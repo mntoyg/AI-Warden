@@ -284,6 +284,19 @@ resolve_agent_cmd() {
     esac
 }
 
+# The sentinel runs as uid 0 with --cap-drop=ALL --cap-add=KILL, and that
+# combination is deliberate rather than sloppy.
+#
+# Killing a process owned by another user requires CAP_KILL to be in the
+# EFFECTIVE set. Docker's --cap-add only seeds the bounding set; a non-root
+# process starts with an empty effective set and no way to raise it, and
+# no-new-privileges rules out file capabilities as a workaround. A sentinel
+# running as uid 1002 would therefore watch the breach happen and get EPERM.
+#
+# So it runs as root holding exactly one capability, in a container with no
+# network, a read-only root filesystem, and no mount other than the workspace.
+# The agent (uid 1001, zero capabilities) still cannot signal it, ptrace it, or
+# reach it in any way - the PID namespace is shared, nothing else is.
 start_sentinel() {
     local agent_container="$1" host_ws="$2"
     [ "$WARDEN_SENTINEL" = "1" ] || return 0
@@ -304,13 +317,14 @@ start_sentinel() {
         --name "$sentinel" \
         --network none \
         --pid "container:${agent_container}" \
-        --user 1002:1002 \
+        --user 0:0 \
         --read-only \
         --tmpfs /tmp:rw,nosuid,size=16m \
         --cap-drop=ALL \
         --cap-add=KILL \
         --security-opt no-new-privileges:true \
         --memory 256m --pids-limit 64 \
+        -e WARDEN_WORKSPACE=/workspace \
         --label ai.warden.role=canary-sentinel \
         --label "ai.warden.agent=${agent_container}" \
         -v "${host_ws}:/workspace" \
@@ -322,7 +336,7 @@ start_sentinel() {
             --canaries=/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault \
         >/dev/null 2>&1
     then
-        ok "canary sentinel attached (uid 1002, CAP_KILL only, no network)"
+        ok "canary sentinel attached (CAP_KILL only, no network, read-only rootfs)"
     else
         warn "could not start the out-of-band sentinel; the in-container tripwire is still armed"
     fi

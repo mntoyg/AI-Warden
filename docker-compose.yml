@@ -14,7 +14,7 @@
 #    warden-agent-sandbox  <- the AI agent lives here, cap_drop ALL, uid 1001
 #         ^
 #         | shared PID namespace
-#    warden-canary-sentinel <- uid 1002, CAP_KILL only, kills the agent on breach
+#    warden-canary-sentinel <- CAP_KILL only, no network, kills the agent on breach
 #
 #  The sandbox is attached ONLY to warden_internal. Because that network is
 #  declared `internal: true`, Docker installs no gateway route for it: the
@@ -146,10 +146,18 @@ services:
 
   # ===========================================================================
   #  3. Out-of-band canary sentinel  (profile: agent)
-  #     Different UID, no network at all, CAP_KILL only, shares the sandbox's
-  #     PID namespace. The agent cannot signal it, cannot ptrace it and cannot
-  #     hide from it - so the tripwire survives an agent that tries to disarm
-  #     the in-container monitor.
+  #     No network at all, read-only rootfs, CAP_KILL as its only capability,
+  #     sharing the sandbox's PID namespace. The agent cannot signal it, cannot
+  #     ptrace it and cannot hide from it - so the tripwire survives an agent
+  #     that tries to disarm the in-container monitor.
+  #
+  #     It runs as uid 0 on purpose: killing another user's process needs
+  #     CAP_KILL in the EFFECTIVE set, and --cap-add only seeds the bounding
+  #     set. A non-root sentinel would start with an empty effective set, have
+  #     no way to raise it (no-new-privileges rules out file capabilities) and
+  #     would get EPERM at exactly the moment it mattered. Root here means root
+  #     holding one capability, with no network and nothing mounted but the
+  #     workspace.
   # ===========================================================================
   warden-canary-sentinel:
     image: ai-warden/agent:latest
@@ -159,7 +167,7 @@ services:
       - warden-agent-sandbox
     network_mode: none
     pid: "service:warden-agent-sandbox"
-    user: "1002:1002"
+    user: "0:0"
     read_only: true
     cap_drop: [ALL]
     cap_add: [KILL]             # the ONLY capability granted anywhere here
@@ -171,12 +179,16 @@ services:
         target: /workspace
     tmpfs:
       - /tmp:rw,nosuid,size=16m
+    environment:
+      WARDEN_WORKSPACE: /workspace
     mem_limit: 256m
     pids_limit: 64
     entrypoint:
       - /opt/warden/venv/bin/python3
       - /opt/warden/canary_monitor.py
       - --mode=sentinel
+      # Audit-only alternative: set --action=log and user "1002:1002" with
+      # cap_drop [ALL] and no cap_add - logging a breach needs no privileges.
       - --action=kill
       - --target-uid=1001
       - --run-dir=/tmp/warden

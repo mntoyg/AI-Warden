@@ -23,7 +23,7 @@
 | อ่าน/เขียนทุกไฟล์ใน `/workspace` | เห็นไฟล์นอก mount ของโฮสต์ |
 | ติดตั้ง package จาก allowlist | ต่อ IP หรือโดเมนนอก allowlist |
 | อ่าน environment variable ของตัวเอง (รวม API key) | เขียนทับ binary ของตัวเองใน `/usr/local/bin` |
-| ฆ่า process ของ uid 1001 (รวม inline monitor) | ฆ่า sentinel (uid 1002) |
+| ฆ่า process ของ uid 1001 (รวม inline monitor) | แตะ sentinel ที่อยู่คนละ container |
 
 **สิ่งที่ถือว่าเชื่อถือได้ (trusted computing base):**
 Linux kernel, Docker daemon และ runtime, image ที่ build จาก repo นี้, และตัวโฮสต์เอง
@@ -41,7 +41,7 @@ Linux kernel, Docker daemon และ runtime, image ที่ build จาก r
 | T5 | ขยับด้านข้างไปยัง LAN / cloud metadata | บล็อก RFC1918 / link-local / metadata ที่ proxy | network `internal` ไม่มีทางไป |
 | T6 | หลุดออกไปยังโฮสต์ | ไม่ mount Docker socket, posture check ปฏิเสธถ้าเจอ | แนะนำ rootless Docker / gVisor |
 | T7 | ทำลายข้อมูลนอกโปรเจกต์ | `/workspace` คือขอบเขต filesystem ทั้งหมด | ทุกอย่างนอกนั้น read-only ต่อ uid 1001 |
-| T8 | ปิดระบบตรวจจับเงียบ ๆ | sentinel แยก container คนละ uid | entrypoint ตรวจ breach flag ตอนจบเสมอ |
+| T8 | ปิดระบบตรวจจับเงียบ ๆ | sentinel แยก container คนละ namespace | entrypoint ตรวจ breach flag ตอนจบเสมอ |
 
 ---
 
@@ -83,11 +83,22 @@ allowlist ควบคุมได้แค่ "คุยกับใคร" ไ
 agent จึง `kill` มันได้ตรง ๆ — tripwire ชั้นเดียวจึงไม่ทนต่อผู้โจมตีที่รู้ตัว
 
 **วิธีแก้:** `warden-canary-sentinel` เป็น container แยก
-- uid 1002 → agent (uid 1001) ส่งสัญญาณหาไม่ได้ (ต้องมี `CAP_KILL`)
 - `--network none` → ไม่มีทาง exfiltrate ผ่านตัวมันเอง
 - `--cap-drop=ALL --cap-add=KILL` → capability เดียวในระบบทั้งหมด และให้เฉพาะ component ที่ต้องใช้
 - แชร์ PID namespace กับ sandbox → ฆ่า process ของ agent ได้
-- `--read-only` rootfs
+- `--read-only` rootfs, mount แค่ workspace
+- agent (uid 1001, ไม่มี capability) ส่งสัญญาณหาไม่ได้ และ ptrace ไม่ได้
+
+**ทำไมต้องรันเป็น uid 0:** การส่งสัญญาณข้าม uid ต้องมี `CAP_KILL` อยู่ใน *effective set*
+แต่ `--cap-add` ของ Docker ให้แค่ *bounding set* — process ที่ไม่ใช่ root จึงมี effective set ว่าง
+และ `no-new-privileges` ก็ปิดทาง file capability ไปแล้ว
+sentinel ที่รันเป็น uid 1002 จะได้ `EPERM` ตอนที่จำเป็นต้องฆ่าพอดี
+ทางเลือกจึงเป็น "root ที่ถือ capability เดียว" ซึ่งแลกมาด้วยพื้นที่โจมตีที่กว้างขึ้นเล็กน้อย
+แต่ container นี้ไม่มี network ไม่มี shell ที่รันอยู่ และ rootfs เป็น read-only
+
+ถ้ารับข้อแลกนี้ไม่ได้ ให้เปลี่ยนเป็นโหมด audit อย่างเดียว: `--action=log` กับ `user: "1002:1002"`
+และไม่ต้อง `cap_add` เลย — การ *บันทึก* breach ไม่ต้องใช้สิทธิ์ใด ๆ
+แต่การฆ่าจะเหลือแค่ tripwire ใน container
 
 **ข้อจำกัดที่เหลือ:** ถ้าปิด sentinel (`WARDEN_SENTINEL=0`) จะเหลือ tripwire ชั้นเดียว
 และ entrypoint ยังตรวจ breach flag ตอนจบ session อยู่ แต่การฆ่าแบบทันทีจะหายไป

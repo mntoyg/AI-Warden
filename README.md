@@ -46,9 +46,9 @@ AI Warden ปิดทั้ง 5 ทางนี้ที่ระดับ **O
         |                                                   |
 +---------------------------+                 +---------------------------+
 |  warden-agent-sandbox     |                 |  warden-canary-sentinel   |
-|  uid 1001 (ai_user)       |   PID namespace |  uid 1002                 |
-|  --cap-drop=ALL           |<--------------->|  CAP_KILL อย่างเดียว        |
-|  no-new-privileges        |     ร่วมกัน      |  ไม่มี network เลย          |
+|  uid 1001 (ai_user)       |   PID namespace |  CAP_KILL อย่างเดียว        |
+|  --cap-drop=ALL           |<--------------->|  ไม่มี network เลย          |
+|  no-new-privileges        |     ร่วมกัน      |  rootfs read-only          |
 |  mount แค่ /workspace     |                 |  ฆ่า agent เมื่อ canary ถูกแตะ |
 +---------------------------+                 +---------------------------+
 ```
@@ -240,8 +240,19 @@ container จบด้วย **exit code 99** และเขียนราย�
 > แต่มันต้องการ `CAP_SYS_ADMIN` ซึ่ง sandbox นี้จงใจไม่มี — เราจึงสืบย้อนจาก `/proc` แทน
 
 **สองชั้นป้องกัน:** ถ้า agent ฉลาดพอจะฆ่า monitor ที่อยู่ใน container เดียวกัน (uid เดียวกันจึงฆ่าได้)
-ยังมี `warden-canary-sentinel` เป็น container แยก uid 1002 มี `CAP_KILL` อย่างเดียว ไม่มี network
-และแชร์ PID namespace กับ sandbox — agent ส่งสัญญาณหามันไม่ได้ ptrace ก็ไม่ได้ แต่มันฆ่า agent ได้
+ยังมี `warden-canary-sentinel` เป็น container แยก ไม่มี network เลย rootfs เป็น read-only
+มี capability เดียวคือ `CAP_KILL` และแชร์ PID namespace กับ sandbox
+agent ส่งสัญญาณหามันไม่ได้ ptrace ก็ไม่ได้ แต่มันฆ่า agent ได้
+
+> **ทำไม sentinel ต้องรันเป็น uid 0**
+> การฆ่า process ของ user อื่นต้องมี `CAP_KILL` อยู่ใน **effective set**
+> แต่ `--cap-add` ของ Docker ใส่ให้แค่ *bounding set* เท่านั้น
+> process ที่ไม่ใช่ root จึงเริ่มด้วย effective set ว่างเปล่า และยกขึ้นมาไม่ได้
+> (`no-new-privileges` ปิดทาง file capability ไว้แล้ว)
+> sentinel ที่รันเป็น uid 1002 จะเห็น breach แล้วได้ `EPERM` พอดี
+> จึงรันเป็น root ที่ถือ capability เดียวในระบบทั้งหมด ไม่มี network
+> และไม่มี mount อะไรนอกจาก workspace — agent (uid 1001, ไม่มี capability เลย)
+> ยังคงแตะมันไม่ได้อยู่ดี
 
 ### 5. Universal Compatibility
 
