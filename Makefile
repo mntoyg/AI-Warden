@@ -70,7 +70,7 @@ run-aider: ## Run Aider in WS
 run-codex: ## Run the Codex CLI in WS
 	@$(CLI) run "$(WS)" codex
 
-run-hermes: ## Run Hermes Agent in WS
+run-hermes: ## Run Hermes Agent in WS (not bundled - rebuild with EXTRA_* args)
 	@$(CLI) run "$(WS)" hermes
 
 run-bash: ## Open a hardened shell in WS (best way to poke at the sandbox)
@@ -92,7 +92,7 @@ allowlist: ## Print the effective egress allowlist
 	@$(CLI) allowlist list
 
 # --- verification ------------------------------------------------------------
-verify: ## Full isolation suite: self-test + breach drill + fail-closed drill
+verify: ## Isolation suite: self-test + breach + fail-closed + sentinel drills
 	@$(VERIFY)
 
 test: verify ## Alias for `make verify`
@@ -137,7 +137,7 @@ lint: ## shellcheck every script, byte-compile the monitor, parse squid.conf
 	exit $$fail
 
 clean: ## Remove verification leftovers and __pycache__
-	@rm -rf workspaces/.verify-* workspaces/.verify-breach-* monitors/__pycache__ 2>/dev/null || true
+	@rm -rf workspaces/.verify-* monitors/__pycache__ 2>/dev/null || true
 	@echo "  cleaned"
 
 nuke: down ## Stop everything and delete the warden images and networks

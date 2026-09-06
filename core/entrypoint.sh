@@ -229,6 +229,7 @@ seed_canaries() {
                 echo "secrets.json"
                 echo ".env.vault"
                 echo "WARDEN_SECURITY_INCIDENT.json"
+                echo ".warden-probe-*"
             } >> "$excl" 2>/dev/null || true
         fi
     fi

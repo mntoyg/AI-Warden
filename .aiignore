@@ -20,6 +20,10 @@
 # ----------------------------------------------------------------------------
 .secrets/
 .secrets.canary
+# Warden runtime scratch (inotify capability probe, handshake markers)
+.warden-probe-*
+.warden-seeded
+.warden-sentinel-armed
 secrets.json
 .env.vault
 credentials.canary
