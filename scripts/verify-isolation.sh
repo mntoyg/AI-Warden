@@ -76,6 +76,9 @@ info "ensuring the egress filter is up"
 # --- disposable workspace ----------------------------------------------------
 VERIFY_WS="${PROJECT_ROOT}/workspaces/.verify-$$"
 mkdir -p "$VERIFY_WS"
+# The sandbox seeds canaries as uid 1001. A fixture owned by a different host
+# uid would silently reduce coverage rather than fail, so make it writable.
+chmod 0777 "$VERIFY_WS" 2>/dev/null || true
 cp "${SCRIPT_DIR}/selftest-in-container.sh" "${VERIFY_WS}/.warden-selftest.sh"
 chmod +x "${VERIFY_WS}/.warden-selftest.sh" 2>/dev/null || true
 VERIFY_WS_MOUNT="$(host_path "$VERIFY_WS")"
@@ -133,6 +136,7 @@ printf '\n'
 
 BREACH_WS="${PROJECT_ROOT}/workspaces/.verify-breach-$$"
 mkdir -p "$BREACH_WS"
+chmod 0777 "$BREACH_WS" 2>/dev/null || true
 BREACH_WS_MOUNT="$(host_path "$BREACH_WS")"
 
 docker run --rm \
@@ -202,6 +206,7 @@ phase_d=1
 if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
     SENTINEL_WS="${PROJECT_ROOT}/workspaces/.verify-sentinel-$$"
     mkdir -p "$SENTINEL_WS"
+    chmod 0777 "$SENTINEL_WS" 2>/dev/null || true
     set +e
     NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$SENTINEL_WS" bash -- -lc '
         pkill -9 -f "canary_mon[i]tor" 2>/dev/null

@@ -23,6 +23,8 @@ LABEL org.opencontainers.image.title="AI Warden Egress Proxy" \
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Package versions are deliberately unpinned - rationale in core/Dockerfile.
+# hadolint ignore=DL3008
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -50,6 +52,6 @@ USER proxy
 EXPOSE 3128
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD nc -z 127.0.0.1 3128 || exit 1
+    CMD ["nc", "-z", "127.0.0.1", "3128"]
 
 ENTRYPOINT ["/usr/local/bin/proxy-entrypoint"]

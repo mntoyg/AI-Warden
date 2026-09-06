@@ -1,0 +1,163 @@
+# =============================================================================
+#  AI Warden - CI
+# -----------------------------------------------------------------------------
+#  The integration job is the point of this file. AI Warden's failure mode is a
+#  control that reports itself armed while enforcing nothing, and every serious
+#  bug in this project so far has been of exactly that shape - a tripwire
+#  watching a filesystem that never delivers events, a sentinel without the
+#  capability to kill, a breach that exited 0. Static analysis catches none of
+#  those. Only running the drills does.
+#
+#  CI also runs on real ext4, so it proves the platform claim in the README that
+#  a Linux host enforces every canary path (enforced=7/7), which a Docker
+#  Desktop developer machine cannot demonstrate.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ===========================================================================
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
+            -S warning \
+            scripts/*.sh core/entrypoint.sh core/network/proxy-entrypoint.sh
+
+      - name: hadolint
+        run: |
+          for f in core/Dockerfile core/network/Dockerfile; do
+            echo "--- $f"
+            docker run --rm -i hadolint/hadolint hadolint --failure-threshold warning - < "$f"
+          done
+
+      - name: Byte-compile the canary monitor
+        run: python3 -m py_compile monitors/canary_monitor.py
+
+      - name: Validate the compose topology
+        run: docker compose config -q
+
+      - name: The sandbox network must be internal
+        # If this ever stops being true the agent gets a route to the internet
+        # and the egress allowlist becomes advisory.
+        run: |
+          docker compose config --format json \
+            | python3 -c 'import json,sys; n=json.load(sys.stdin)["networks"]["warden_internal"]; assert n.get("internal") is True, n; print("warden_internal is internal: OK")'
+
+      - name: The egress ruleset must end in a default deny
+        run: |
+          grep -qE '^[[:space:]]*http_access[[:space:]]+deny[[:space:]]+all[[:space:]]*$' \
+            core/network/squid.conf && echo "default-deny present: OK"
+
+      - name: No exfiltration relay may be allowlisted
+        run: |
+          if grep -vE '^[[:space:]]*(#|$)' core/network/whitelist_domains.txt \
+             | grep -Ei 'ngrok|trycloudflare|localtunnel|pastebin|webhook\.site|requestb|hookb|transfer\.sh|file\.io|anonfiles|0x0\.st'; then
+            echo "::error::an exfiltration relay is present in the egress allowlist"
+            exit 1
+          fi
+          echo "no known relays in the allowlist: OK"
+
+      - name: Per-tool ignore files must match .aiignore
+        # They are mirrors. A drifted mirror means one agent is told not to
+        # touch the canaries while another is not.
+        run: |
+          make sync-ignores
+          git diff --exit-code -- '.*ignore' \
+            || { echo "::error::ignore mirrors are stale - run 'make sync-ignores'"; exit 1; }
+
+      - name: Host prerequisite check
+        run: ./scripts/setup-host.sh --check
+
+  # ===========================================================================
+  integration:
+    name: Isolation drills (real ext4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build
+
+      - name: Start the egress filter
+        run: ./scripts/warden-cli.sh up
+
+      - name: Prove the egress allowlist from inside the sandbox network
+        run: |
+          set -e
+          run_probe() {
+            docker run --rm --network warden_internal --entrypoint sh \
+              ai-warden/egress-proxy:latest -c "$1"
+          }
+          echo "--- direct egress must be impossible ---"
+          run_probe 'nc -z -w 3 1.1.1.1 443 && exit 1 || echo "  1.1.1.1:443 blocked"'
+          run_probe 'nc -z -w 3 8.8.8.8 53  && exit 1 || echo "  8.8.8.8:53 blocked"'
+          echo "--- allowlisted destinations must work ---"
+          run_probe 'curl -x http://warden-egress-proxy:3128 -sS -o /dev/null -w "  api.anthropic.com HTTP %{http_code}\n" -m 30 https://api.anthropic.com/v1/models'
+          echo "--- everything else must be refused ---"
+          run_probe 'curl -x http://warden-egress-proxy:3128 -s -o /dev/null -m 20 https://example.com/  && exit 1 || echo "  example.com:443 refused"'
+          run_probe 'curl -x http://warden-egress-proxy:3128 -s -o /dev/null -m 20 https://1.1.1.1/      && exit 1 || echo "  IP-literal refused"'
+          run_probe 'curl -x http://warden-egress-proxy:3128 -s -o /dev/null -m 20 https://github.com:22/ && exit 1 || echo "  github.com:22 refused"'
+
+      - name: Isolation suite (self-test, breach, fail-closed, sentinel)
+        run: NO_COLOR=1 ./scripts/verify-isolation.sh
+
+      - name: Every canary path must be enforceable on Linux
+        # The README claims 7/7 on a native Docker host and 4/7 on Docker
+        # Desktop. This is where that claim is actually checked.
+        run: |
+          set -e
+          mkdir -p workspaces/ci && chmod 0777 workspaces/ci
+          NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/ci bash -- -lc 'true' 2>&1 \
+            | tee /tmp/warden-run.log || true
+          if grep -q 'enforced=7/7' /tmp/warden-run.log; then
+            echo "enforced=7/7 on ext4: OK"
+          else
+            echo "::error::expected enforced=7/7 on a native Linux host"
+            grep -E 'enforced=|DEGRADED' /tmp/warden-run.log || true
+            exit 1
+          fi
+
+      - name: Compose agent profile must come up and hand off cleanly
+        run: |
+          set -e
+          mkdir -p workspaces/ci-compose && chmod 0777 workspaces/ci-compose
+          WARDEN_WORKSPACE_HOST=./workspaces/ci-compose \
+            timeout 300 docker compose --profile agent up \
+              --abort-on-container-exit --exit-code-from warden-agent-sandbox \
+            2>&1 | tee /tmp/warden-compose.log || true
+          grep -q 'seeding handshake received' /tmp/warden-compose.log \
+            || { echo "::error::the sentinel never received the seeding handshake"; exit 1; }
+          grep -q 'armed out-of-band' /tmp/warden-compose.log \
+            || { echo "::error::the agent started before the sentinel was armed"; exit 1; }
+          echo "compose handshake: OK"
+
+      - name: Nothing may be left behind
+        if: always()
+        run: |
+          ./scripts/warden-cli.sh down || true
+          docker compose --profile agent down -v || true
+          left="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' | wc -l)"
+          echo "leftover canary vaults: ${left}"
+          test "$left" -eq 0
+
+      - name: Egress audit trail
+        if: always()
+        run: docker logs warden-egress-proxy 2>&1 | tail -40 || true

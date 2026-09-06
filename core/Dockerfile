@@ -41,7 +41,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # -----------------------------------------------------------------------------
 # 1. Base OS + toolchain
+#
+#    Package versions are deliberately not pinned (hadolint DL3008). Debian
+#    point releases are dropped from the mirrors as they are superseded, so a
+#    fully pinned image stops building within weeks - and an image nobody can
+#    rebuild is a worse security outcome than a floating minor version. Rebuild
+#    regularly and re-run ./scripts/verify-isolation.sh.
 # -----------------------------------------------------------------------------
+# hadolint ignore=DL3008
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -76,6 +83,7 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 2. Node.js (NodeSource) - required by Claude Code and the Codex CLI
 # -----------------------------------------------------------------------------
+# hadolint ignore=DL3008
 RUN set -eux; \
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh; \
     bash /tmp/nodesource_setup.sh; \
@@ -111,6 +119,10 @@ RUN set -eux; \
 #    npm globals live in root-owned /usr/local so the agent cannot rewrite its
 #    own binaries; python agents live in an isolated venv on PATH.
 # -----------------------------------------------------------------------------
+# Agent CLIs are intentionally unpinned (hadolint DL3016): the point is to run
+# the current release of Claude Code / Codex. Pin them via the NPM_AGENTS build
+# arg when you need a byte-reproducible image.
+# hadolint ignore=DL3016
 RUN set -eux; \
     npm install -g --omit=dev ${NPM_AGENTS} ${EXTRA_NPM_PACKAGES}; \
     npm cache clean --force
@@ -221,7 +233,7 @@ RUN set -eux; \
 
 # Unhealthy the moment the canary tripwire fires.
 HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=2 \
-    CMD test ! -f /run/warden/breach.flag
+    CMD ["test", "!", "-f", "/run/warden/breach.flag"]
 
 ENTRYPOINT ["/usr/local/bin/warden-entrypoint"]
 CMD ["bash", "-l"]
