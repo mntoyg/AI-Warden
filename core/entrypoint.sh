@@ -169,7 +169,7 @@ aws_secret_access_key = warden/CANARY/not-a-secret/0002
 region = us-east-1
 AWSCRED
             ;;
-        id_rsa_backup)
+        id_rsa|id_rsa_backup|id_ed25519)
             cat > "$path" <<'KEY'
 -----BEGIN OPENSSH PRIVATE KEY-----
 QUktV0FSREVOLUNBTkFSWSAtIHN5bnRoZXRpYyBob25leXBvdC4gTm90IGEgcmVh

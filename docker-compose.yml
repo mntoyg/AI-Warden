@@ -118,6 +118,8 @@ services:
           create_host_path: true
     tmpfs:
       - /run/warden:rw,nosuid,size=16m,uid=1001,gid=1001
+      # Enforceable canary vault - see the note in core/Dockerfile.
+      - /workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001
     env_file:
       - path: .env
         required: false

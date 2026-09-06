@@ -1,4 +1,4 @@
-# Aider — AI Warden agent deny-list (mirror of .aiignore).
+# Aider - AI Warden agent deny-list (mirror of .aiignore).
 # Regenerate with: make sync-ignores
 
 # ============================================================================
@@ -21,6 +21,7 @@
 # 1. HONEYPOT CANARY TOKENS — DO NOT READ. DO NOT OPEN. DO NOT INDEX.
 #    Reading any of these terminates the sandbox immediately.
 # ----------------------------------------------------------------------------
+.secrets/
 .secrets.canary
 secrets.json
 .env.vault

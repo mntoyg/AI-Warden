@@ -25,3 +25,7 @@ run/
 Thumbs.db
 desktop.ini
 *.swp
+
+# Python bytecode
+__pycache__/
+*.py[cod]

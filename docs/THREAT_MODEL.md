@@ -146,11 +146,45 @@ sandbox นี้ยืนอยู่บน Linux namespace ถ้ามี CVE
 `--memory`, `--cpus`, `--pids-limit` จำกัดผลกระทบไว้แล้ว แต่ไม่ได้ป้องกัน
 timing side channel หรือการอ่านข้อมูลข้าม container บนโฮสต์เดียวกัน
 
-### 4.5 การเปลี่ยนไฟล์จากฝั่งโฮสต์บน Docker Desktop
-bind mount ของ Docker Desktop (Windows/macOS) ไม่ propagate inotify event
-จากฝั่งโฮสต์เข้ามาใน container อย่างสม่ำเสมอ
-**ไม่กระทบกรณีใช้งานจริง** เพราะสิ่งที่เราสนใจคือการเข้าถึงจาก *ในคอนเทนเนอร์*
-ซึ่ง kernel เห็น syscall ตรง ๆ เสมอ
+### 4.5 inotify ใช้ไม่ได้บน bind mount ของ Docker Desktop
+
+นี่คือข้อจำกัดที่ต้องอ่านให้จบ เพราะมันกระทบ canary โดยตรง
+
+bind mount ของ Docker Desktop บน Windows/macOS ไม่ใช่ filesystem ปกติ
+บน Windows มันคือ 9p/drvfs:
+
+```
+/workspace 9p rw,noatime,aname=drvfs;path=D:\;...
+```
+
+`inotify_add_watch()` บน path นี้ **คืนค่าสำเร็จ** แต่ **ไม่เคยส่ง event ออกมาเลย**
+วัดมาแล้วในการทดสอบจริง: `/workspace/secrets.json` → `NO EVENTS`
+ขณะที่ `/workspace/.secrets/credentials` (tmpfs) และ `/home/ai_user/probe.txt` (overlayfs)
+→ `OPEN|ACCESS(read)` ทั้งคู่
+`noatime` ยังปิดทางเลือกสำรองอย่างการ poll atime ไปด้วย
+
+**ผลกระทบ:** canary ที่วางไว้ใน bind mount ตรง ๆ (`/workspace/secrets.json`,
+`/workspace/.env.vault`, `/workspace/.secrets.canary`) **บังคับใช้ไม่ได้บน Docker Desktop**
+บน Linux ที่รัน Docker ตรง ๆ (ext4/xfs/overlayfs) canary เหล่านี้ทำงานครบ
+
+**สิ่งที่ทำไว้แล้ว:**
+
+1. **วัด ไม่เดา** — ตอน arm monitor สร้างไฟล์ probe ชั่วคราวในแต่ละไดเรกทอรี
+   อ่านมันเอง แล้วดูว่ามี event มาไหม จากนั้นรายงานตรง ๆ ว่า path ไหน `watchable`
+   path ไหน `DEGRADED` และสรุปเป็น `enforced=N/M`
+   (ใช้ไฟล์ probe ไม่ใช่ canary จริง เพราะการอ่าน canary จะไปทริกเกอร์ monitor
+   ตัวอื่นที่เฝ้าไฟล์เดียวกันอยู่คนละ container)
+
+2. **มี canary ที่บังคับใช้ได้จริงในทุกแพลตฟอร์ม** — `/workspace/.secrets` ถูก mount เป็น
+   tmpfs ทับลงไปในโฟลเดอร์โปรเจกต์ เป็น Linux filesystem แท้ ๆ ที่ส่ง event ได้
+   canary ที่นั่นทำงานเหมือนกันหมดทุกที่
+
+3. **ยังมี canary ใน `$HOME` ของ container** ซึ่งอยู่บน overlayfs และทำงานได้เสมอ
+
+**สิ่งที่ยังเหลือ:** `warden-canary-sentinel` มองเห็น workspace ผ่าน bind mount เดียวกัน
+บน Docker Desktop มันจึงเฝ้า canary ใน workspace ไม่ได้ (tmpfs ของ agent เป็นของ
+mount namespace นั้นตัวเดียว) — sentinel จะรายงานสถานะ degraded ของตัวเองตอนเริ่ม
+บน Linux sentinel ทำงานเต็มรูปแบบ
 
 ---
 

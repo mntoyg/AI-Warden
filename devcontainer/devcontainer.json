@@ -61,6 +61,10 @@
     // Writable scratch for the canary tripwire's state, owned by ai_user.
     "--tmpfs", "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001",
 
+    // Canary vault on a real Linux filesystem. Without this, canaries in a
+    // Docker Desktop bind mount (9p/virtiofs) are silently unenforceable.
+    "--tmpfs", "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001",
+
     "--label", "ai.warden.role=agent-sandbox"
   ],
 

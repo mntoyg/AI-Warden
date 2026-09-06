@@ -18,6 +18,7 @@
 # 1. HONEYPOT CANARY TOKENS — DO NOT READ. DO NOT OPEN. DO NOT INDEX.
 #    Reading any of these terminates the sandbox immediately.
 # ----------------------------------------------------------------------------
+.secrets/
 .secrets.canary
 secrets.json
 .env.vault

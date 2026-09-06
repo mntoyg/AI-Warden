@@ -189,6 +189,62 @@ def describe_mask(mask: int) -> str:
     return "|".join(names) if names else f"0x{mask:08x}"
 
 
+def filesystem_of(path: str) -> str:
+    """Filesystem type backing `path`, from the longest matching mountpoint."""
+    best, best_fs = "", "unknown"
+    try:
+        with open("/proc/mounts") as fh:
+            for line in fh:
+                fields = line.split()
+                if len(fields) < 3:
+                    continue
+                mount, fstype = fields[1], fields[2]
+                if (path == mount or path.startswith(mount.rstrip("/") + "/")) and len(mount) >= len(best):
+                    best, best_fs = mount, fstype
+    except OSError:
+        pass
+    return best_fs
+
+
+def probe_inotify_delivery(directory: str, timeout: float = 1.0) -> Optional[bool]:
+    """Does inotify actually deliver events for files in this directory?
+
+    inotify_add_watch succeeds on filesystems that never deliver a single event
+    - most importantly the 9p/virtiofs bind mounts Docker Desktop uses on
+    Windows and macOS, where /workspace is mounted `noatime` and neither
+    inotify nor an atime heuristic sees a read. A tripwire that reports itself
+    armed while silently observing nothing is worse than no tripwire at all, so
+    the capability is measured rather than assumed.
+
+    The probe uses a throwaway file, never a canary: reading a real canary here
+    would trip whichever *other* monitor is watching the same path from another
+    container.
+
+    Returns True (events delivered), False (silently deaf), or None (could not
+    determine - e.g. the directory is not writable).
+    """
+    probe_path = os.path.join(directory, f".warden-probe-{os.getpid()}")
+    ino = None
+    try:
+        with open(probe_path, "w") as fh:
+            fh.write("warden inotify capability probe\n")
+        ino = Inotify()
+        ino.add_watch(probe_path, IN_OPEN | IN_ACCESS)
+        with open(probe_path, "rb") as fh:
+            fh.read()
+        ready, _, _ = select.select([ino.fd], [], [], timeout)
+        return bool(ready and ino.read_events())
+    except OSError:
+        return None
+    finally:
+        if ino is not None:
+            ino.close()
+        try:
+            os.unlink(probe_path)
+        except OSError:
+            pass
+
+
 # =============================================================================
 #  Process attribution (best effort, from /proc)
 # =============================================================================
@@ -338,6 +394,8 @@ class CanaryMonitor:
         self.wd_files: Dict[int, str] = {}
         self.wd_dirs: Dict[int, str] = {}
         self.dir_basenames: Dict[str, set] = {}
+        self.deaf_dirs: Dict[str, bool] = {}
+        self.degraded: List[str] = []
         self._running = True
 
     # --- watch management -----------------------------------------------------
@@ -346,6 +404,33 @@ class CanaryMonitor:
         for path in self.canaries:
             directory = os.path.dirname(path) or "/"
             self.dir_basenames.setdefault(directory, set()).add(os.path.basename(path))
+
+        # Measure inotify delivery once per directory before trusting any watch.
+        for directory in self.dir_basenames:
+            if not os.path.isdir(directory):
+                continue
+            fstype = filesystem_of(directory)
+            delivers = probe_inotify_delivery(directory)
+            self.deaf_dirs[directory] = delivers is False
+            if delivers is True:
+                log(f"watchable  : {directory} ({fstype}) - inotify delivers events")
+            elif delivers is False:
+                alert(
+                    f"DEGRADED   : {directory} ({fstype}) does NOT deliver inotify events. "
+                    "Canaries on this path CANNOT be enforced."
+                )
+                alert(
+                    "DEGRADED   : this is normal for Docker Desktop bind mounts on "
+                    "Windows/macOS (9p/virtiofs). See docs/THREAT_MODEL.md 4.5."
+                )
+            else:
+                log(f"unknown    : {directory} ({fstype}) - could not probe (not writable?)")
+
+        for path in self.canaries:
+            directory = os.path.dirname(path) or "/"
+            if self.deaf_dirs.get(directory):
+                self.degraded.append(path)
+                continue
             if os.path.isfile(path):
                 try:
                     wd = self.inotify.add_watch(path, FILE_MASK | IN_EXCL_UNLINK)
@@ -357,16 +442,21 @@ class CanaryMonitor:
                 log(f"canary not present yet, watching its directory: {path}")
 
         for directory in self.dir_basenames:
-            if not os.path.isdir(directory):
+            if not os.path.isdir(directory) or self.deaf_dirs.get(directory):
                 continue
             try:
                 wd = self.inotify.add_watch(directory, DIR_MASK)
                 self.wd_dirs[wd] = directory
             except OSError as exc:
                 log(f"cannot watch directory {directory}: {exc}")
+
+        # Discard anything the probes left in the queue.
+        self.inotify.read_events()
         return armed
 
     def rearm_file(self, path: str) -> None:
+        if self.deaf_dirs.get(os.path.dirname(path) or "/"):
+            return
         if not os.path.isfile(path):
             return
         if path in self.wd_files.values():
@@ -389,9 +479,19 @@ class CanaryMonitor:
         armed = self.arm()
         log(
             f"v{WARDEN_VERSION} mode={self.mode} action={self.action} "
-            f"armed={armed}/{len(self.canaries)} watching="
-            + ", ".join(self.canaries)
+            f"enforced={armed}/{len(self.canaries)} watching="
+            + ", ".join(sorted(self.wd_files.values()))
         )
+        if self.degraded:
+            alert(
+                f"{len(self.degraded)} canary path(s) are NOT enforced on this host: "
+                + ", ".join(self.degraded)
+            )
+        if armed == 0:
+            alert(
+                "NO canary is enforceable here. The tripwire is inert - rely on "
+                "capability dropping, the mount scope and the egress allowlist."
+            )
         # Publish readiness so the entrypoint can hold the agent back until the
         # watches are actually in place, instead of guessing with a sleep.
         try:

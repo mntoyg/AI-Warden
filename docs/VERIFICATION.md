@@ -25,7 +25,7 @@
   [PASS] non-allowlisted host was blocked
   [PASS] IP-literal destination 1.1.1.1:443 refused
   [PASS] CONNECT to a non-443 port (github.com:22) refused
-  [PASS] 5 canary token(s) seeded and in place
+  [PASS] 7 canary token(s) seeded and in place
 
 ================= PHASE B: live breach drill ====================
   [SECURITY BREACH] Canary file accessed by Agent Process!
@@ -138,19 +138,34 @@ curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
 
 ### 1.4 Canary tripwire
 
+ก่อนอื่น ดูว่า path ไหน "บังคับใช้ได้จริง" บนเครื่องคุณ — monitor รายงานไว้ตอนเริ่ม container:
+
+```
+[canary] watchable  : /workspace/.secrets (tmpfs)  - inotify delivers events
+[canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
+[canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
+[canary] v1.0.0 mode=inline action=kill enforced=4/7
+[canary] *** 3 canary path(s) are NOT enforced on this host: /workspace/.secrets.canary, ...
+```
+
+บน Linux ที่รัน Docker ตรง ๆ จะได้ `enforced=7/7`
+บน Docker Desktop (Windows/macOS) จะได้ `4/7` เพราะ bind mount เป็น 9p/virtiofs
+ซึ่ง `inotify_add_watch()` สำเร็จแต่ไม่เคยส่ง event — รายละเอียดใน
+[THREAT_MODEL.md §4.5](THREAT_MODEL.md)
+
 > คำสั่งต่อไปนี้ **จะฆ่า container ของคุณทันที** — นั่นคือผลลัพธ์ที่ถูกต้อง
 
 ```bash
-cat /workspace/secrets.json
+cat /workspace/.secrets/credentials
 ```
 
-สิ่งที่จะเห็น:
+สิ่งที่จะเห็น (ผลจริงจากการทดสอบ):
 
 ```
 [canary ...] *** [SECURITY BREACH] Canary file accessed by Agent Process!
-[canary ...] *** [SECURITY BREACH] file=/workspace/secrets.json event=OPEN mode=inline
-[canary ...] *** [SECURITY BREACH] suspect pid=51 uid=1001 exe=/usr/bin/cat
-[canary ...] *** [SECURITY BREACH] SIGKILL delivered to 2 process(es)
+[canary ...] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
+[canary ...] *** [SECURITY BREACH] suspect pid=86 uid=1001 exe=/usr/bin/bash cmd='...'
+[canary ...] *** [SECURITY BREACH] SIGKILL delivered to 2 process(es): [86, 88]
 [canary ...] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
 ```
 
@@ -164,15 +179,21 @@ cat ./workspaces/default/WARDEN_SECURITY_INCIDENT.json
 ทดสอบว่า tripwire จับ **การเขียนทับ** และ **การลบ** ด้วย (ทั้งสองอย่างคือการพยายาม disarm):
 
 ```bash
-echo "x" > /workspace/.env.vault    # trip
-rm /workspace/.secrets.canary       # trip
+echo "x" > /workspace/.secrets/id_rsa      # trip
+rm /home/ai_user/.aws/credentials          # trip
 ```
 
 การ `stat` เฉย ๆ ต้องไม่ trip เพราะ `stat(2)` ไม่ได้ `open()`:
 
 ```bash
-test -f /workspace/secrets.json && echo "still alive"   # still alive
-ls -la /workspace                                        # still alive
+test -f /workspace/.secrets/credentials && echo "still alive"   # still alive
+ls -la /workspace/.secrets                                       # still alive
+```
+
+ตรวจว่า filesystem ไหนส่ง inotify event ได้บ้างบนเครื่องคุณ:
+
+```bash
+awk '$2=="/workspace" || $2=="/workspace/.secrets" || $2=="/" {print $2, $3, $4}' /proc/mounts
 ```
 
 ---
@@ -239,7 +260,8 @@ grep -n 'http_access deny all' core/network/squid.conf
 | IP ตรง ๆ ถูกบล็อก | `curl -m10 https://1.1.1.1/` | failed |
 | พอร์ตนอก 80/443 ถูกบล็อก | `curl -m10 https://github.com:22/` | failed |
 | โดเมนใน allowlist ใช้ได้ | `curl -w '%{http_code}' https://api.anthropic.com/v1/models` | `401` (หรือ 2xx/4xx อื่น) |
-| canary ฆ่า container | `cat /workspace/secrets.json` | container exit `99` |
+| canary ฆ่า container | `cat /workspace/.secrets/credentials` | container exit `99` |
+| tripwire รายงานความสามารถจริง | ดูบรรทัด `enforced=N/M` ตอนเริ่ม | ตรงกับ filesystem ของเครื่อง |
 | posture ไม่ครบ = ไม่ยอมเริ่ม | `docker run` โดยไม่ใส่ `--cap-drop` | exit `78` |
 | ไม่มี proxy = ไม่ยอมเริ่ม | `docker stop warden-egress-proxy` แล้ว run | exit `78` |
 

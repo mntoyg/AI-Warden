@@ -130,8 +130,17 @@ host_path() {
 # =============================================================================
 #  Mount safety - the most important guard rail in this script
 # =============================================================================
+# Result is published in the global RESOLVED_MOUNT rather than on stdout, and
+# the function is called directly rather than inside $(...).
+#
+# That is not a style preference. `die` ends with `exit 1`, and inside a command
+# substitution that only kills the subshell: the caller would sail on with an
+# empty path and every check here would be decorative. Calling it directly also
+# gives the .ssh/.aws confirmation prompt a real terminal to read from.
+RESOLVED_MOUNT=""
 assert_safe_mount() {
     local abs="$1"
+    RESOLVED_MOUNT=""
     [ -d "$abs" ] || die "not a directory: ${abs}"
 
     local real; real="$(cd "$abs" && pwd -P)"
@@ -171,7 +180,7 @@ assert_safe_mount() {
         die "refusing to mount the AI Warden source tree into the sandbox it controls"
     fi
 
-    printf '%s' "$real"
+    RESOLVED_MOUNT="$real"
 }
 
 container_name_for() {
@@ -352,6 +361,7 @@ stop_sentinel() {
 # which is exactly the pattern the sentinel exists to flag.
 cleanup_workspace_canaries() {
     local ws="$1" f
+    rmdir "${ws}/.secrets" 2>/dev/null || true
     for f in .secrets.canary secrets.json .env.vault; do
         if [ -f "${ws}/${f}" ] && grep -qs 'AI-WARDEN-CANARY' "${ws}/${f}"; then
             rm -f "${ws}/${f}" 2>/dev/null || true
@@ -376,7 +386,8 @@ cmd_run() {
     docker image inspect "$AGENT_IMAGE" >/dev/null 2>&1 \
         || die "image ${AGENT_IMAGE} is missing. Run: $0 build"
 
-    local abs; abs="$(assert_safe_mount "$target")"
+    assert_safe_mount "$target"
+    local abs="$RESOLVED_MOUNT"
     local mount_src; mount_src="$(host_path "$abs")"
     local name; name="$(container_name_for "$abs")"
 
@@ -401,6 +412,10 @@ cmd_run() {
         --ulimit nofile=8192:8192
         --ulimit nproc=512:512
         --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
+        # A real Linux filesystem inside the workspace, so the canaries there
+        # are actually enforceable even when /workspace itself is a 9p or
+        # virtiofs bind mount that never delivers inotify events.
+        --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001"
         --label ai.warden.role=agent-sandbox
         --label "ai.warden.workspace=${abs}"
         --log-opt max-size=20m --log-opt max-file=3

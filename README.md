@@ -207,11 +207,13 @@ make logs
 ตอน container เริ่มทำงาน entrypoint จะวางไฟล์ล่อไว้:
 
 ```
-/workspace/.secrets.canary
-/workspace/secrets.json
-/workspace/.env.vault
-/home/ai_user/.aws/credentials
-/home/ai_user/.ssh/id_rsa_backup
+/workspace/.secrets/credentials      <- tmpfs, บังคับใช้ได้ทุกแพลตฟอร์ม
+/workspace/.secrets/id_rsa           <- tmpfs, บังคับใช้ได้ทุกแพลตฟอร์ม
+/workspace/.secrets.canary           <- bind mount, ดูหัวข้อ "ข้อเท็จจริงเรื่องแพลตฟอร์ม"
+/workspace/secrets.json              <- bind mount
+/workspace/.env.vault                <- bind mount
+/home/ai_user/.aws/credentials       <- overlayfs, บังคับใช้ได้เสมอ
+/home/ai_user/.ssh/id_rsa_backup     <- overlayfs, บังคับใช้ได้เสมอ
 ```
 
 ไฟล์เหล่านี้ถูกใส่ไว้เป็นบรรทัดแรกของ `.aiignore` และไฟล์ ignore ของทุกเครื่องมือ
@@ -229,6 +231,31 @@ agent ที่ประพฤติดีจึงถูกบอกอย่�
 
 container จบด้วย **exit code 99** และเขียนรายงาน forensic ลง
 `<workspace>/WARDEN_SECURITY_INCIDENT.json`
+
+#### ข้อเท็จจริงเรื่องแพลตฟอร์ม — และเหตุผลที่ AI Warden พูดตรง ๆ เรื่องนี้
+
+`inotify_add_watch` **สำเร็จ** บน filesystem ที่ไม่เคยส่ง event ออกมาเลยสักตัว
+กรณีที่เจอจริงคือ bind mount ของ Docker Desktop บน Windows/macOS ซึ่งเป็น 9p หรือ virtiofs
+(`/workspace 9p rw,noatime,...`) — `noatime` ยังตัดทางเลือกสำรองอย่างการดู atime ไปด้วย
+
+tripwire ที่รายงานว่า "armed" ทั้งที่มองไม่เห็นอะไรเลย อันตรายกว่าไม่มี tripwire
+AI Warden จึง **วัดความสามารถจริง** ตอน arm ด้วยไฟล์ probe ชั่วคราว (ไม่ใช่ canary จริง —
+เพราะการอ่าน canary จะไปทริกเกอร์ monitor ตัวอื่นที่เฝ้าไฟล์เดียวกันอยู่คนละ container)
+แล้วรายงานผลตามจริง:
+
+```
+[canary] watchable  : /workspace/.secrets (tmpfs)  - inotify delivers events
+[canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
+                        Canaries on this path CANNOT be enforced.
+[canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
+[canary] v1.0.0 mode=inline action=kill enforced=4/7
+[canary] *** 3 canary path(s) are NOT enforced on this host: ...
+```
+
+ทางแก้คือ mount **tmpfs ไว้ที่ `/workspace/.secrets`** — เป็น Linux filesystem จริง
+อยู่ในโฟลเดอร์โปรเจกต์ และส่ง inotify event ได้ตามปกติ
+canary ที่นั่นจึงบังคับใช้ได้ทุกแพลตฟอร์ม รวมทั้ง Docker Desktop บน Windows
+ส่วน canary ที่อยู่ใน bind mount ตรง ๆ ยังคงไว้เป็นชั้นเสริม และ**ทำงานเต็มที่บน Linux ที่รัน Docker ตรง**
 
 > **ทำไมไม่ใช้ `watchdog` อย่างเดียว**
 > การ *อ่าน* ไฟล์ทำให้เกิด `IN_OPEN` / `IN_ACCESS` แต่ inotify emitter ของ `watchdog`

@@ -172,7 +172,12 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 8. Canary configuration
 # -----------------------------------------------------------------------------
-ENV WARDEN_CANARY_FILES="/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault:/home/ai_user/.aws/credentials:/home/ai_user/.ssh/id_rsa_backup" \
+# /workspace/.secrets is mounted as a tmpfs by warden-cli / compose. That is
+# not decoration: a Docker Desktop bind mount is 9p or virtiofs, which accepts
+# inotify_add_watch and then never delivers a single event, so canaries sitting
+# directly in the bind mount cannot be enforced on Windows or macOS. A tmpfs
+# mounted inside the workspace is a real Linux filesystem and does deliver.
+ENV WARDEN_CANARY_FILES="/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault:/home/ai_user/.aws/credentials:/home/ai_user/.ssh/id_rsa_backup" \
     WARDEN_CANARY_ACTION=kill \
     WARDEN_BREACH_EXIT_CODE=99 \
     WARDEN_WORKSPACE=/workspace

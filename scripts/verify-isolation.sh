@@ -97,6 +97,7 @@ warden_flags=(
     --memory 2g --memory-swap 2g
     --pids-limit 256
     --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
+    --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001"
     -v "${VERIFY_WS_MOUNT}:/workspace"
 )
 
@@ -117,7 +118,7 @@ fi
 # =============================================================================
 if [ "$RUN_BREACH" = "1" ]; then
 printf '\n%s================= PHASE B: live breach drill ====================%s\n' "$C_BOLD" "$C_RESET"
-info "a container will now deliberately read /workspace/secrets.json"
+info "a container will now deliberately read /workspace/.secrets/credentials"
 info "expected outcome: the tripwire kills it and the container exits 99"
 printf '\n'
 
@@ -131,10 +132,11 @@ docker run --rm \
     --cap-drop=ALL --security-opt no-new-privileges:true \
     --memory 1g --pids-limit 128 \
     --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+    --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001" \
     -v "${BREACH_WS_MOUNT}:/workspace" \
     --name warden-verify-breach \
     "$AGENT_IMAGE" \
-    bash -c 'echo "[attacker] exfiltrating credentials..."; cat /workspace/secrets.json > /dev/null 2>&1; sleep 20; echo "[attacker] still alive - THE TRIPWIRE FAILED"'
+    bash -c 'echo "[attacker] exfiltrating credentials..."; cat /workspace/.secrets/credentials > /dev/null 2>&1; sleep 20; echo "[attacker] still alive - THE TRIPWIRE FAILED"'
 phase_b=$?
 
 printf '\n'
@@ -149,6 +151,7 @@ else
     bad "phase B: expected exit 99, got ${phase_b} - the canary tripwire did NOT contain the breach"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
+rmdir "${BREACH_WS}/.secrets" 2>/dev/null || true
 rm -rf "$BREACH_WS" 2>/dev/null || true
 fi
 
