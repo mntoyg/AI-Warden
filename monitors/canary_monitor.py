@@ -255,6 +255,7 @@ class ProcInfo:
     cmdline: str
     exe: str
     open_canaries: List[str] = field(default_factory=list)
+    evidence: str = ""
 
 
 def _read(path: str) -> str:
@@ -291,6 +292,13 @@ def iter_processes() -> Iterable[ProcInfo]:
         yield ProcInfo(pid=pid, uid=uid, cmdline=cmdline, exe=exe)
 
 
+# A warden process naturally carries canary paths in its own argv. Without this
+# filter the cmdline heuristic below matches the monitor (or, across a shared
+# PID namespace, the sentinel) and the incident report confidently names the
+# wrong process - the one thing an intrusion report must never do.
+WARDEN_SELF_MARKERS = ("canary_monitor.py", "/opt/warden/", "warden-entrypoint")
+
+
 def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> List[ProcInfo]:
     """Find processes that currently hold a canary open, or that mention one."""
     suspects: List[ProcInfo] = []
@@ -299,6 +307,8 @@ def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> List[ProcInf
 
     for proc in iter_processes():
         if proc.pid in (self_pid, 1):
+            continue
+        if any(marker in proc.cmdline for marker in WARDEN_SELF_MARKERS):
             continue
         holding: List[str] = []
         fd_dir = f"/proc/{proc.pid}/fd"
@@ -316,7 +326,11 @@ def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> List[ProcInf
         mentions = any(b in proc.cmdline for b in basenames)
         if holding or mentions:
             proc.open_canaries = holding
+            proc.evidence = "open file descriptor" if holding else "canary named in argv"
             suspects.append(proc)
+
+    # An open descriptor is proof; a matching command line is only a hint.
+    suspects.sort(key=lambda p: 0 if p.open_canaries else 1)
     return suspects
 
 
@@ -548,7 +562,8 @@ class CanaryMonitor:
         for proc in suspects:
             alert(
                 f"[SECURITY BREACH] suspect pid={proc.pid} uid={proc.uid} "
-                f"exe={proc.exe or '?'} cmd={proc.cmdline[:180]!r}"
+                f"evidence={proc.evidence} exe={proc.exe or '?'} "
+                f"cmd={proc.cmdline[:180]!r}"
             )
         if not suspects:
             alert(
@@ -572,6 +587,7 @@ class CanaryMonitor:
                     "exe": p.exe,
                     "cmdline": p.cmdline[:500],
                     "open_canaries": p.open_canaries,
+                    "evidence": p.evidence,
                 }
                 for p in suspects
             ],
