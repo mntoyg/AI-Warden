@@ -18,5 +18,14 @@
 #  provider prefixes are kept for realism (AKIA, sk_live_, ghp_, sk-ant-) but
 #  each is broken with a character that provider's charset forbids. Only the
 #  PEM header cannot be broken that way without making the decoy useless.
+#
+#  The entry below is a COMMIT fingerprint, so it only matches against real
+#  history - CI checks out with fetch-depth: 0 for that reason. If you edit
+#  the canary block, the finding moves to a new commit and this needs
+#  refreshing:
+#      gitleaks detect --source=. --report-format json --report-path /tmp/gl.json
+#      python3 -c "import json;[print(f['Fingerprint']) for f in json.load(open('/tmp/gl.json'))]"
+#  That churn is deliberate: a key-shaped blob should be re-reviewed whenever
+#  it changes, rather than blanket-allowlisted by path.
 # =============================================================================
 5eef14937c17413d5405d04e8c5370e99db8f107:core/entrypoint.sh:private-key:159

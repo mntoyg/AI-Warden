@@ -33,6 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks scans history, and the canary's PEM header is
+          # allowlisted in .gitleaksignore by commit fingerprint. A shallow
+          # checkout collapses history into one synthetic commit with a
+          # different SHA, so the fingerprint stops matching and the scan
+          # fails on a finding that is already accounted for.
+          fetch-depth: 0
 
       - name: shellcheck
         run: |
