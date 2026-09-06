@@ -93,8 +93,9 @@ ls /var/run/docker.sock # No such file or directory
 
 ```bash
 awk '$3 !~ /^(proc|sysfs|tmpfs|devpts|mqueue|cgroup2?|overlay|shm|devtmpfs)$/ {print $2, $3}' /proc/mounts
-# /                overlay
-# /workspace       <fs ของโฮสต์>
+# /                    overlay
+# /workspace           <fs ของโฮสต์ - 9p บน Docker Desktop>
+# /workspace/.secrets  ext4   <- canary vault (named volume)
 # /etc/hosts /etc/hostname /etc/resolv.conf  <- Docker ใส่ให้เองเสมอ
 ```
 
@@ -141,7 +142,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
 ก่อนอื่น ดูว่า path ไหน "บังคับใช้ได้จริง" บนเครื่องคุณ — monitor รายงานไว้ตอนเริ่ม container:
 
 ```
-[canary] watchable  : /workspace/.secrets (tmpfs)  - inotify delivers events
+[canary] watchable  : /workspace/.secrets (ext4)   - inotify delivers events
 [canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
 [canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
 [canary] v1.0.0 mode=inline action=kill enforced=4/7
@@ -262,6 +263,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | โดเมนใน allowlist ใช้ได้ | `curl -w '%{http_code}' https://api.anthropic.com/v1/models` | `401` (หรือ 2xx/4xx อื่น) |
 | canary ฆ่า container | `cat /workspace/.secrets/credentials` | container exit `99` |
 | tripwire รายงานความสามารถจริง | ดูบรรทัด `enforced=N/M` ตอนเริ่ม | ตรงกับ filesystem ของเครื่อง |
+| sentinel ยังทำงานแม้ inline monitor ถูกฆ่า | `pkill -9 -f 'canary_mon[i]tor'` แล้วอ่าน canary | sentinel ฆ่า container (`mode=sentinel`) |
 | posture ไม่ครบ = ไม่ยอมเริ่ม | `docker run` โดยไม่ใส่ `--cap-drop` | exit `78` |
 | ไม่มี proxy = ไม่ยอมเริ่ม | `docker stop warden-egress-proxy` แล้ว run | exit `78` |
 

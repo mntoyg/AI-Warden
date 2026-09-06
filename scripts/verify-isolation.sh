@@ -75,8 +75,15 @@ cp "${SCRIPT_DIR}/selftest-in-container.sh" "${VERIFY_WS}/.warden-selftest.sh"
 chmod +x "${VERIFY_WS}/.warden-selftest.sh" 2>/dev/null || true
 VERIFY_WS_MOUNT="$(host_path "$VERIFY_WS")"
 
+VERIFY_VAULT="warden-verify-vault-$$"
+docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/null
+docker run --rm --network none --user 0:0 --cap-drop=ALL --cap-add=CHOWN \
+    --entrypoint sh -v "${VERIFY_VAULT}:/vault" "$AGENT_IMAGE" \
+    -c "chmod 0770 /vault && chown -R 1001:1001 /vault" >/dev/null
+
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed >/dev/null 2>&1 || true
+    docker volume rm -f "$VERIFY_VAULT" >/dev/null 2>&1 || true
     if [ "$KEEP" = "0" ]; then
         rm -rf "$VERIFY_WS" 2>/dev/null || true
     else
@@ -97,7 +104,7 @@ warden_flags=(
     --memory 2g --memory-swap 2g
     --pids-limit 256
     --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
-    --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001"
+    -v "${VERIFY_VAULT}:/workspace/.secrets"
     -v "${VERIFY_WS_MOUNT}:/workspace"
 )
 
@@ -132,7 +139,7 @@ docker run --rm \
     --cap-drop=ALL --security-opt no-new-privileges:true \
     --memory 1g --pids-limit 128 \
     --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
-    --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001" \
+    -v "${VERIFY_VAULT}:/workspace/.secrets" \
     -v "${BREACH_WS_MOUNT}:/workspace" \
     --name warden-verify-breach \
     "$AGENT_IMAGE" \

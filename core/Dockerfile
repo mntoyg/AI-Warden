@@ -172,11 +172,13 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 8. Canary configuration
 # -----------------------------------------------------------------------------
-# /workspace/.secrets is mounted as a tmpfs by warden-cli / compose. That is
-# not decoration: a Docker Desktop bind mount is 9p or virtiofs, which accepts
-# inotify_add_watch and then never delivers a single event, so canaries sitting
-# directly in the bind mount cannot be enforced on Windows or macOS. A tmpfs
-# mounted inside the workspace is a real Linux filesystem and does deliver.
+# /workspace/.secrets is a named Docker volume mounted there by warden-cli and
+# by compose. That is not decoration: a Docker Desktop bind mount is 9p or
+# virtiofs, which accepts inotify_add_watch and then never delivers a single
+# event, so canaries sitting directly in the bind mount cannot be enforced on
+# Windows or macOS. The volume lives on real ext4, and - unlike a tmpfs - it
+# presents the SAME inodes to the sentinel container, so the out-of-band
+# tripwire can watch it too.
 ENV WARDEN_CANARY_FILES="/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault:/home/ai_user/.aws/credentials:/home/ai_user/.ssh/id_rsa_backup" \
     WARDEN_CANARY_ACTION=kill \
     WARDEN_BREACH_EXIT_CODE=99 \

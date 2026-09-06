@@ -293,6 +293,54 @@ resolve_agent_cmd() {
     esac
 }
 
+# =============================================================================
+#  The canary vault
+# -----------------------------------------------------------------------------
+#  A named Docker volume mounted at /workspace/.secrets, in BOTH the agent and
+#  the sentinel.
+#
+#  Two problems are solved by the same mount:
+#
+#  1. Docker Desktop bind-mounts the workspace as 9p/virtiofs, where
+#     inotify_add_watch() succeeds and no event is ever delivered. A named
+#     volume lives on the VM's own ext4, so canaries in it are enforceable on
+#     every platform. (A tmpfs also fixes that, but only for one container.)
+#
+#  2. A tmpfs belongs to a single mount namespace, so the sentinel could not see
+#     it - the whole anti-tamper layer was inert wherever it was needed most. A
+#     named volume is the same inode set in both containers, and inotify watches
+#     inodes, so a read by the agent wakes the watcher in the sentinel.
+#
+#  A fresh named volume is root-owned, and the agent has no capabilities with
+#  which to chown it, so ownership is initialised once by a throwaway root
+#  container before the sandbox starts.
+#
+#  The vault is group-writable by ai_user (0770, root:1001 -> 1001:1001) and the
+#  sentinel joins group 1001 with --group-add. That is what lets a sentinel
+#  running with NO capabilities read the canaries: root without
+#  CAP_DAC_OVERRIDE gets no permission bypass at all, and inotify_add_watch()
+#  needs read access on the file. Ordinary Unix group permissions are the
+#  least-privilege answer here; granting CAP_DAC_READ_SEARCH instead would let
+#  the sentinel read every file in its container to solve the same problem.
+# =============================================================================
+vault_name_for() { printf '%s-vault' "$1"; }
+
+ensure_vault() {
+    local vault="$1"
+    docker volume create --label ai.warden.role=canary-vault "$vault" >/dev/null \
+        || { warn "could not create the canary vault volume"; return 1; }
+    docker run --rm --network none --user 0:0 \
+        --cap-drop=ALL --cap-add=CHOWN --security-opt no-new-privileges:true \
+        --entrypoint sh -v "${vault}:/vault" "$AGENT_IMAGE" \
+        -c "chmod 0770 /vault && chown -R 1001:1001 /vault" >/dev/null 2>&1 \
+        || { warn "could not initialise the canary vault ownership"; return 1; }
+    return 0
+}
+
+remove_vault() {
+    docker volume rm -f "$1" >/dev/null 2>&1 || true
+}
+
 # The sentinel runs as uid 0 with --cap-drop=ALL --cap-add=KILL, and that
 # combination is deliberate rather than sloppy.
 #
@@ -307,7 +355,7 @@ resolve_agent_cmd() {
 # The agent (uid 1001, zero capabilities) still cannot signal it, ptrace it, or
 # reach it in any way - the PID namespace is shared, nothing else is.
 start_sentinel() {
-    local agent_container="$1" host_ws="$2"
+    local agent_container="$1" host_ws="$2" vault="$3"
     [ "$WARDEN_SENTINEL" = "1" ] || return 0
 
     local sentinel="${agent_container}-sentinel"
@@ -327,6 +375,7 @@ start_sentinel() {
         --network none \
         --pid "container:${agent_container}" \
         --user 0:0 \
+        --group-add 1001 \
         --read-only \
         --tmpfs /tmp:rw,nosuid,size=16m \
         --cap-drop=ALL \
@@ -337,12 +386,13 @@ start_sentinel() {
         --label ai.warden.role=canary-sentinel \
         --label "ai.warden.agent=${agent_container}" \
         -v "${host_ws}:/workspace" \
+        -v "${vault}:/workspace/.secrets" \
         --entrypoint /opt/warden/venv/bin/python3 \
         "$AGENT_IMAGE" \
         /opt/warden/canary_monitor.py \
             --mode=sentinel --action=kill --target-uid=1001 \
             --run-dir=/tmp/warden --wait-for-canaries=30 \
-            --canaries=/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault \
+            --canaries=/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault \
         >/dev/null 2>&1
     then
         ok "canary sentinel attached (CAP_KILL only, no network, read-only rootfs)"
@@ -390,8 +440,10 @@ cmd_run() {
     local abs="$RESOLVED_MOUNT"
     local mount_src; mount_src="$(host_path "$abs")"
     local name; name="$(container_name_for "$abs")"
+    local vault; vault="$(vault_name_for "$name")"
 
     cmd_up
+    ensure_vault "$vault" || die "the canary vault could not be prepared"
 
     docker rm -f "$name" >/dev/null 2>&1 || true
 
@@ -412,14 +464,12 @@ cmd_run() {
         --ulimit nofile=8192:8192
         --ulimit nproc=512:512
         --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
-        # A real Linux filesystem inside the workspace, so the canaries there
-        # are actually enforceable even when /workspace itself is a 9p or
-        # virtiofs bind mount that never delivers inotify events.
-        --tmpfs "/workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001"
         --label ai.warden.role=agent-sandbox
         --label "ai.warden.workspace=${abs}"
         --log-opt max-size=20m --log-opt max-file=3
         -v "${mount_src}:/workspace:${WARDEN_WORKSPACE_MODE}"
+        # Enforceable canary vault, shared with the sentinel. See ensure_vault().
+        -v "${vault}:/workspace/.secrets"
         -e WARDEN_WORKSPACE=/workspace
         -e WARDEN_STRICT=1
         -e WARDEN_REQUIRE_PROXY=1
@@ -463,13 +513,16 @@ cmd_run() {
     printf '\n'
 
     if [ "$WARDEN_SENTINEL" = "1" ]; then
-        ( start_sentinel "$name" "$mount_src" ) &
+        ( start_sentinel "$name" "$mount_src" "$vault" ) &
     fi
-    trap 'stop_sentinel "$name"' EXIT INT TERM
+    trap 'stop_sentinel "$name"; remove_vault "$vault"' EXIT INT TERM
 
     local rc=0
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
+    # Order matters: the sentinel must be gone before anything touches a
+    # watched path, or shutdown housekeeping reads as tampering.
     stop_sentinel "$name"
+    remove_vault "$vault"
     trap - EXIT INT TERM
     cleanup_workspace_canaries "$abs"
 
@@ -572,6 +625,7 @@ cmd_stop() {
     local name="${1:-}"
     if [ -n "$name" ]; then
         stop_sentinel "$name"
+        remove_vault "$(vault_name_for "$name")"
         if docker rm -f "$name" >/dev/null 2>&1; then
             ok "stopped ${name}"
         else
@@ -589,6 +643,14 @@ cmd_stop() {
     fi
     # shellcheck disable=SC2086
     docker rm -f $sids $ids >/dev/null 2>&1 || true
+
+    # Sweep up canary vaults orphaned by a hard kill of a previous session.
+    local vols
+    vols="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' 2>/dev/null || true)"
+    if [ -n "$vols" ]; then
+        # shellcheck disable=SC2086
+        docker volume rm -f $vols >/dev/null 2>&1 || true
+    fi
     ok "all sandboxes stopped"
 }
 

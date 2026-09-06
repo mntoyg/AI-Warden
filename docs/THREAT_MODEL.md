@@ -86,8 +86,16 @@ agent จึง `kill` มันได้ตรง ๆ — tripwire ชั้น
 - `--network none` → ไม่มีทาง exfiltrate ผ่านตัวมันเอง
 - `--cap-drop=ALL --cap-add=KILL` → capability เดียวในระบบทั้งหมด และให้เฉพาะ component ที่ต้องใช้
 - แชร์ PID namespace กับ sandbox → ฆ่า process ของ agent ได้
-- `--read-only` rootfs, mount แค่ workspace
+- `--read-only` rootfs, mount แค่ workspace กับ canary vault
 - agent (uid 1001, ไม่มี capability) ส่งสัญญาณหาไม่ได้ และ ptrace ไม่ได้
+
+**ทำไมต้อง `--group-add 1001`:** root ที่ถูก `--cap-drop=ALL` **ไม่มี `CAP_DAC_OVERRIDE`**
+จึงไม่ได้สิทธิ์ข้าม file permission เลยแม้แต่น้อย และ `inotify_add_watch()` ต้องการสิทธิ์
+อ่านไฟล์ที่จะเฝ้า ตอนแรก sentinel จึงอ่าน canary โหมด `0400` ของ uid 1001 ไม่ได้
+และได้ `enforced=0/5` เงียบ ๆ
+vault จึงเป็น `0770` เจ้าของ `1001:1001` canary เป็น `0440` และ sentinel เข้าร่วมกลุ่ม 1001
+— ใช้ group permission ธรรมดา ซึ่ง least-privilege กว่าการแจก `CAP_DAC_READ_SEARCH`
+ที่จะทำให้ sentinel อ่านได้ทุกไฟล์ใน container ตัวเอง
 
 **ทำไมต้องรันเป็น uid 0:** การส่งสัญญาณข้าม uid ต้องมี `CAP_KILL` อยู่ใน *effective set*
 แต่ `--cap-add` ของ Docker ให้แค่ *bounding set* — process ที่ไม่ใช่ root จึงมี effective set ว่าง
@@ -159,7 +167,7 @@ bind mount ของ Docker Desktop บน Windows/macOS ไม่ใช่ file
 
 `inotify_add_watch()` บน path นี้ **คืนค่าสำเร็จ** แต่ **ไม่เคยส่ง event ออกมาเลย**
 วัดมาแล้วในการทดสอบจริง: `/workspace/secrets.json` → `NO EVENTS`
-ขณะที่ `/workspace/.secrets/credentials` (tmpfs) และ `/home/ai_user/probe.txt` (overlayfs)
+ขณะที่ `/workspace/.secrets/credentials` (named volume บน ext4) และ `/home/ai_user/probe.txt` (overlayfs)
 → `OPEN|ACCESS(read)` ทั้งคู่
 `noatime` ยังปิดทางเลือกสำรองอย่างการ poll atime ไปด้วย
 
@@ -175,16 +183,18 @@ bind mount ของ Docker Desktop บน Windows/macOS ไม่ใช่ file
    (ใช้ไฟล์ probe ไม่ใช่ canary จริง เพราะการอ่าน canary จะไปทริกเกอร์ monitor
    ตัวอื่นที่เฝ้าไฟล์เดียวกันอยู่คนละ container)
 
-2. **มี canary ที่บังคับใช้ได้จริงในทุกแพลตฟอร์ม** — `/workspace/.secrets` ถูก mount เป็น
-   tmpfs ทับลงไปในโฟลเดอร์โปรเจกต์ เป็น Linux filesystem แท้ ๆ ที่ส่ง event ได้
-   canary ที่นั่นทำงานเหมือนกันหมดทุกที่
+2. **มี canary ที่บังคับใช้ได้จริงในทุกแพลตฟอร์ม** — `/workspace/.secrets` เป็น
+   **named volume** ที่ mount ทับลงไปในโฟลเดอร์โปรเจกต์ อยู่บน ext4 จริงในตัว VM
+   จึงส่ง event ได้ตามปกติ
+   เลือก named volume แทน tmpfs เพราะ tmpfs เป็นของ mount namespace เดียว
+   sentinel ที่อยู่คนละ container จะมองไม่เห็น — named volume ให้ inode ชุดเดียวกัน
+   กับทั้งสอง container และ inotify เฝ้าที่ inode ทั้งสองชั้นจึงเห็นเหตุการณ์เดียวกัน
 
 3. **ยังมี canary ใน `$HOME` ของ container** ซึ่งอยู่บน overlayfs และทำงานได้เสมอ
 
-**สิ่งที่ยังเหลือ:** `warden-canary-sentinel` มองเห็น workspace ผ่าน bind mount เดียวกัน
-บน Docker Desktop มันจึงเฝ้า canary ใน workspace ไม่ได้ (tmpfs ของ agent เป็นของ
-mount namespace นั้นตัวเดียว) — sentinel จะรายงานสถานะ degraded ของตัวเองตอนเริ่ม
-บน Linux sentinel ทำงานเต็มรูปแบบ
+**สิ่งที่ยังเหลือ:** canary ที่วางใน bind mount ตรง ๆ (3 ใน 7 path) ยังบังคับใช้ไม่ได้
+บน Docker Desktop และ monitor จะรายงานตรง ๆ ว่า `enforced=4/7`
+ทั้ง inline monitor และ sentinel เฝ้า vault ได้ทั้งคู่แล้ว บน Linux จะได้ `7/7`
 
 ---
 

@@ -177,7 +177,6 @@ bCBrZXkuIFJlYWRpbmcgdGhpcyBmaWxlIHRyaXBzIHRoZSBBSSBXYXJkZW4gaW50
 cnVzaW9uIGRldGVjdG9yIGFuZCB0ZXJtaW5hdGVzIHRoZSBzYW5kYm94LgAAAAA=
 -----END OPENSSH PRIVATE KEY-----
 KEY
-            chmod 0600 "$path" 2>/dev/null || true
             ;;
         *)
             cat > "$path" <<'CANARY'
@@ -188,7 +187,9 @@ INTERNAL_SSO_COOKIE=WARDEN.CANARY.NOT.A.SESSION.TOKEN
 CANARY
             ;;
     esac
-    chmod 0400 "$path" 2>/dev/null || true
+    # 0440, not 0400: the out-of-band sentinel joins group ai_user and holds no
+    # capabilities, so group-read is the only way it can watch these files.
+    chmod 0440 "$path" 2>/dev/null || true
     return 0
 }
 

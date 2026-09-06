@@ -207,8 +207,8 @@ make logs
 ตอน container เริ่มทำงาน entrypoint จะวางไฟล์ล่อไว้:
 
 ```
-/workspace/.secrets/credentials      <- tmpfs, บังคับใช้ได้ทุกแพลตฟอร์ม
-/workspace/.secrets/id_rsa           <- tmpfs, บังคับใช้ได้ทุกแพลตฟอร์ม
+/workspace/.secrets/credentials      <- named volume (ext4) บังคับใช้ได้ทุกแพลตฟอร์ม
+/workspace/.secrets/id_rsa           <- named volume (ext4) บังคับใช้ได้ทุกแพลตฟอร์ม
 /workspace/.secrets.canary           <- bind mount, ดูหัวข้อ "ข้อเท็จจริงเรื่องแพลตฟอร์ม"
 /workspace/secrets.json              <- bind mount
 /workspace/.env.vault                <- bind mount
@@ -244,7 +244,7 @@ AI Warden จึง **วัดความสามารถจริง** ต�
 แล้วรายงานผลตามจริง:
 
 ```
-[canary] watchable  : /workspace/.secrets (tmpfs)  - inotify delivers events
+[canary] watchable  : /workspace/.secrets (ext4)   - inotify delivers events
 [canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
                         Canaries on this path CANNOT be enforced.
 [canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
@@ -252,10 +252,22 @@ AI Warden จึง **วัดความสามารถจริง** ต�
 [canary] *** 3 canary path(s) are NOT enforced on this host: ...
 ```
 
-ทางแก้คือ mount **tmpfs ไว้ที่ `/workspace/.secrets`** — เป็น Linux filesystem จริง
-อยู่ในโฟลเดอร์โปรเจกต์ และส่ง inotify event ได้ตามปกติ
-canary ที่นั่นจึงบังคับใช้ได้ทุกแพลตฟอร์ม รวมทั้ง Docker Desktop บน Windows
+ทางแก้คือ mount **named volume ไว้ที่ `/workspace/.secrets`** — อยู่บน ext4 จริงในตัว VM
+ทำให้ส่ง inotify event ได้ตามปกติ canary ที่นั่นจึงบังคับใช้ได้ทุกแพลตฟอร์ม
+
+**ทำไมต้องเป็น named volume ไม่ใช่ tmpfs** — tmpfs แก้ปัญหา inotify ได้ก็จริง
+แต่มันเป็นของ **mount namespace เดียว** แปลว่า `warden-canary-sentinel` ที่อยู่คนละ container
+จะมองไม่เห็นเลย → ชั้น anti-tamper ทั้งชั้นตายสนิทบน Docker Desktop
+named volume ให้ **inode ชุดเดียวกัน** กับทั้งสอง container และ inotify เฝ้าที่ inode
+การอ่านของ agent จึงปลุก watcher ในฝั่ง sentinel ได้
+
 ส่วน canary ที่อยู่ใน bind mount ตรง ๆ ยังคงไว้เป็นชั้นเสริม และ**ทำงานเต็มที่บน Linux ที่รัน Docker ตรง**
+
+> **หมายเหตุเรื่องสิทธิ์:** vault เป็น `0770` เจ้าของ `1001:1001` และ sentinel เข้าร่วมกลุ่ม 1001
+> ด้วย `--group-add` เพราะ root ที่ถูก `--cap-drop=ALL` **ไม่มี `CAP_DAC_OVERRIDE`**
+> จึงไม่ได้สิทธิ์ข้าม permission ใด ๆ เลย และ `inotify_add_watch()` ต้องการสิทธิ์อ่านไฟล์
+> การใช้ group permission ธรรมดาคือคำตอบที่ least-privilege กว่าการแจก `CAP_DAC_READ_SEARCH`
+> ซึ่งจะทำให้ sentinel อ่านได้ทุกไฟล์ใน container ตัวเอง
 
 > **ทำไมไม่ใช้ `watchdog` อย่างเดียว**
 > การ *อ่าน* ไฟล์ทำให้เกิด `IN_OPEN` / `IN_ACCESS` แต่ inotify emitter ของ `watchdog`
@@ -270,6 +282,17 @@ canary ที่นั่นจึงบังคับใช้ได้ทุ�
 ยังมี `warden-canary-sentinel` เป็น container แยก ไม่มี network เลย rootfs เป็น read-only
 มี capability เดียวคือ `CAP_KILL` และแชร์ PID namespace กับ sandbox
 agent ส่งสัญญาณหามันไม่ได้ ptrace ก็ไม่ได้ แต่มันฆ่า agent ได้
+
+ทดสอบสถานการณ์นี้จริงแล้ว — agent ฆ่า monitor ตัวใน container สำเร็จ
+เหลือแต่ของ sentinel ที่ฆ่าไม่ได้ (`pkill: Operation not permitted`)
+พออ่าน canary ต่อ sentinel จับได้และฆ่า agent ทิ้ง:
+
+```
+monitors still alive: 1   (the survivor is the sentinel's, running as root)
+[canary] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=sentinel
+[canary] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [91]
+agent container is GONE - killed by the sentinel
+```
 
 > **ทำไม sentinel ต้องรันเป็น uid 0**
 > การฆ่า process ของ user อื่นต้องมี `CAP_KILL` อยู่ใน **effective set**

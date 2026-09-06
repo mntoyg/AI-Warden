@@ -115,7 +115,7 @@ pass "no host filesystem bind mount found"
 unexpected="$(awk '
     { mp = $2; fs = $3 }
     fs ~ /^(proc|sysfs|tmpfs|devtmpfs|devpts|mqueue|shm|overlay|cgroup|cgroup2|securityfs|pstore|bpf|tracefs|debugfs|configfs|fusectl|hugetlbfs|nsfs|binfmt_misc|autofs|ramfs|rpc_pipefs)$/ { next }
-    mp == "/" || mp == "/workspace" { next }
+    mp == "/" || mp == "/workspace" || mp == "/workspace/.secrets" { next }
     mp == "/etc/hosts" || mp == "/etc/hostname" || mp == "/etc/resolv.conf" { next }
     { print mp " (" fs ")" }
 ' /proc/mounts 2>/dev/null | head -10)"
@@ -130,6 +130,20 @@ if [ -d /workspace ]; then
 else
     fail "/workspace is missing"
 fi
+
+# The canary vault must sit on a filesystem that actually delivers inotify.
+# A 9p/virtiofs bind mount accepts inotify_add_watch() and then stays silent,
+# which would leave the tripwire inert without any error anywhere.
+vault_fs="$(awk '$2 == "/workspace/.secrets" {print $3}' /proc/mounts | head -1)"
+case "${vault_fs:-none}" in
+    none)
+        fail "the canary vault is not mounted at /workspace/.secrets" \
+             "launch through warden-cli.sh or compose, not a bare docker run" ;;
+    9p|virtiofs|fuse*|cifs|nfs*)
+        fail "the canary vault is on ${vault_fs}, which does not deliver inotify events" ;;
+    *)
+        pass "canary vault mounted on ${vault_fs} (an inotify-capable filesystem)" ;;
+esac
 
 if ls /root >/dev/null 2>&1; then
     fail "/root is readable by the agent"
@@ -283,6 +297,16 @@ if pgrep -f canary_monitor.py >/dev/null 2>&1; then
     pass "canary_monitor.py is running inside the sandbox"
 else
     fail "the in-container canary monitor is not running"
+fi
+
+# "Running" is not the same as "watching something". The monitor publishes the
+# number of watches it actually established, after probing that the filesystem
+# delivers events at all - so this asserts enforcement, not mere liveness.
+enforced="$(cat /run/warden/armed 2>/dev/null || echo 0)"
+if [ "${enforced:-0}" -gt 0 ]; then
+    pass "${enforced} canary path(s) are genuinely enforced (probed, not assumed)"
+else
+    fail "the tripwire armed zero enforceable canaries"          "every canary path is on a filesystem that never delivers inotify events"
 fi
 
 if [ -f /run/warden/breach.flag ]; then

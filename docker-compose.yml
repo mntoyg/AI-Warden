@@ -32,6 +32,21 @@
 
 name: ai-warden
 
+volumes:
+  # Enforceable canary vault, shared by the agent and the sentinel.
+  #
+  # It has to be a named volume rather than a tmpfs for two reasons. A Docker
+  # Desktop bind mount is 9p/virtiofs, where inotify_add_watch() succeeds and
+  # no event is ever delivered - so canaries in the workspace itself cannot be
+  # enforced there. And a tmpfs belongs to one mount namespace, so the sentinel
+  # in its own container could never see it. A named volume lives on real ext4
+  # and presents the SAME inodes to both containers; inotify watches inodes, so
+  # a read by the agent wakes the watcher in the sentinel.
+  warden_canary_vault:
+    name: warden_canary_vault
+    labels:
+      ai.warden.role: canary-vault
+
 networks:
   warden_internal:
     name: warden_internal
@@ -102,6 +117,8 @@ services:
     depends_on:
       warden-egress-proxy:
         condition: service_healthy
+      warden-vault-init:
+        condition: service_completed_successfully
     networks:
       warden_internal: {}       # internal only - no external network here
     user: "1001:1001"
@@ -116,10 +133,11 @@ services:
         target: /workspace
         bind:
           create_host_path: true
+      - type: volume
+        source: warden_canary_vault
+        target: /workspace/.secrets
     tmpfs:
       - /run/warden:rw,nosuid,size=16m,uid=1001,gid=1001
-      # Enforceable canary vault - see the note in core/Dockerfile.
-      - /workspace/.secrets:rw,nosuid,size=1m,mode=0700,uid=1001,gid=1001
     env_file:
       - path: .env
         required: false
@@ -147,6 +165,31 @@ services:
       ai.warden.role: agent-sandbox
 
   # ===========================================================================
+  #  2b. Canary vault initialiser  (profile: agent)
+  #      A fresh named volume is root-owned, and the agent has no capabilities
+  #      with which to chown it. This runs once, hands the vault to uid 1001,
+  #      and exits before the sandbox starts.
+  # ===========================================================================
+  warden-vault-init:
+    image: ai-warden/agent:latest
+    container_name: warden-vault-init
+    profiles: [agent]
+    network_mode: none
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    volumes:
+      - type: volume
+        source: warden_canary_vault
+        target: /vault
+    entrypoint: ["sh", "-c", "chmod 0770 /vault && chown -R 1001:1001 /vault"]
+    labels:
+      ai.warden.role: vault-init
+
+  # ===========================================================================
   #  3. Out-of-band canary sentinel  (profile: agent)
   #     No network at all, read-only rootfs, CAP_KILL as its only capability,
   #     sharing the sandbox's PID namespace. The agent cannot signal it, cannot
@@ -170,6 +213,7 @@ services:
     network_mode: none
     pid: "service:warden-agent-sandbox"
     user: "0:0"
+    group_add: ["1001"]
     read_only: true
     cap_drop: [ALL]
     cap_add: [KILL]             # the ONLY capability granted anywhere here
@@ -179,6 +223,9 @@ services:
       - type: bind
         source: ${WARDEN_WORKSPACE_HOST:-./workspaces/default}
         target: /workspace
+      - type: volume
+        source: warden_canary_vault
+        target: /workspace/.secrets
     tmpfs:
       - /tmp:rw,nosuid,size=16m
     environment:
@@ -195,7 +242,7 @@ services:
       - --target-uid=1001
       - --run-dir=/tmp/warden
       - --wait-for-canaries=30
-      - --canaries=/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault
+      - --canaries=/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault
     logging:
       driver: json-file
       options:
