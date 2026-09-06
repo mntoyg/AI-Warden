@@ -314,11 +314,11 @@ resolve_agent_cmd() {
 #     named volume is the same inode set in both containers, and inotify watches
 #     inodes, so a read by the agent wakes the watcher in the sentinel.
 #
-#  A fresh named volume is root-owned, and the agent has no capabilities with
-#  which to chown it, so ownership is initialised once by a throwaway root
-#  container before the sandbox starts.
+#  Ownership needs no privileged setup: a fresh named volume inherits the owner
+#  and mode of the image directory it is mounted over, and core/Dockerfile
+#  ships /workspace/.secrets as 0770 ai_user:ai_user.
 #
-#  The vault is group-writable by ai_user (0770, root:1001 -> 1001:1001) and the
+#  The vault is group-writable by ai_user (0770 ai_user:ai_user) and the
 #  sentinel joins group 1001 with --group-add. That is what lets a sentinel
 #  running with NO capabilities read the canaries: root without
 #  CAP_DAC_OVERRIDE gets no permission bypass at all, and inotify_add_watch()
@@ -332,12 +332,6 @@ ensure_vault() {
     local vault="$1"
     docker volume create --label ai.warden.role=canary-vault "$vault" >/dev/null \
         || { warn "could not create the canary vault volume"; return 1; }
-    docker run --rm --network none --user 0:0 \
-        --cap-drop=ALL --cap-add=CHOWN --security-opt no-new-privileges:true \
-        --entrypoint sh -v "${vault}:/vault" "$AGENT_IMAGE" \
-        -c "chmod 0770 /vault && chown -R 1001:1001 /vault" >/dev/null 2>&1 \
-        || { warn "could not initialise the canary vault ownership"; return 1; }
-    return 0
 }
 
 remove_vault() {

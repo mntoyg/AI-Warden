@@ -199,6 +199,15 @@ RUN set -eux; \
     find / -xdev -type f -perm -2000 -exec chmod a-s {} + || true; \
     rm -f /usr/bin/wall /usr/bin/write || true
 
+# The canary vault's mount point. A fresh named volume inherits the owner and
+# mode of the image directory it is mounted over, so this single line is what
+# makes the vault writable by ai_user and readable by the sentinel's group -
+# no privileged init container required anywhere in the stack.
+RUN set -eux; \
+    mkdir -p /workspace/.secrets; \
+    chown 1001:1001 /workspace/.secrets; \
+    chmod 0770 /workspace/.secrets
+
 USER ai_user
 WORKDIR /workspace
 

@@ -35,6 +35,13 @@ name: ai-warden
 volumes:
   # Enforceable canary vault, shared by the agent and the sentinel.
   #
+  # No privileged init step is needed to make it writable: a fresh named volume
+  # inherits the owner and mode of the image directory it is mounted over, and
+  # core/Dockerfile ships /workspace/.secrets as 0770 ai_user:ai_user. An
+  # earlier revision used a one-shot chown service here, which also broke
+  # `up --abort-on-container-exit`: the init container exiting normally tore
+  # the whole stack down.
+  #
   # It has to be a named volume rather than a tmpfs for two reasons. A Docker
   # Desktop bind mount is 9p/virtiofs, where inotify_add_watch() succeeds and
   # no event is ever delivered - so canaries in the workspace itself cannot be
@@ -117,8 +124,6 @@ services:
     depends_on:
       warden-egress-proxy:
         condition: service_healthy
-      warden-vault-init:
-        condition: service_completed_successfully
     networks:
       warden_internal: {}       # internal only - no external network here
     user: "1001:1001"
@@ -164,31 +169,6 @@ services:
         max-file: "3"
     labels:
       ai.warden.role: agent-sandbox
-
-  # ===========================================================================
-  #  2b. Canary vault initialiser  (profile: agent)
-  #      A fresh named volume is root-owned, and the agent has no capabilities
-  #      with which to chown it. This runs once, hands the vault to uid 1001,
-  #      and exits before the sandbox starts.
-  # ===========================================================================
-  warden-vault-init:
-    image: ai-warden/agent:latest
-    container_name: warden-vault-init
-    profiles: [agent]
-    network_mode: none
-    user: "0:0"
-    cap_drop: [ALL]
-    cap_add: [CHOWN]
-    security_opt:
-      - no-new-privileges:true
-    restart: "no"
-    volumes:
-      - type: volume
-        source: warden_canary_vault
-        target: /vault
-    entrypoint: ["sh", "-c", "chmod 0770 /vault && chown -R 1001:1001 /vault"]
-    labels:
-      ai.warden.role: vault-init
 
   # ===========================================================================
   #  3. Out-of-band canary sentinel  (profile: agent)

@@ -126,7 +126,7 @@
   // what creates warden_internal, and a network made by hand lacks the
   // com.docker.compose.network label, after which compose refuses to adopt it.
   // ---------------------------------------------------------------------------
-  "initializeCommand": "docker volume create --label ai.warden.role=canary-vault warden_devcontainer_vault >/dev/null && docker run --rm --network none --user 0:0 --cap-drop=ALL --cap-add=CHOWN --entrypoint sh -v warden_devcontainer_vault:/vault ai-warden/agent:latest -c \"chmod 0770 /vault && chown -R 1001:1001 /vault\"; docker network inspect warden_internal >/dev/null 2>&1 || echo 'AI Warden: warden_internal is missing - run \"make up\" in the AI Warden repo first'; docker ps --filter name=warden-egress-proxy --filter status=running --format '{{.Names}}' | grep -q warden-egress-proxy || echo 'AI Warden: egress proxy is not running - start it with \"make up\"; the sandbox will refuse to start without it'",
+  "initializeCommand": "docker volume create --label ai.warden.role=canary-vault warden_devcontainer_vault >/dev/null; docker network inspect warden_internal >/dev/null 2>&1 || echo 'AI Warden: warden_internal is missing - run \"make up\" in the AI Warden repo first'; docker ps --filter name=warden-egress-proxy --filter status=running --format '{{.Names}}' | grep -q warden-egress-proxy || echo 'AI Warden: egress proxy is not running - start it with \"make up\"; the sandbox will refuse to start without it'",
 
   // Print the effective security posture into the dev container log, so a
   // weakened configuration is visible immediately rather than discovered later.

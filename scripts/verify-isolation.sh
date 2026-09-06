@@ -82,9 +82,6 @@ VERIFY_WS_MOUNT="$(host_path "$VERIFY_WS")"
 
 VERIFY_VAULT="warden-verify-vault-$$"
 docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/null
-docker run --rm --network none --user 0:0 --cap-drop=ALL --cap-add=CHOWN \
-    --entrypoint sh -v "${VERIFY_VAULT}:/vault" "$AGENT_IMAGE" \
-    -c "chmod 0770 /vault && chown -R 1001:1001 /vault" >/dev/null
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed >/dev/null 2>&1 || true
