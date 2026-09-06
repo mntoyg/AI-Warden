@@ -1,0 +1,27 @@
+# ---- AI Warden: host-side secrets (NEVER commit) --------------------------
+.env
+.env.local
+*.pem
+*.key
+
+# ---- Sandboxed project roots ---------------------------------------------
+# workspaces/ holds real user projects that are bind-mounted into the sandbox.
+# Track the directory skeleton only.
+workspaces/*
+!workspaces/.gitkeep
+!workspaces/default/
+workspaces/default/*
+!workspaces/default/.gitkeep
+
+# ---- Runtime artefacts ----------------------------------------------------
+logs/
+*.log
+*.pid
+run/
+.squid-cache/
+
+# ---- OS / editor noise ----------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp

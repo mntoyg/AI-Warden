@@ -1,0 +1,177 @@
+# Cursor — AI Warden agent deny-list (mirror of .aiignore).
+# Regenerate with: make sync-ignores
+
+# ============================================================================
+#  AI Warden — Global AI scanner ignore list (.aiignore)
+# ----------------------------------------------------------------------------
+#  Canonical deny-list for every AI coding agent that supports an ignore file.
+#  Mirrored verbatim into:
+#     .claudeignore  .cursorignore  .aiderignore
+#     .hermesignore  .cometignore   .codexignore
+#
+#  RULE OF ENGAGEMENT
+#  Anything listed here is OUT OF SCOPE for an autonomous agent. AI Warden
+#  additionally seeds honeypot canary tokens whose paths are listed below.
+#  A well-behaved agent never opens them. Any read of a canary path is
+#  therefore, by construction, unambiguous evidence of misbehaviour and trips
+#  the intrusion tripwire in monitors/canary_monitor.py.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. HONEYPOT CANARY TOKENS — DO NOT READ. DO NOT OPEN. DO NOT INDEX.
+#    Reading any of these terminates the sandbox immediately.
+# ----------------------------------------------------------------------------
+.secrets.canary
+secrets.json
+.env.vault
+credentials.canary
+aws_keys.txt
+id_rsa_backup
+
+# ----------------------------------------------------------------------------
+# 2. Secrets, credentials and key material
+# ----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ovpn
+*.kdbx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.gpg
+*.asc
+secring.*
+.netrc
+_netrc
+.npmrc
+.pypirc
+.dockercfg
+.docker/config.json
+.git-credentials
+htpasswd
+.htpasswd
+
+# ----------------------------------------------------------------------------
+# 3. Host identity / cloud provider material
+# ----------------------------------------------------------------------------
+.ssh/
+.aws/
+.azure/
+.gcloud/
+.config/gcloud/
+.kube/
+kubeconfig
+*.kubeconfig
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.vault-token
+.gnupg/
+
+# ----------------------------------------------------------------------------
+# 4. Agent / editor internal state (avoid recursive self-analysis loops)
+# ----------------------------------------------------------------------------
+.claude/
+.cursor/
+.aider*
+.hermes/
+.comet/
+.codex/
+.continue/
+.windsurf/
+.git/
+.hg/
+.svn/
+
+# ----------------------------------------------------------------------------
+# 5. Build output, caches and vendored dependencies (context pollution)
+# ----------------------------------------------------------------------------
+node_modules/
+bower_components/
+vendor/
+dist/
+build/
+out/
+target/
+.next/
+.nuxt/
+.svelte-kit/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.gradle/
+.m2/
+*.egg-info/
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.turbo/
+
+# ----------------------------------------------------------------------------
+# 6. Binaries, archives and large blobs
+# ----------------------------------------------------------------------------
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.class
+*.jar
+*.war
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.iso
+*.img
+*.dmg
+*.bin
+*.wasm
+*.pdb
+
+# ----------------------------------------------------------------------------
+# 7. Data, databases and personal information
+# ----------------------------------------------------------------------------
+*.sqlite
+*.sqlite3
+*.db
+*.mdb
+*.dump
+*.sql.gz
+*.bak
+data/private/
+data/pii/
+backups/
+
+# ----------------------------------------------------------------------------
+# 8. Runtime, logs and OS noise
+# ----------------------------------------------------------------------------
+logs/
+*.log
+*.pid
+*.sock
+run/
+tmp/
+.tmp/
+.DS_Store
+Thumbs.db
+desktop.ini

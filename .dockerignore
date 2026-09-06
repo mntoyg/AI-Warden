@@ -1,0 +1,9 @@
+.git
+.github
+workspaces
+logs
+docs
+*.md
+!README.md
+.env
+.env.local
