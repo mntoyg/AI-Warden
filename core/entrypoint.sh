@@ -49,16 +49,27 @@ posture_check() {
     fi
 
     # --- 1b. All capabilities must be dropped ---------------------------------
-    local capeff
+    # CapEff alone is not evidence: a non-root process has an empty effective
+    # set even when the container kept the full default capability list. The
+    # bounding set (CapBnd) is what --cap-drop=ALL actually clears, and it is
+    # what decides whether any capability could ever be regained.
+    local capeff capbnd
     capeff="$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null || echo 'unknown')"
-    if [ "$capeff" = "0000000000000000" ]; then
-        log "capabilities       : none (CapEff=${capeff}) OK"
-    elif [ "$capeff" = "unknown" ]; then
-        warn "could not read CapEff from /proc/self/status"
-    else
-        warn "capabilities RETAINED (CapEff=${capeff}). Launch with --cap-drop=ALL."
+    capbnd="$(awk '/^CapBnd:/ {print $2}' /proc/self/status 2>/dev/null || echo 'unknown')"
+
+    if [ "$capeff" != "0000000000000000" ] && [ "$capeff" != "unknown" ]; then
+        warn "effective capabilities RETAINED (CapEff=${capeff}). Launch with --cap-drop=ALL."
         failures=$((failures + 1))
     fi
+    case "$capbnd" in
+        0000000000000000)
+            log "capabilities       : bounding set empty (CapEff=${capeff}) OK" ;;
+        unknown)
+            warn "could not read CapBnd from /proc/self/status" ;;
+        *)
+            warn "capability bounding set NOT empty (CapBnd=${capbnd}). Launch with --cap-drop=ALL."
+            failures=$((failures + 1)) ;;
+    esac
 
     # --- 1c. no-new-privileges ------------------------------------------------
     local nnp
