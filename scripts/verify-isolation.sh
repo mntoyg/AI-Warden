@@ -11,8 +11,11 @@
 #                               die with exit code 99.
 #    C. Fail-closed drill     - a container launched WITHOUT --cap-drop=ALL must
 #                               refuse to start (exit code 78).
+#    D. Sentinel drill        - the agent kills the inline monitor, then reads a
+#                               canary. The out-of-band sentinel must still
+#                               contain it (exit code 99).
 #
-#  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach]
+#  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
 set -uo pipefail
 
@@ -29,11 +32,13 @@ readonly INTERNAL_NET="warden_internal"
 
 KEEP=0
 RUN_BREACH=1
+RUN_SENTINEL=1
 for arg in "$@"; do
     case "$arg" in
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
-        -h|--help)    sed -n '2,17p' "$0"; exit 0 ;;
+        --no-sentinel) RUN_SENTINEL=0 ;;
+        -h|--help)    sed -n '2,21p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -184,6 +189,49 @@ if [ "$phase_c" -eq 78 ]; then
 else
     bad "phase C: expected exit 78, got ${phase_c} - the posture check is not fail-closed"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# =============================================================================
+if [ "$RUN_BREACH" = "1" ] && [ "$RUN_SENTINEL" = "1" ]; then
+printf '\n%s================= PHASE D: sentinel drill =======================%s\n' "$C_BOLD" "$C_RESET"
+info "the agent will kill the in-container tripwire, then read a canary"
+info "expected outcome: the out-of-band sentinel kills it anyway, exit 99"
+printf '\n'
+
+# This is the scenario the sentinel exists for, and the one that silently did
+# nothing for three releases: the inline monitor runs as the agent's own uid, so
+# a tamper-aware agent can simply kill it.
+phase_d=1
+if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
+    SENTINEL_WS="${PROJECT_ROOT}/workspaces/.verify-sentinel-$$"
+    mkdir -p "$SENTINEL_WS"
+    set +e
+    NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$SENTINEL_WS" bash -- -lc '
+        pkill -9 -f "canary_mon[i]tor" 2>/dev/null
+        sleep 1
+        if pgrep -f "canary_mon[i]tor" >/dev/null 2>&1; then
+            echo "[drill] inline monitor killed; a sentinel monitor survives (root)"
+        else
+            echo "[drill] NO monitor is left alive - the sentinel is missing"
+        fi
+        cat /workspace/.secrets/credentials > /dev/null 2>&1
+        sleep 20
+        echo "[drill] STILL ALIVE - THE SENTINEL FAILED"' 2>&1 \
+        | grep -E '^\[drill\]|SECURITY BREACH|mode=sentinel' | sed 's/^/  /'
+    phase_d=${PIPESTATUS[0]}
+    set -e
+    rmdir "${SENTINEL_WS}/.secrets" 2>/dev/null || true
+    rm -rf "$SENTINEL_WS" 2>/dev/null || true
+fi
+
+printf '\n'
+if [ "$phase_d" -eq 99 ]; then
+    good "phase D: the sentinel contained a breach after the inline monitor was killed"
+else
+    bad "phase D: expected exit 99, got ${phase_d} - an agent that disarms the inline"
+    bad "         monitor is not contained by the out-of-band sentinel"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
 fi
 
 # =============================================================================

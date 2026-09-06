@@ -145,6 +145,7 @@ services:
       WARDEN_WORKSPACE: /workspace
       WARDEN_CANARY_ACTION: kill
       WARDEN_REQUIRE_PROXY: "1"
+      WARDEN_EXPECT_SENTINEL: "1"
       WARDEN_STRICT: "1"
     mem_limit: ${WARDEN_MEMORY:-4g}
     cpus: ${WARDEN_CPUS:-2}
@@ -243,7 +244,9 @@ services:
       - --action=kill
       - --target-uid=1001
       - --run-dir=/tmp/warden
-      - --wait-for-canaries=30
+      - --wait-for-canaries=45
+      - --wait-for-marker=/workspace/.secrets/.warden-seeded
+      - --armed-marker=/workspace/.secrets/.warden-sentinel-armed
       - --canaries=/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault
     logging:
       driver: json-file

@@ -88,7 +88,10 @@ load_env_file() {
                 if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
                 ;;
         esac
-    done < <(grep -E '^[A-Z_]+=' "$ENV_FILE" 2>/dev/null || true)
+    # Only WARDEN_* lines are read. Matching '^[A-Z_]+=' would pull every API
+    # key in .env through this shell's variables, which contradicts the promise
+    # at the top of this file - the daemon gets them straight from --env-file.
+    done < <(grep -E '^WARDEN_[A-Z_]+=' "$ENV_FILE" 2>/dev/null || true)
 }
 
 docker_available() {
@@ -391,7 +394,9 @@ start_sentinel() {
         "$AGENT_IMAGE" \
         /opt/warden/canary_monitor.py \
             --mode=sentinel --action=kill --target-uid=1001 \
-            --run-dir=/tmp/warden --wait-for-canaries=30 \
+            --run-dir=/tmp/warden --wait-for-canaries=45 \
+            --wait-for-marker=/workspace/.secrets/.warden-seeded \
+            --armed-marker=/workspace/.secrets/.warden-sentinel-armed \
             --canaries=/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault \
         >/dev/null 2>&1
     then
@@ -474,6 +479,7 @@ cmd_run() {
         -e WARDEN_STRICT=1
         -e WARDEN_REQUIRE_PROXY=1
         -e WARDEN_CANARY_ACTION=kill
+        -e "WARDEN_EXPECT_SENTINEL=${WARDEN_SENTINEL}"
         -e "TERM=${TERM:-xterm-256color}"
     )
 
@@ -501,6 +507,7 @@ cmd_run() {
     if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
 
     local -a agent_cmd=()
+    local line
     while IFS= read -r line; do agent_cmd+=("$line"); done < <(resolve_agent_cmd "$agent")
     agent_cmd+=("$@")
 

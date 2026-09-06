@@ -19,6 +19,9 @@ readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
 readonly WARDEN_PY="/opt/warden/venv/bin/python3"
+readonly VAULT_DIR="${WARDEN_VAULT_DIR:-/workspace/.secrets}"
+readonly SEEDED_MARKER="${VAULT_DIR}/.warden-seeded"
+readonly SENTINEL_MARKER="${VAULT_DIR}/.warden-sentinel-armed"
 
 BREACH_EXIT_CODE="${WARDEN_BREACH_EXIT_CODE:-99}"
 STRICT="${WARDEN_STRICT:-1}"          # 1 = refuse to start on a weak posture
@@ -26,6 +29,8 @@ REQUIRE_PROXY="${WARDEN_REQUIRE_PROXY:-1}"
 PROXY_HOST="${WARDEN_PROXY_HOST:-warden-egress-proxy}"
 PROXY_PORT="${WARDEN_PROXY_PORT:-3128}"
 PROXY_WAIT_SECONDS="${WARDEN_PROXY_WAIT:-20}"
+EXPECT_SENTINEL="${WARDEN_EXPECT_SENTINEL:-0}"
+SENTINEL_WAIT_SECONDS="${WARDEN_SENTINEL_WAIT:-45}"
 
 # --- logging -----------------------------------------------------------------
 _ts()   { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
@@ -196,14 +201,20 @@ CANARY
 seed_canaries() {
     local seeded=0 path
     local IFS=':'
+    set -f            # canary paths are split on ":", never glob-expanded
     for path in ${WARDEN_CANARY_FILES:-}; do
         [ -z "$path" ] && continue
         if seed_canary_file "$path"; then
             seeded=$((seeded + 1))
         fi
     done
+    set +f
     unset IFS
     log "canary tokens      : ${seeded} seeded"
+
+    # Tell the out-of-band sentinel that every canary is in place. It waits
+    # for this before arming, so it can never trip on our own seeding writes.
+    : > "$SEEDED_MARKER" 2>/dev/null || true
 
     # Keep the canaries out of the user's git index without touching their
     # tracked .gitignore. .git/info/exclude is local-only and never committed.
@@ -331,6 +342,34 @@ ${PROXY_WAIT_SECONDS}s. Failing closed. Start it with: make up"
     warn "egress proxy unreachable; WARDEN_REQUIRE_PROXY=0 so continuing offline"
 }
 
+# ==============================================================================
+# 4b. Sentinel handshake
+# -----------------------------------------------------------------------------
+# The sentinel starts in its own container and takes a few seconds to attach.
+# Launching the agent before it is armed leaves a window in which an agent that
+# kills the inline monitor is watched by nothing at all - which is precisely
+# the scenario the sentinel exists to cover. So we wait for it to say it is
+# live. Nothing of the agent has run at this point, so the marker cannot have
+# been forged.
+# ==============================================================================
+wait_for_sentinel() {
+    [ "$EXPECT_SENTINEL" = "1" ] || return 0
+    local waited=0
+    while [ "$waited" -lt "$SENTINEL_WAIT_SECONDS" ]; do
+        if [ -f "$SENTINEL_MARKER" ]; then
+            log "canary sentinel    : armed out-of-band ($(cat "$SENTINEL_MARKER" 2>/dev/null | tr -d "
+") path(s))"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    warn "the out-of-band sentinel did not arm within ${SENTINEL_WAIT_SECONDS}s."
+    warn "  continuing with the in-container tripwire only - capability dropping,"
+    warn "  mount scope and the egress allowlist are unaffected."
+    return 0
+}
+
 # =============================================================================
 # 5. Banner
 # =============================================================================
@@ -372,12 +411,16 @@ trap on_breach_signal USR1
 # =============================================================================
 mkdir -p "$RUN_DIR" 2>/dev/null || true
 rm -f "$BREACH_FLAG" "${RUN_DIR}/armed" 2>/dev/null || true
+# Compose reuses one named vault across runs, so a marker from a previous
+# session would let the sentinel arm mid-seed. Clear both before anything else.
+rm -f "$SEEDED_MARKER" "$SENTINEL_MARKER" 2>/dev/null || true
 
 banner
 posture_check
 seed_canaries
 start_monitor || true
 check_egress
+wait_for_sentinel
 
 if [ "$#" -eq 0 ]; then
     set -- bash -l

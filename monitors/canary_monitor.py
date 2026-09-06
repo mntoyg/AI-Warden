@@ -391,6 +391,7 @@ class CanaryMonitor:
         run_dir: Path,
         target_uid: Optional[int],
         signal_pid1: bool,
+        armed_marker: str = "",
     ) -> None:
         self.canaries = [os.path.abspath(p) for p in canaries if p]
         self.mode = mode
@@ -398,6 +399,7 @@ class CanaryMonitor:
         self.run_dir = run_dir
         self.target_uid = target_uid
         self.signal_pid1 = signal_pid1
+        self.armed_marker = armed_marker
         self.self_pid = os.getpid()
         self.inotify = Inotify()
         self.wd_files: Dict[int, str] = {}
@@ -508,6 +510,16 @@ class CanaryMonitor:
             (self.run_dir / "armed").write_text(f"{armed}\n")
         except OSError:
             pass
+
+        # The out-of-band sentinel publishes readiness into the shared vault so
+        # the agent's entrypoint can wait for it. Without this the sentinel
+        # armed ~10s after the agent was already running, leaving a window in
+        # which an agent that killed the inline monitor was watched by nothing.
+        if self.armed_marker:
+            try:
+                Path(self.armed_marker).write_text(f"{armed}\n")
+            except OSError as exc:
+                log(f"could not publish the armed marker: {exc}")
 
         while self._running:
             try:
@@ -655,6 +667,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="seconds to wait for at least one canary to appear before arming",
     )
     parser.add_argument(
+        "--wait-for-marker",
+        default="",
+        help="wait for this file to appear before arming (the entrypoint "
+             "creates it once canary seeding is complete)",
+    )
+    parser.add_argument(
+        "--armed-marker",
+        default="",
+        help="create this file once the watches are established, so the "
+             "entrypoint can hold the agent back until this monitor is live",
+    )
+    parser.add_argument(
         "--quiesce",
         type=float,
         default=-1.0,
@@ -671,6 +695,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not canaries:
         log("FATAL: no canary paths configured")
         return 78
+
+    # Prefer an explicit handshake over a timing heuristic when one is offered.
+    if args.wait_for_marker:
+        marker_deadline = time.time() + max(args.wait_for_canaries, 1.0)
+        while time.time() < marker_deadline and not os.path.exists(args.wait_for_marker):
+            time.sleep(0.1)
+        if os.path.exists(args.wait_for_marker):
+            log(f"seeding handshake received ({args.wait_for_marker})")
+        else:
+            log(f"WARNING: {args.wait_for_marker} never appeared; arming anyway")
 
     # Wait for the entrypoint to finish seeding before arming.
     #
@@ -705,7 +739,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # Inline we are the agent's UID, so the same filter applies.
         target_uid=args.target_uid,
         # Only the in-container monitor can meaningfully signal PID 1.
-        signal_pid1=(args.mode == "inline"),
+        # Both modes signal PID 1. The sentinel shares the agent's PID
+        # namespace, so PID 1 there IS the agent's warden-entrypoint, and it
+        # holds CAP_KILL. Without this the sentinel would kill the agent's
+        # processes and the container would exit with the agent's own status -
+        # silently breaking the "99 means breach" contract at exactly the
+        # moment the second layer is the one doing its job.
+        signal_pid1=True,
+        armed_marker=args.armed_marker,
     )
     return monitor.run()
 
