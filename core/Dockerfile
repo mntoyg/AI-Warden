@@ -137,12 +137,17 @@ RUN set -eux; \
 # 5. Warden supervisor runtime
 #
 #    The tripwire imports nothing outside the standard library, so this venv
-#    installs no packages. It exists for isolation: the agent can `pip install
-#    --user`, and a venv built without system site-packages gives the monitor an
-#    interpreter whose import path the agent cannot reach into.
+#    installs no packages - and is built --without-pip so it does not ship a
+#    package manager either. That removes the bundled pip/setuptools (which
+#    were the only CVE-carrying components the warden itself owned) and leaves
+#    the supervisor runtime with nothing to install anything with.
+#
+#    It exists for isolation: the agent can `pip install --user`, and a venv
+#    built without system site-packages gives the monitor an interpreter whose
+#    import path the agent cannot reach into.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
-    python3 -m venv /opt/warden/venv; \
+    python3 -m venv --without-pip /opt/warden/venv; \
     /opt/warden/venv/bin/python3 -c 'import ctypes, select, struct; print("warden runtime ok")'
 
 # -----------------------------------------------------------------------------

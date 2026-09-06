@@ -45,6 +45,7 @@ import ctypes.util
 import errno
 import json
 import os
+import re
 import select
 import signal
 import struct
@@ -283,8 +284,9 @@ def iter_processes() -> Iterable[ProcInfo]:
         cmdline = _read(f"/proc/{pid}/cmdline").replace("\x00", " ").strip()
         if not cmdline:
             cmdline = _read(f"/proc/{pid}/comm").strip()
+        cmdline = sanitize(cmdline)
         try:
-            exe = os.readlink(f"/proc/{pid}/exe")
+            exe = sanitize(os.readlink(f"/proc/{pid}/exe"), 256)
         except OSError:
             exe = ""
         yield ProcInfo(pid=pid, uid=uid, cmdline=cmdline, exe=exe)
@@ -356,27 +358,64 @@ def kill_processes(target_uid: Optional[int], self_pid: int) -> List[int]:
     return killed
 
 
+# The agent owns /run/warden (a tmpfs it can write) and /workspace. Anything
+# the monitor writes into those directories must refuse to follow a symlink
+# planted there - in sentinel mode the writer is root, so a redirected write is
+# a real privilege problem rather than the agent overwriting its own files.
+# O_NOFOLLOW fails with ELOOP when the final component is a link.
+def write_no_follow(path: Path, content: str, mode: int = 0o444) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    fd = os.open(str(path), flags, mode)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(content)
+
+
+# /proc/<pid>/cmdline is attacker-controlled: a process can name itself
+# anything, including terminal escape sequences or forged '[canary ...]' lines.
+# This is a forensic record a human reads under pressure, so nothing reaching it
+# gets to move the cursor or fake a log line.
+_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+
+
+def sanitize(text: str, limit: int = 500) -> str:
+    return _CONTROL_CHARS.sub('?', text)[:limit]
+
+
 def write_breach_record(run_dir: Path, record: dict) -> None:
+    body = json.dumps(record, indent=2, sort_keys=True) + "\n"
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
-        flag = run_dir / "breach.flag"
-        with open(flag, "w") as fh:
-            fh.write(json.dumps(record, indent=2, sort_keys=True))
-            fh.write("\n")
-        os.chmod(flag, 0o444)
+        write_no_follow(run_dir / "breach.flag", body)
     except OSError as exc:
         log(f"could not persist breach record: {exc}")
 
     # A second copy in the workspace makes the incident visible on the host
     # even after the container is gone.
-    workspace = os.environ.get("WARDEN_WORKSPACE", "/workspace")
+    #
+    # If the usual path is a symlink, that is itself evidence: the agent tried
+    # to redirect the report onto a file of its choosing. Refusing to follow it
+    # is necessary but not sufficient - dropping the evidence would hand the
+    # attacker exactly what the symlink was for. So the record is written beside
+    # it under a name the agent could not have pre-empted, and the tampering is
+    # recorded in the report itself.
+    workspace = Path(os.environ.get("WARDEN_WORKSPACE", "/workspace"))
+    primary = workspace / "WARDEN_SECURITY_INCIDENT.json"
     try:
-        report = Path(workspace) / "WARDEN_SECURITY_INCIDENT.json"
-        with open(report, "w") as fh:
-            fh.write(json.dumps(record, indent=2, sort_keys=True))
-            fh.write("\n")
-    except OSError:
-        pass
+        write_no_follow(primary, body)
+        return
+    except OSError as exc:
+        alert(
+            f"[SECURITY BREACH] {primary} could not be written ({exc.strerror}); "
+            "it may have been replaced with a symlink to redirect this report"
+        )
+
+    record = dict(record, report_path_tampered=str(primary))
+    fallback = workspace / f"WARDEN_SECURITY_INCIDENT.{os.getpid()}.{int(time.time())}.json"
+    try:
+        write_no_follow(fallback, json.dumps(record, indent=2, sort_keys=True) + "\n")
+        alert(f"[SECURITY BREACH] incident report written to {fallback} instead")
+    except OSError as exc:
+        log(f"could not write the workspace incident report at all: {exc}")
 
 
 # =============================================================================
@@ -507,7 +546,7 @@ class CanaryMonitor:
         # watches are actually in place, instead of guessing with a sleep.
         try:
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            (self.run_dir / "armed").write_text(f"{armed}\n")
+            write_no_follow(self.run_dir / "armed", f"{armed}\n")
         except OSError:
             pass
 
@@ -517,7 +556,7 @@ class CanaryMonitor:
         # which an agent that killed the inline monitor was watched by nothing.
         if self.armed_marker:
             try:
-                Path(self.armed_marker).write_text(f"{armed}\n")
+                write_no_follow(Path(self.armed_marker), f"{armed}\n")
             except OSError as exc:
                 log(f"could not publish the armed marker: {exc}")
 
@@ -592,7 +631,7 @@ class CanaryMonitor:
                     "pid": p.pid,
                     "uid": p.uid,
                     "exe": p.exe,
-                    "cmdline": p.cmdline[:500],
+                    "cmdline": p.cmdline,
                     "open_canaries": p.open_canaries,
                     "evidence": p.evidence,
                 }

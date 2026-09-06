@@ -128,6 +128,14 @@ seed_canary_file() {
 
     mkdir -p "$dir" 2>/dev/null || { warn "cannot create ${dir} for canary"; return 1; }
 
+    # -L before -e: a DANGLING symlink is invisible to -e, so `cat > "$path"`
+    # would follow it and write the canary body to whatever it points at. On a
+    # workspace carried over from an earlier session that link is agent-planted.
+    if [ -L "$path" ]; then
+        warn "skipping canary ${path}: it is a symlink (refusing to write through it)"
+        return 1
+    fi
+
     if [ -e "$path" ]; then
         if grep -qs 'AI-WARDEN-CANARY\|QUktV0FSREVO' "$path"; then
             # A canary from an earlier session is still here. Leave it exactly

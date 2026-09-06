@@ -85,6 +85,66 @@ jobs:
       - name: Host prerequisite check
         run: ./scripts/setup-host.sh --check
 
+      - name: Secret scan (full history)
+        # The canary carries a real PEM header on purpose, so that one finding
+        # is allowlisted by fingerprint in .gitleaksignore - together with the
+        # command to decode it and confirm it is synthetic. Anything else that
+        # fires here is a genuine leak.
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --redact --no-banner
+
+  # ===========================================================================
+  vulnerabilities:
+    name: Image CVE scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build
+
+      # The gate is deliberately scoped. OS packages, and anything under
+      # /opt/warden, are what this project chose and ships - a HIGH or CRITICAL
+      # there is ours and fails the build.
+      - name: Fail on CVEs in what AI Warden itself ships
+        run: |
+          set -e
+          for img in ai-warden/agent:latest ai-warden/egress-proxy:latest; do
+            echo "--- $img (OS packages)"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image --scanners vuln --pkg-types os \
+              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --quiet "$img"
+          done
+          echo "--- agent image, warden-owned paths"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+            --ignore-unfixed --quiet --format json ai-warden/agent:latest > trivy.json
+          python3 -c '
+          import json, sys
+          d = json.load(open("trivy.json"))
+          ours = [v for r in d.get("Results", [])
+                  for v in (r.get("Vulnerabilities") or [])
+                  if "/opt/warden/" in (v.get("PkgPath") or "")]
+          for v in ours:
+              print("::error::%s in %s (%s)" % (v["VulnerabilityID"], v["PkgName"], v.get("PkgPath")))
+          print("warden-owned CVEs:", len(ours))
+          sys.exit(1 if ours else 0)'
+
+      # The agent CLIs bring their own dependency trees. A CVE in litellm, or in
+      # npm's bundled tar, does not weaken the sandbox: the threat model already
+      # assumes arbitrary code execution as uid 1001 inside the container, and
+      # containment comes from the capability set, the mount scope and the
+      # egress allowlist - none of which those packages can influence. Reported
+      # so it stays visible, not gated, because we do not control those trees.
+      - name: Report CVEs in the bundled agents (informational)
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image --scanners vuln --severity HIGH,CRITICAL \
+            --ignore-unfixed --quiet ai-warden/agent:latest || true
+
   # ===========================================================================
   integration:
     name: Isolation drills (real ext4)

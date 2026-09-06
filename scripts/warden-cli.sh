@@ -149,14 +149,20 @@ assert_safe_mount() {
     local real; real="$(cd "$abs" && pwd -P)"
     local home; home="$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || echo '/nonexistent')"
 
-    # 1. Filesystem roots and drive roots.
+    # 1. Filesystem roots, system paths, and anything holding every user's data.
+    #    /home and /Users are listed by name: $HOME is caught below, but mounting
+    #    their parent would hand the agent every account on the machine.
     case "$real" in
-        /|/root|/etc|/usr|/var|/boot|/dev|/proc|/sys|/bin|/sbin|/lib|/opt)
+        /|/root|/etc|/usr|/var|/boot|/dev|/proc|/sys|/bin|/sbin|/lib|/lib64|/opt|/srv)
             die "refusing to mount system path: ${real}" ;;
-        /[a-z]|/[a-z]/)
+        /home|/home/|/Users|/Users/|/media|/mnt|/mnt/)
+            die "refusing to mount a shared parent of user data: ${real}" ;;
+        /[a-z]|/[a-z]/|/[A-Z]|/[A-Z]/)
             die "refusing to mount a whole drive: ${real}" ;;
-        /c|/c/|/d|/d/|/mnt/c|/mnt/c/)
-            die "refusing to mount a whole Windows drive: ${real}" ;;
+        /mnt/[a-z]|/mnt/[a-z]/|/mnt/[A-Z]|/mnt/[A-Z]/|/media/*/)
+            die "refusing to mount a whole mounted drive: ${real}" ;;
+        /cygdrive/*/)
+            die "refusing to mount a whole drive: ${real}" ;;
     esac
 
     # 2. The user's home directory itself (a project *inside* it is fine).

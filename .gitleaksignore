@@ -1,0 +1,22 @@
+# =============================================================================
+#  gitleaks allowlist
+# -----------------------------------------------------------------------------
+#  One finding, and it is a false positive by construction.
+#
+#  core/entrypoint.sh seeds a honeypot canary that has to LOOK like an SSH
+#  private key, so it carries a real "-----BEGIN OPENSSH PRIVATE KEY-----"
+#  header. The body is base64 and decodes to:
+#
+#      AI-WARDEN-CANARY - synthetic honeypot. Not a real key. Reading this file
+#      trips the AI Warden intrusion detector and terminates the sandbox.
+#
+#  Verify it yourself rather than taking this file's word for it:
+#      sed -n '/BEGIN OPENSSH/,/END OPENSSH/p' core/entrypoint.sh \
+#        | grep -v '^---' | tr -d '\n' | base64 -d
+#
+#  Every other canary value is deliberately built so scanners do NOT fire:
+#  provider prefixes are kept for realism (AKIA, sk_live_, ghp_, sk-ant-) but
+#  each is broken with a character that provider's charset forbids. Only the
+#  PEM header cannot be broken that way without making the decoy useless.
+# =============================================================================
+5eef14937c17413d5405d04e8c5370e99db8f107:core/entrypoint.sh:private-key:159
