@@ -1,0 +1,165 @@
+// =============================================================================
+//  AI Warden - Dev Container specification (Cursor / VS Code)
+// -----------------------------------------------------------------------------
+//  HOW TO USE
+//    1. Build the warden images once, from the AI Warden repo:
+//           make build          (or ./scripts/warden-cli.sh build)
+//    2. Start the egress filter:
+//           make up
+//    3. Copy this file into the project you want to work on:
+//           mkdir -p /path/to/your-project/.devcontainer
+//           cp devcontainer/devcontainer.json /path/to/your-project/.devcontainer/
+//    4. In Cursor or VS Code: "Reopen in Container".
+//
+//  WHAT YOU GET
+//    The editor's terminal, its extensions and any agent you launch from it all
+//    run inside the same hardened sandbox that `warden-cli.sh run` produces:
+//    uid 1001, every capability dropped, no privilege escalation, only this
+//    project folder mounted, and no route to the internet except the allowlist
+//    proxy. Cursor's own agent, Claude Code, Aider and Codex are all contained
+//    by the same rules.
+//
+//  This file is JSONC - comments are part of the format and are intentional.
+// =============================================================================
+{
+  "name": "AI Warden Sandbox",
+
+  // ---------------------------------------------------------------------------
+  // Use the prebuilt warden image. Building from core/Dockerfile here would only
+  // work inside the AI Warden repo itself; referencing the image by tag lets
+  // this file be dropped into any project unchanged.
+  //
+  // If you would rather build per project, replace "image" with:
+  //   "build": { "dockerfile": "../core/Dockerfile", "context": ".." }
+  // ---------------------------------------------------------------------------
+  "image": "ai-warden/agent:latest",
+
+  // ---------------------------------------------------------------------------
+  // THE ISOLATION CONTRACT
+  // These flags are the whole point of AI Warden. Removing any one of them
+  // silently downgrades the sandbox, and the entrypoint will refuse to start
+  // (exit 78) rather than run an agent under a weakened posture.
+  // ---------------------------------------------------------------------------
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--security-opt", "no-new-privileges:true",
+
+    // Internal network: declared `internal: true`, so there is no gateway
+    // route out. The only reachable destination is warden-egress-proxy:3128.
+    "--network=warden_internal",
+
+    "--hostname=warden-sandbox",
+    "--user=1001:1001",
+
+    // Resource ceilings: a runaway agent cannot exhaust the host.
+    "--memory=4g",
+    "--memory-swap=4g",
+    "--cpus=2",
+    "--pids-limit=512",
+    "--ulimit", "nofile=8192:8192",
+
+    // Writable scratch for the canary tripwire's state, owned by ai_user.
+    "--tmpfs", "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001",
+
+    "--label", "ai.warden.role=agent-sandbox"
+  ],
+
+  // ---------------------------------------------------------------------------
+  // Mount ONLY the opened project. Nothing else from the host is visible:
+  // no $HOME, no ~/.ssh, no ~/.aws, no Docker socket, no parent directory.
+  // ---------------------------------------------------------------------------
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace",
+
+  // Deliberately empty. Do NOT add SSH agent forwarding, a Docker socket bind,
+  // or a ~/.aws mount here - each one hands the agent exactly what this sandbox
+  // exists to withhold.
+  "mounts": [],
+
+  "remoteUser": "ai_user",
+  "containerUser": "ai_user",
+  "updateRemoteUserUID": false,
+
+  // Keep the image ENTRYPOINT (warden-entrypoint) in charge: it seeds the
+  // canary tokens, arms the tripwire, verifies the launch posture and fails
+  // closed if the egress proxy is unreachable.
+  "overrideCommand": true,
+  "shutdownAction": "stopContainer",
+
+  // ---------------------------------------------------------------------------
+  // Egress: every client library inside the container is pointed at the proxy.
+  // ---------------------------------------------------------------------------
+  "containerEnv": {
+    "WARDEN_WORKSPACE": "/workspace",
+    "WARDEN_STRICT": "1",
+    "WARDEN_REQUIRE_PROXY": "1",
+    "WARDEN_CANARY_ACTION": "kill",
+    "HTTP_PROXY": "http://warden-egress-proxy:3128",
+    "HTTPS_PROXY": "http://warden-egress-proxy:3128",
+    "http_proxy": "http://warden-egress-proxy:3128",
+    "https_proxy": "http://warden-egress-proxy:3128",
+    "NO_PROXY": "localhost,127.0.0.1,::1,warden-egress-proxy",
+    "no_proxy": "localhost,127.0.0.1,::1,warden-egress-proxy"
+  },
+
+  // API keys are taken from YOUR shell at attach time. They are never written
+  // into the image, never committed, and disappear with the container.
+  "remoteEnv": {
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}",
+    "PERPLEXITY_API_KEY": "${localEnv:PERPLEXITY_API_KEY}",
+    "GEMINI_API_KEY": "${localEnv:GEMINI_API_KEY}",
+    "GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+  },
+
+  // ---------------------------------------------------------------------------
+  // Make sure the warden networks exist before the container is created.
+  // Runs on the HOST. Harmless if they already exist.
+  // ---------------------------------------------------------------------------
+  "initializeCommand": "docker network inspect warden_internal >/dev/null 2>&1 || docker network create --driver bridge --internal --subnet 172.31.240.0/24 warden_internal >/dev/null; docker network inspect warden_external >/dev/null 2>&1 || docker network create --driver bridge warden_external >/dev/null; docker ps --filter name=warden-egress-proxy --filter status=running --format '{{.Names}}' | grep -q warden-egress-proxy || echo 'AI Warden: egress proxy is not running - start it with: make up'",
+
+  // Print the effective security posture into the dev container log, so a
+  // weakened configuration is visible immediately rather than discovered later.
+  "postAttachCommand": "printf '\\nAI Warden posture\\n  user      : %s (uid %s)\\n  CapBnd    : %s\\n  NoNewPrivs: %s\\n  proxy     : %s\\n\\n' \"$(id -un)\" \"$(id -u)\" \"$(awk '/^CapBnd:/{print $2}' /proc/self/status)\" \"$(awk '/^NoNewPrivs:/{print $2}' /proc/self/status)\" \"${HTTPS_PROXY:-none}\"",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "dbaeumer.vscode-eslint",
+        "timonwong.shellcheck"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": { "path": "/bin/bash", "args": ["-l"] }
+        },
+        // Keep the editor's own indexer away from the honeypot tokens. Reading
+        // one of them terminates the container, and a background file watcher
+        // has no business opening a file called .env.vault.
+        "files.exclude": {
+          "**/.secrets.canary": true,
+          "**/secrets.json": true,
+          "**/.env.vault": true
+        },
+        "files.watcherExclude": {
+          "**/.secrets.canary": true,
+          "**/secrets.json": true,
+          "**/.env.vault": true,
+          "**/node_modules/**": true
+        },
+        "search.exclude": {
+          "**/.secrets.canary": true,
+          "**/secrets.json": true,
+          "**/.env.vault": true
+        }
+      }
+    }
+  },
+
+  // No dev container Features: each one runs an install script at build time
+  // with network access, which is exactly the kind of unreviewed code this
+  // sandbox exists to keep out. Add tooling to core/Dockerfile instead, where
+  // it is reviewed once and pinned.
+  "features": {}
+}
