@@ -1,0 +1,87 @@
+# =============================================================================
+#  AI Warden - Egress Allowlist
+# -----------------------------------------------------------------------------
+#  Squid `dstdomain` ACL entries. This is the COMPLETE list of destinations an
+#  agent may reach. Anything absent from this file is denied with 403.
+#
+#  SYNTAX
+#    example.com     exact host only
+#    .example.com    example.com and every subdomain
+#
+#  RULES FOR EDITING
+#    * Add the narrowest entry that works. Prefer `api.vendor.com` over
+#      `.vendor.com`; prefer `.vendor.com` over adding a CDN wildcard.
+#    * Never add a general-purpose host that can relay arbitrary traffic
+#      (URL shorteners, pastebins, webhook catchers, tunnels, raw object
+#      storage, Google Drive, Discord/Slack webhooks). Those turn an
+#      allowlisted proxy into an exfiltration channel.
+#    * Every addition widens the blast radius of a compromised agent.
+#      Review this file the way you would review a firewall change.
+#
+#  Reload after editing:  make reload-proxy
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Model providers (control plane for the agents themselves)
+# ---------------------------------------------------------------------------
+api.anthropic.com
+statsig.anthropic.com
+api.openai.com
+chatgpt.com
+auth.openai.com
+.perplexity.ai
+generativelanguage.googleapis.com
+
+# ---------------------------------------------------------------------------
+# Source control
+# ---------------------------------------------------------------------------
+github.com
+api.github.com
+codeload.github.com
+.githubusercontent.com
+objects.githubusercontent.com
+ghcr.io
+pkg-containers.githubusercontent.com
+
+# ---------------------------------------------------------------------------
+# JavaScript / Node ecosystem
+# ---------------------------------------------------------------------------
+registry.npmjs.org
+.npmjs.org
+registry.yarnpkg.com
+.yarnpkg.com
+
+# ---------------------------------------------------------------------------
+# Python ecosystem
+# ---------------------------------------------------------------------------
+pypi.org
+files.pythonhosted.org
+.pythonhosted.org
+
+# ---------------------------------------------------------------------------
+# Debian base image updates (needed only if the agent installs OS packages;
+# comment these out for a fully frozen sandbox)
+# ---------------------------------------------------------------------------
+deb.debian.org
+security.debian.org
+deb.nodesource.com
+
+# ---------------------------------------------------------------------------
+# Certificate validation (OCSP / CRL). Without these, TLS clients that do hard
+# revocation checking will stall.
+# ---------------------------------------------------------------------------
+.digicert.com
+.letsencrypt.org
+.sectigo.com
+
+# ===========================================================================
+#  DELIBERATELY NOT ALLOWLISTED - do not "just add these"
+# ---------------------------------------------------------------------------
+#   *.ngrok.io, *.trycloudflare.com, localtunnel  -> reverse tunnels
+#   pastebin.com, gist raw endpoints, 0x0.st      -> drop sites
+#   webhook.site, requestbin, hookb.in            -> data collectors
+#   discord.com/api/webhooks, hooks.slack.com     -> data collectors
+#   transfer.sh, file.io, anonfiles               -> file exfiltration
+#   *.amazonaws.com (bare S3), storage.googleapis -> arbitrary bucket writes
+#   raw IP literals of any kind                   -> blocked by squid.conf
+# ===========================================================================

@@ -1,0 +1,191 @@
+# =============================================================================
+#  AI Warden - Zero-Trust sandbox topology
+# -----------------------------------------------------------------------------
+#  NETWORK MODEL
+#
+#      internet
+#         |
+#    [ warden_external ]                (normal bridge)
+#         |
+#    warden-egress-proxy   <- squid, deny-by-default allowlist
+#         |
+#    [ warden_internal ]                (internal: true -> NO route out)
+#         |
+#    warden-agent-sandbox  <- the AI agent lives here, cap_drop ALL, uid 1001
+#         ^
+#         | shared PID namespace
+#    warden-canary-sentinel <- uid 1002, CAP_KILL only, kills the agent on breach
+#
+#  The sandbox is attached ONLY to warden_internal. Because that network is
+#  declared `internal: true`, Docker installs no gateway route for it: the
+#  agent physically cannot open a socket to the internet. The proxy is the one
+#  and only path out, and it refuses everything not on the allowlist.
+#
+#  USAGE
+#    docker compose up -d warden-egress-proxy      # long-lived filter
+#    ./scripts/warden-cli.sh run ./myproject claude
+#
+#  Or, fully via compose:
+#    WARDEN_WORKSPACE_HOST=./workspaces/default \
+#      docker compose --profile agent up --build
+# =============================================================================
+
+name: ai-warden
+
+networks:
+  warden_internal:
+    name: warden_internal
+    driver: bridge
+    internal: true            # <-- the single most important line in this file
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+  warden_external:
+    name: warden_external
+    driver: bridge
+
+services:
+  # ===========================================================================
+  #  1. Egress allowlist proxy - the only way out
+  # ===========================================================================
+  warden-egress-proxy:
+    build:
+      context: .
+      dockerfile: core/network/Dockerfile
+    image: ai-warden/egress-proxy:latest
+    container_name: warden-egress-proxy
+    hostname: warden-egress-proxy
+    restart: unless-stopped
+    networks:
+      warden_internal:
+        aliases: [warden-egress-proxy]
+      warden_external: {}
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /run:rw,noexec,nosuid,size=8m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /var/spool/squid:rw,noexec,nosuid,size=32m
+      - /var/log/squid:rw,noexec,nosuid,size=16m
+    mem_limit: 512m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3128"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    labels:
+      ai.warden.role: egress-proxy
+
+  # ===========================================================================
+  #  2. Agent sandbox  (profile: agent)
+  #     Prefer ./scripts/warden-cli.sh run - it mounts one project folder and
+  #     nothing else. This service exists for compose-native workflows.
+  # ===========================================================================
+  warden-agent-sandbox:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    image: ai-warden/agent:latest
+    container_name: warden-agent-sandbox
+    hostname: warden-sandbox
+    profiles: [agent]
+    depends_on:
+      warden-egress-proxy:
+        condition: service_healthy
+    networks:
+      warden_internal: {}       # internal only - no external network here
+    user: "1001:1001"
+    working_dir: /workspace
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Bind ONLY the project under test. Never mount $HOME, / or a parent dir.
+    volumes:
+      - type: bind
+        source: ${WARDEN_WORKSPACE_HOST:-./workspaces/default}
+        target: /workspace
+        bind:
+          create_host_path: true
+    tmpfs:
+      - /run/warden:rw,nosuid,size=16m,uid=1001,gid=1001
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WARDEN_WORKSPACE: /workspace
+      WARDEN_CANARY_ACTION: kill
+      WARDEN_REQUIRE_PROXY: "1"
+      WARDEN_STRICT: "1"
+    mem_limit: ${WARDEN_MEMORY:-4g}
+    cpus: ${WARDEN_CPUS:-2}
+    pids_limit: ${WARDEN_PIDS_LIMIT:-512}
+    ulimits:
+      nofile: 8192
+      nproc: 512
+    stdin_open: true
+    tty: true
+    init: false                 # entrypoint must be PID 1 to own the shutdown
+    command: ["bash", "-l"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    labels:
+      ai.warden.role: agent-sandbox
+
+  # ===========================================================================
+  #  3. Out-of-band canary sentinel  (profile: agent)
+  #     Different UID, no network at all, CAP_KILL only, shares the sandbox's
+  #     PID namespace. The agent cannot signal it, cannot ptrace it and cannot
+  #     hide from it - so the tripwire survives an agent that tries to disarm
+  #     the in-container monitor.
+  # ===========================================================================
+  warden-canary-sentinel:
+    image: ai-warden/agent:latest
+    container_name: warden-canary-sentinel
+    profiles: [agent]
+    depends_on:
+      - warden-agent-sandbox
+    network_mode: none
+    pid: "service:warden-agent-sandbox"
+    user: "1002:1002"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [KILL]             # the ONLY capability granted anywhere here
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: ${WARDEN_WORKSPACE_HOST:-./workspaces/default}
+        target: /workspace
+    tmpfs:
+      - /tmp:rw,nosuid,size=16m
+    mem_limit: 256m
+    pids_limit: 64
+    entrypoint:
+      - /opt/warden/venv/bin/python3
+      - /opt/warden/canary_monitor.py
+      - --mode=sentinel
+      - --action=kill
+      - --target-uid=1001
+      - --run-dir=/tmp/warden
+      - --wait-for-canaries=30
+      - --canaries=/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      ai.warden.role: canary-sentinel
