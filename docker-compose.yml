@@ -236,8 +236,10 @@ services:
       - /opt/warden/venv/bin/python3
       - /opt/warden/canary_monitor.py
       - --mode=sentinel
-      # Audit-only alternative: set --action=log and user "1002:1002" with
-      # cap_drop [ALL] and no cap_add - logging a breach needs no privileges.
+      # Audit-only alternative: --action=log with user "1002:1002", cap_drop
+      # [ALL] and no cap_add - recording a breach needs no privileges. Keep
+      # group_add ["1001"] either way: without it inotify_add_watch() cannot
+      # even open the canaries to watch them.
       - --action=kill
       - --target-uid=1001
       - --run-dir=/tmp/warden

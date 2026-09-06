@@ -63,14 +63,15 @@ allowlist ควบคุมได้แค่ "คุยกับใคร" ไ
 **ถ้ายอมรับข้อแลกนี้ไม่ได้:** เพิ่ม `ssl_bump` ใน `squid.conf` และ inject CA ใน Dockerfile
 แต่ต้องยอมรับว่า proxy กลายเป็นจุดรวมความลับ
 
-### 3.2 inotify ผ่าน ctypes แทน watchdog อย่างเดียว
+### 3.2 inotify ผ่าน ctypes ไม่พึ่ง library ภายนอกเลย
 
 **เลือก:** เรียก `inotify_init1` / `inotify_add_watch` ตรง ๆ ผ่าน `ctypes`
 
 **เหตุผล:** เป้าหมายคือจับ *การอ่าน* ซึ่งให้ `IN_OPEN` / `IN_ACCESS`
 แต่ inotify emitter ของ `watchdog` subscribe แค่ create / modify / delete / move
-`cat secrets.json` จึงมองไม่เห็นเลยถ้าใช้ watchdog อย่างเดียว
-`watchdog` ยังถูกติดตั้งไว้และใช้เป็น detector สำรอง แต่ไม่ใช่ทางหลัก
+`cat secrets.json` จึงมองไม่เห็นเลย — `watchdog` แสดงความต้องการหลักของเครื่องมือนี้ไม่ได้
+ผลพลอยได้คือ tripwire ไม่มี dependency นอก standard library เลยสักตัว
+ซึ่งสำคัญเป็นพิเศษกับ component ที่มีหน้าที่เฝ้าระวัง
 
 **ทางเลือกที่ดีกว่าแต่ใช้ไม่ได้:** `fanotify` ระบุ pid ที่เปิดไฟล์ได้แม่นยำในตัว
 แต่ต้อง `CAP_SYS_ADMIN` ซึ่งขัดกับ T2 โดยตรง — จึงสืบย้อนจาก `/proc/*/fd` แทน

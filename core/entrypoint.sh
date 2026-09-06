@@ -383,6 +383,17 @@ if [ "$#" -eq 0 ]; then
     set -- bash -l
 fi
 
+# A missing agent should say how to add it, not just "command not found".
+# claude, codex and aider ship in the image; hermes and anything else are
+# opt-in through the EXTRA_NPM_PACKAGES / EXTRA_PIP_PACKAGES build args.
+if ! command -v "$1" >/dev/null 2>&1 && [ ! -x "$1" ]; then
+    warn "agent '$1' is not installed in this image."
+    warn "  bundled agents : claude, codex, aider, bash"
+    warn "  add another    : rebuild with EXTRA_NPM_PACKAGES / EXTRA_PIP_PACKAGES, e.g."
+    warn "    docker build -f core/Dockerfile --build-arg EXTRA_NPM_PACKAGES=<pkg> -t ai-warden/agent:latest ."
+    fatal "refusing to start with an agent that does not exist"
+fi
+
 log "launching agent    : $*"
 log "-----------------------------------------------------------------"
 

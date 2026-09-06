@@ -122,12 +122,16 @@ RUN set -eux; \
     ln -sf /opt/agents/venv/bin/aider /usr/local/bin/aider
 
 # -----------------------------------------------------------------------------
-# 5. Warden supervisor venv - kept separate from anything the agent installs
+# 5. Warden supervisor runtime
+#
+#    The tripwire imports nothing outside the standard library, so this venv
+#    installs no packages. It exists for isolation: the agent can `pip install
+#    --user`, and a venv built without system site-packages gives the monitor an
+#    interpreter whose import path the agent cannot reach into.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     python3 -m venv /opt/warden/venv; \
-    /opt/warden/venv/bin/pip install --no-cache-dir --upgrade pip; \
-    /opt/warden/venv/bin/pip install --no-cache-dir watchdog
+    /opt/warden/venv/bin/python3 -c 'import ctypes, select, struct; print("warden runtime ok")'
 
 # -----------------------------------------------------------------------------
 # 6. Warden runtime files

@@ -6,17 +6,21 @@
 #  the sandbox the instant an agent process opens, reads, writes, moves or
 #  deletes one of them.
 #
-#  WHY RAW inotify AND NOT watchdog ALONE
-#  --------------------------------------
+#  WHY RAW inotify, AND NO THIRD-PARTY WATCHER
+#  -------------------------------------------
 #  Reading a file produces IN_OPEN / IN_ACCESS. The `watchdog` library's inotify
 #  emitter subscribes to create/modify/delete/move only, so a plain `cat
-#  secrets.json` is invisible to it. AI Warden therefore drives inotify(7)
-#  directly through ctypes and uses watchdog only as a secondary, portable
-#  detector for structural events.
+#  secrets.json` is invisible to it - it cannot express this tool's core
+#  requirement. inotify(7) is therefore driven directly through ctypes, which
+#  also means the tripwire has no dependency outside the standard library.
 #
 #  fanotify would give us per-open process attribution, but it requires
 #  CAP_SYS_ADMIN - which this sandbox deliberately does not have. Attribution
 #  is instead reconstructed best-effort from /proc.
+#
+#  inotify_add_watch() SUCCEEDS on filesystems that never deliver an event
+#  (9p/virtiofs bind mounts on Docker Desktop). Delivery is therefore measured
+#  per directory at arm time - see probe_inotify_delivery().
 #
 #  MODES
 #  -----
@@ -25,10 +29,10 @@
 #              entrypoint exits with WARDEN_BREACH_EXIT_CODE.
 #
 #    sentinel  Runs in a separate container that shares the agent's PID
-#              namespace and holds ONLY CAP_KILL, as a different UID. The agent
-#              cannot signal it, cannot ptrace it and cannot unmount its view of
-#              the workspace, so the tripwire survives an agent that actively
-#              tries to disarm it.
+#              namespace, with no network and CAP_KILL as its only capability.
+#              The agent cannot signal it, ptrace it, or unmount its view of the
+#              canary vault, so the tripwire survives an agent that actively
+#              tries to disarm the inline monitor.
 #
 #  Exit codes:  0 clean shutdown | 99 breach handled | 78 fatal configuration
 # =============================================================================
@@ -58,7 +62,6 @@ IN_ACCESS = 0x00000001
 IN_MODIFY = 0x00000002
 IN_ATTRIB = 0x00000004
 IN_CLOSE_WRITE = 0x00000008
-IN_CLOSE_NOWRITE = 0x00000010
 IN_OPEN = 0x00000020
 IN_MOVED_FROM = 0x00000040
 IN_MOVED_TO = 0x00000080
@@ -137,8 +140,6 @@ class Inotify:
         self._libc.inotify_init1.restype = ctypes.c_int
         self._libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
         self._libc.inotify_add_watch.restype = ctypes.c_int
-        self._libc.inotify_rm_watch.argtypes = [ctypes.c_int, ctypes.c_int]
-        self._libc.inotify_rm_watch.restype = ctypes.c_int
 
         fd = self._libc.inotify_init1(os.O_CLOEXEC | os.O_NONBLOCK)
         if fd < 0:
@@ -152,9 +153,6 @@ class Inotify:
             err = ctypes.get_errno()
             raise OSError(err, f"inotify_add_watch({path}) failed: {os.strerror(err)}")
         return wd
-
-    def rm_watch(self, wd: int) -> None:
-        self._libc.inotify_rm_watch(self.fd, wd)
 
     def read_events(self) -> List[tuple]:
         """Return a list of (wd, mask, cookie, name) tuples."""
@@ -337,7 +335,7 @@ def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> List[ProcInf
 # =============================================================================
 #  Containment
 # =============================================================================
-def kill_processes(target_uid: Optional[int], self_pid: int, dry_run: bool = False) -> List[int]:
+def kill_processes(target_uid: Optional[int], self_pid: int) -> List[int]:
     """SIGKILL every candidate agent process. Never touches PID 1 or self."""
     killed: List[int] = []
 
@@ -347,9 +345,6 @@ def kill_processes(target_uid: Optional[int], self_pid: int, dry_run: bool = Fal
         if proc.pid in (1, self_pid):
             continue
         if target_uid is not None and proc.uid != target_uid:
-            continue
-        if dry_run:
-            killed.append(proc.pid)
             continue
         try:
             os.kill(proc.pid, signal.SIGKILL)
@@ -612,18 +607,6 @@ class CanaryMonitor:
 
 
 # =============================================================================
-#  Optional watchdog cross-check
-# =============================================================================
-def watchdog_available() -> bool:
-    try:
-        import watchdog  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-# =============================================================================
 #  CLI
 # =============================================================================
 def parse_canaries(raw: str) -> List[str]:
@@ -712,11 +695,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if time.time() - newest >= quiesce:
                 break
         time.sleep(0.25)
-
-    log(
-        "watchdog library: "
-        + ("available (secondary detector)" if watchdog_available() else "absent (inotify only)")
-    )
 
     monitor = CanaryMonitor(
         canaries=canaries,

@@ -137,7 +137,18 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `warden-cli.sh verify` | รันชุดทดสอบ isolation ทั้งหมด |
 | `warden-cli.sh doctor` | ตรวจ prerequisite ของโฮสต์ |
 
-`agent` ที่รองรับ: `claude` | `aider` | `codex` | `hermes` | `bash`
+`agent` ที่รองรับ: `claude` | `aider` | `codex` | `bash` — ติดตั้งมาให้ใน image แล้ว
+
+ตัวอื่น (เช่น `hermes`) เพิ่มได้ตอน build แล้วเรียกชื่อได้เลย:
+
+```bash
+docker build -f core/Dockerfile \
+  --build-arg EXTRA_NPM_PACKAGES='<npm-package>' \
+  --build-arg EXTRA_PIP_PACKAGES='<pip-package>' \
+  -t ai-warden/agent:latest .
+```
+
+ถ้าเรียก agent ที่ยังไม่ได้ติดตั้ง entrypoint จะบอกวิธีเพิ่มให้ ไม่ใช่แค่ `command not found`
 
 ส่ง argument ต่อให้ agent ได้ด้วย `--`:
 
@@ -269,11 +280,12 @@ named volume ให้ **inode ชุดเดียวกัน** กับท�
 > การใช้ group permission ธรรมดาคือคำตอบที่ least-privilege กว่าการแจก `CAP_DAC_READ_SEARCH`
 > ซึ่งจะทำให้ sentinel อ่านได้ทุกไฟล์ใน container ตัวเอง
 
-> **ทำไมไม่ใช้ `watchdog` อย่างเดียว**
+> **ทำไมไม่ใช้ `watchdog`**
 > การ *อ่าน* ไฟล์ทำให้เกิด `IN_OPEN` / `IN_ACCESS` แต่ inotify emitter ของ `watchdog`
 > subscribe แค่ create / modify / delete / move เท่านั้น
-> แปลว่า `cat secrets.json` ธรรมดา ๆ **`watchdog` มองไม่เห็น**
-> AI Warden จึงเรียก `inotify(7)` ตรง ๆ ผ่าน `ctypes` และใช้ `watchdog` เป็นตัวสำรองเท่านั้น
+> แปลว่า `cat secrets.json` ธรรมดา ๆ **`watchdog` มองไม่เห็น** — มันแสดงความต้องการหลัก
+> ของเครื่องมือนี้ไม่ได้เลย AI Warden จึงเรียก `inotify(7)` ตรง ๆ ผ่าน `ctypes`
+> ผลพลอยได้คือ tripwire ไม่มี dependency นอก standard library เลยสักตัว
 >
 > ทางที่ดีกว่าคือ `fanotify` เพราะระบุ process ที่เปิดไฟล์ได้แม่นยำ
 > แต่มันต้องการ `CAP_SYS_ADMIN` ซึ่ง sandbox นี้จงใจไม่มี — เราจึงสืบย้อนจาก `/proc` แทน
