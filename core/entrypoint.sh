@@ -123,12 +123,16 @@ seed_canary_file() {
 
     mkdir -p "$dir" 2>/dev/null || { warn "cannot create ${dir} for canary"; return 1; }
 
-    # Never clobber a real user file that happens to sit on a canary path.
-    if [ -e "$path" ] && ! grep -qs 'AI-WARDEN-CANARY\|QUktV0FSREVO' "$path"; then
+    if [ -e "$path" ]; then
+        if grep -qs 'AI-WARDEN-CANARY\|QUktV0FSREVO' "$path"; then
+            # A canary from an earlier session is still here. Leave it exactly
+            # as it is: rewriting it would generate inotify traffic that the
+            # out-of-band sentinel could legitimately read as tampering.
+            return 0
+        fi
         warn "skipping canary ${path}: a real file already exists there"
         return 1
     fi
-    rm -f "$path" 2>/dev/null || true
 
     case "$(basename "$path")" in
         secrets.json)
@@ -218,16 +222,20 @@ seed_canaries() {
     fi
 }
 
+# Canaries are NOT removed on shutdown.
+#
+# Deleting them here would mean the container reads and unlinks watched files
+# while the out-of-band sentinel is still armed in its own container - an
+# IN_OPEN followed by an IN_DELETE_SELF, which is indistinguishable from an
+# agent destroying evidence. The sentinel would correctly report a breach that
+# never happened.
+#
+# Canaries inside the container's own filesystem vanish with the container.
+# The ones in the bind-mounted workspace are cleaned up by warden-cli.sh from
+# the host AFTER the sentinel has been stopped, and are listed in every ignore
+# file plus .git/info/exclude in the meantime.
 cleanup_canaries() {
-    local path
-    local IFS=':'
-    for path in ${WARDEN_CANARY_FILES:-}; do
-        [ -z "$path" ] && continue
-        if [ -f "$path" ] && grep -q 'AI-WARDEN-CANARY\|QUktV0FSREVO' "$path" 2>/dev/null; then
-            rm -f "$path" 2>/dev/null || true
-        fi
-    done
-    unset IFS
+    :
 }
 
 # =============================================================================
@@ -245,13 +253,24 @@ start_monitor() {
         --canaries "${WARDEN_CANARY_FILES:-}" &
     local pid=$!
     echo "$pid" > "$MONITOR_PID_FILE" 2>/dev/null || true
-    # Give inotify a moment to register the watches before the agent starts.
-    sleep 0.4
-    if kill -0 "$pid" 2>/dev/null; then
-        log "canary tripwire    : armed (pid ${pid}, action=${WARDEN_CANARY_ACTION:-kill})"
-        return 0
-    fi
-    warn "canary tripwire failed to start"
+
+    # Hold the agent back until the inotify watches are actually registered.
+    # The monitor publishes ${RUN_DIR}/armed once arm() has returned, so this
+    # is a real handshake rather than a hopeful sleep.
+    local waited=0
+    while [ "$waited" -lt 100 ]; do
+        if [ -f "${RUN_DIR}/armed" ]; then
+            log "canary tripwire    : armed (pid ${pid}, action=${WARDEN_CANARY_ACTION:-kill})"
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            warn "canary tripwire exited before arming"
+            return 1
+        fi
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    warn "canary tripwire did not arm within 10s"
     return 1
 }
 
@@ -351,7 +370,7 @@ trap on_breach_signal USR1
 # MAIN
 # =============================================================================
 mkdir -p "$RUN_DIR" 2>/dev/null || true
-rm -f "$BREACH_FLAG" 2>/dev/null || true
+rm -f "$BREACH_FLAG" "${RUN_DIR}/armed" 2>/dev/null || true
 
 banner
 posture_check

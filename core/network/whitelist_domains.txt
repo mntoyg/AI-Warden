@@ -8,6 +8,10 @@
 #    example.com     exact host only
 #    .example.com    example.com and every subdomain
 #
+#  Squid REJECTS a list that contains both a wildcard and one of its own
+#  subdomains ("'registry.npmjs.org' is a subdomain of '.npmjs.org'") and
+#  refuses to start. Pick one form per zone - and prefer the exact host.
+#
 #  RULES FOR EDITING
 #    * Add the narrowest entry that works. Prefer `api.vendor.com` over
 #      `.vendor.com`; prefer `.vendor.com` over adding a CDN wildcard.
@@ -39,24 +43,19 @@ github.com
 api.github.com
 codeload.github.com
 .githubusercontent.com
-objects.githubusercontent.com
 ghcr.io
-pkg-containers.githubusercontent.com
 
 # ---------------------------------------------------------------------------
 # JavaScript / Node ecosystem
 # ---------------------------------------------------------------------------
 registry.npmjs.org
-.npmjs.org
 registry.yarnpkg.com
-.yarnpkg.com
 
 # ---------------------------------------------------------------------------
 # Python ecosystem
 # ---------------------------------------------------------------------------
 pypi.org
 files.pythonhosted.org
-.pythonhosted.org
 
 # ---------------------------------------------------------------------------
 # Debian base image updates (needed only if the agent installs OS packages;

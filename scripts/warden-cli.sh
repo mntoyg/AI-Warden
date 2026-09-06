@@ -97,10 +97,16 @@ docker_available() {
 }
 
 compose() {
+    # MSYS_NO_PATHCONV is set globally so docker never mangles in-container
+    # paths like /workspace. The flip side is that HOST paths must be converted
+    # explicitly, or Git Bash's /d/... reaches the daemon as D:\d\...
+    local dir file
+    dir="$(host_path "$PROJECT_ROOT")"
+    file="$(host_path "${PROJECT_ROOT}/docker-compose.yml")"
     if docker compose version >/dev/null 2>&1; then
-        docker compose --project-directory "$PROJECT_ROOT" -f "${PROJECT_ROOT}/docker-compose.yml" "$@"
+        docker compose --project-directory "$dir" -f "$file" "$@"
     elif command -v docker-compose >/dev/null 2>&1; then
-        docker-compose --project-directory "$PROJECT_ROOT" -f "${PROJECT_ROOT}/docker-compose.yml" "$@"
+        docker-compose --project-directory "$dir" -f "$file" "$@"
     else
         die "docker compose v2 is required (docker compose version)"
     fi
@@ -182,12 +188,14 @@ container_name_for() {
 # =============================================================================
 cmd_build() {
     docker_available
+    local ctx; ctx="$(host_path "$PROJECT_ROOT")"
+
     info "building egress proxy image (${PROXY_IMAGE})"
-    docker build -f "${PROJECT_ROOT}/core/network/Dockerfile" -t "$PROXY_IMAGE" "$PROJECT_ROOT"
+    docker build -f "$(host_path "${PROJECT_ROOT}/core/network/Dockerfile")" -t "$PROXY_IMAGE" "$ctx"
     ok "egress proxy built"
 
     info "building agent sandbox image (${AGENT_IMAGE}) - this pulls Node, Python and the agent CLIs"
-    docker build -f "${PROJECT_ROOT}/core/Dockerfile" -t "$AGENT_IMAGE" "$PROJECT_ROOT" "$@"
+    docker build -f "$(host_path "${PROJECT_ROOT}/core/Dockerfile")" -t "$AGENT_IMAGE" "$ctx" "$@"
     ok "agent sandbox built"
 
     docker image inspect "$AGENT_IMAGE" --format '{{.Config.User}} {{.Config.WorkingDir}}' >/dev/null
@@ -197,16 +205,32 @@ cmd_build() {
 # =============================================================================
 #  Sub-command: up / down  (the long-lived egress filter)
 # =============================================================================
-ensure_networks() {
-    docker network inspect "$INTERNAL_NET" >/dev/null 2>&1 || {
-        info "creating internal (no-egress) network ${INTERNAL_NET}"
-        docker network create --driver bridge --internal \
-            --subnet 172.31.240.0/24 "$INTERNAL_NET" >/dev/null
-    }
-    docker network inspect "$EXTERNAL_NET" >/dev/null 2>&1 || {
-        info "creating external network ${EXTERNAL_NET}"
-        docker network create --driver bridge "$EXTERNAL_NET" >/dev/null
-    }
+# The networks are created by `docker compose up`, never here.
+#
+# Compose refuses to adopt a network it did not create: an existing
+# warden_internal made with `docker network create` has no
+# com.docker.compose.network label, and compose aborts with "network was found
+# but has incorrect label". So this only validates what is already there.
+assert_networks_sane() {
+    local net internal label
+    for net in "$INTERNAL_NET" "$EXTERNAL_NET"; do
+        docker network inspect "$net" >/dev/null 2>&1 || continue
+        label="$(docker network inspect -f '{{index .Labels "com.docker.compose.network"}}' "$net" 2>/dev/null || true)"
+        if [ -z "$label" ]; then
+            die "network ${net} exists but was not created by compose.
+        Remove it so compose can recreate it correctly:
+            docker network rm ${net}"
+        fi
+    done
+
+    if docker network inspect "$INTERNAL_NET" >/dev/null 2>&1; then
+        internal="$(docker network inspect -f '{{.Internal}}' "$INTERNAL_NET")"
+        if [ "$internal" != "true" ]; then
+            die "network ${INTERNAL_NET} is NOT internal - the sandbox would have
+        direct internet access. Remove it and let compose recreate it:
+            docker network rm ${INTERNAL_NET}"
+        fi
+    fi
 }
 
 proxy_running() {
@@ -215,11 +239,11 @@ proxy_running() {
 
 cmd_up() {
     docker_available
-    ensure_networks
+    assert_networks_sane
     if proxy_running; then
         ok "egress proxy already running"
     else
-        info "starting egress allowlist proxy"
+        info "starting egress allowlist proxy (compose also creates both networks)"
         compose up -d warden-egress-proxy
     fi
 
@@ -306,6 +330,19 @@ start_sentinel() {
 
 stop_sentinel() {
     docker rm -f "${1}-sentinel" >/dev/null 2>&1 || true
+}
+
+# Canaries in the bind-mounted workspace are removed from the HOST, after both
+# the container and its sentinel are gone. Doing it inside the container would
+# mean reading and unlinking watched files while the sentinel is still armed,
+# which is exactly the pattern the sentinel exists to flag.
+cleanup_workspace_canaries() {
+    local ws="$1" f
+    for f in .secrets.canary secrets.json .env.vault; do
+        if [ -f "${ws}/${f}" ] && grep -qs 'AI-WARDEN-CANARY' "${ws}/${f}"; then
+            rm -f "${ws}/${f}" 2>/dev/null || true
+        fi
+    done
 }
 
 cmd_run() {
@@ -405,6 +442,7 @@ cmd_run() {
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
     stop_sentinel "$name"
     trap - EXIT INT TERM
+    cleanup_workspace_canaries "$abs"
 
     printf '\n'
     if [ "$rc" -eq 99 ]; then

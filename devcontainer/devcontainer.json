@@ -113,10 +113,12 @@
   },
 
   // ---------------------------------------------------------------------------
-  // Make sure the warden networks exist before the container is created.
-  // Runs on the HOST. Harmless if they already exist.
+  // Check the warden network and proxy before the container is created. Runs on
+  // the HOST. It deliberately does NOT create the network itself: compose is
+  // what creates warden_internal, and a network made by hand lacks the
+  // com.docker.compose.network label, after which compose refuses to adopt it.
   // ---------------------------------------------------------------------------
-  "initializeCommand": "docker network inspect warden_internal >/dev/null 2>&1 || docker network create --driver bridge --internal --subnet 172.31.240.0/24 warden_internal >/dev/null; docker network inspect warden_external >/dev/null 2>&1 || docker network create --driver bridge warden_external >/dev/null; docker ps --filter name=warden-egress-proxy --filter status=running --format '{{.Names}}' | grep -q warden-egress-proxy || echo 'AI Warden: egress proxy is not running - start it with: make up'",
+  "initializeCommand": "docker network inspect warden_internal >/dev/null 2>&1 || echo 'AI Warden: warden_internal is missing - run \"make up\" in the AI Warden repo first'; docker ps --filter name=warden-egress-proxy --filter status=running --format '{{.Names}}' | grep -q warden-egress-proxy || echo 'AI Warden: egress proxy is not running - start it with \"make up\"; the sandbox will refuse to start without it'",
 
   // Print the effective security posture into the dev container log, so a
   // weakened configuration is visible immediately rather than discovered later.

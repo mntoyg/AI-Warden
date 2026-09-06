@@ -196,24 +196,24 @@ else
     pass ".env already exists (mode forced to 600)"
 fi
 
+# Networks are intentionally NOT created here. `docker compose up` creates them
+# and stamps them with com.docker.compose.network; a network created by hand
+# lacks that label and compose then refuses to adopt it.
 if docker info >/dev/null 2>&1; then
-    if ! docker network inspect warden_internal >/dev/null 2>&1; then
-        docker network create --driver bridge --internal --subnet 172.31.240.0/24 warden_internal >/dev/null
-        pass "created warden_internal (internal: no route to the internet)"
-    else
-        internal="$(docker network inspect -f '{{.Internal}}' warden_internal)"
-        if [ "$internal" = "true" ]; then
-            pass "warden_internal exists and is internal"
+    for net in warden_internal warden_external; do
+        if docker network inspect "$net" >/dev/null 2>&1; then
+            label="$(docker network inspect -f '{{index .Labels "com.docker.compose.network"}}' "$net" 2>/dev/null || true)"
+            if [ -z "$label" ]; then
+                fail "${net} exists but was not created by compose - remove it: docker network rm ${net}"
+            elif [ "$net" = "warden_internal" ]                  && [ "$(docker network inspect -f '{{.Internal}}' "$net")" != "true" ]; then
+                fail "warden_internal is NOT internal - remove it: docker network rm warden_internal"
+            else
+                pass "${net} present and correctly labelled"
+            fi
         else
-            fail "warden_internal exists but is NOT internal. Remove it: docker network rm warden_internal"
+            note "${net} will be created by 'make up'"
         fi
-    fi
-    if ! docker network inspect warden_external >/dev/null 2>&1; then
-        docker network create --driver bridge warden_external >/dev/null
-        pass "created warden_external"
-    else
-        pass "warden_external exists"
-    fi
+    done
 fi
 
 if [ "$MODE" = "build" ]; then

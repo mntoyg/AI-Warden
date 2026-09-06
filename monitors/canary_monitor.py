@@ -71,10 +71,15 @@ IN_ONLYDIR = 0x01000000
 IN_EXCL_UNLINK = 0x04000000
 
 # Events on the canary file itself that constitute a breach.
+#
+# IN_ATTRIB is deliberately NOT in this set. A bare chmod is not an exfiltration
+# attempt, and the seeding path ends with chmod 0400 - watching ATTRIB would let
+# the out-of-band sentinel trip on the warden's own housekeeping if it armed
+# mid-seed. Nothing is lost: a file cannot be read or written without open(2),
+# so IN_OPEN already covers every access that matters.
 FILE_MASK = (
     IN_ACCESS
     | IN_MODIFY
-    | IN_ATTRIB
     | IN_OPEN
     | IN_CLOSE_WRITE
     | IN_DELETE_SELF
@@ -387,6 +392,13 @@ class CanaryMonitor:
             f"armed={armed}/{len(self.canaries)} watching="
             + ", ".join(self.canaries)
         )
+        # Publish readiness so the entrypoint can hold the agent back until the
+        # watches are actually in place, instead of guessing with a sleep.
+        try:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            (self.run_dir / "armed").write_text(f"{armed}\n")
+        except OSError:
+            pass
 
         while self._running:
             try:
@@ -543,6 +555,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=0.0,
         help="seconds to wait for at least one canary to appear before arming",
     )
+    parser.add_argument(
+        "--quiesce",
+        type=float,
+        default=-1.0,
+        help="seconds of no writes to any canary before arming "
+             "(default: 3s in sentinel mode, 0s inline)",
+    )
     args = parser.parse_args(argv)
 
     if not sys.platform.startswith("linux"):
@@ -554,8 +573,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log("FATAL: no canary paths configured")
         return 78
 
+    # Wait for the entrypoint to finish seeding before arming.
+    #
+    # This matters for the out-of-band sentinel, which starts in its own
+    # container and has no way to know how far the agent container has got. If
+    # it armed halfway through seeding it would trip on the warden's own writes.
+    # The gate is "at least one canary exists AND nothing has touched any of
+    # them for `quiesce` seconds", which needs no shared marker file - and so
+    # cannot be forged by the agent to arm the sentinel early.
+    quiesce = args.quiesce if args.quiesce >= 0 else (3.0 if args.mode == "sentinel" else 0.0)
     deadline = time.time() + args.wait_for_canaries
-    while time.time() < deadline and not any(os.path.isfile(p) for p in canaries):
+    while time.time() < deadline:
+        present = [p for p in canaries if os.path.isfile(p)]
+        if present:
+            newest = 0.0
+            for p in present:
+                try:
+                    st = os.stat(p)
+                    newest = max(newest, st.st_mtime, st.st_ctime)
+                except OSError:
+                    continue
+            if time.time() - newest >= quiesce:
+                break
         time.sleep(0.25)
 
     log(
