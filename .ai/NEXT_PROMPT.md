@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v1 · 2026-09-14
+# AI Warden — next-session prompt · v2 · 2026-09-14
 
 Copy everything inside the fence into a new chat. The session that uses it must
 rewrite this file (and bump the version) before it ends — see step 3.
@@ -21,14 +21,21 @@ Talk to me in Thai. Code, comments, commit messages and CI stay in English.
 2) WORK
    - Default task: the top item in HANDOFF "Next steps", unless I ask otherwise.
    - Done means RUN, not reasoned about: ./scripts/verify-isolation.sh must stay
-     green on phases A-D, and new behaviour gets a drill, not just a code change.
+     green on phases A-E (exit 0), and new behaviour gets a drill, not just a code
+     change. On Docker Desktop `enforced=4/7` is correct; 7/7 is a CI-on-ext4 claim.
    - This project's recurring bug is a control that reports itself armed while
      enforcing nothing. For every guard you touch, ask "how would I know if this
-     silently did nothing?" and test exactly that.
+     silently did nothing?" and test exactly that. Writing that test can EXPOSE a
+     new bug (session 3: the E3 drill found live mount-guard holes). When it does,
+     record it in HANDOFF "Next steps" with a repro — do NOT weaken the drill to
+     hide it, and do NOT silently widen this task into fixing it.
+   - verify-isolation.sh runs `set -uo pipefail` (NO -e). NEVER add `set -e` inside
+     a phase: a breach drill exiting 99 is expected DATA, not a script failure, and
+     a stray `set -e` will kill the whole suite silently at 99 (session 3, ~20 min lost).
    - Read the Gotchas table in HANDOFF before writing shell or Python through the
-     Bash tool (path mangling, backslash escapes, `git commit -F`, set -e traps).
-   - Commit + push after every finished step. Security fixes are not shipped until
-     they are in a tag.
+     Bash tool (path mangling, backslash/`\033` escapes, `git commit -F`, set traps).
+   - Commit + push after every finished step. A test-only change needs no tag; a
+     change to shipped behaviour is a security fix and is not shipped until tagged.
 
 3) END — mandatory, before your final message
    a. Update .ai/HANDOFF.md: Status, re-prioritised Next steps, new Gotchas, and a
@@ -49,8 +56,13 @@ Talk to me in Thai. Code, comments, commit messages and CI stay in English.
 
 - **Reality check first** — session 2 opened to find the audit fixes only on `main`
   and Docker Desktop not running; both would have been missed by trusting the notes.
-- **"Done means run"** — every serious bug in sessions 1–2 passed code review and
-  failed only when the drills ran.
-- **Evidence-cited, size-capped rewrites** — a self-improving prompt otherwise grows
-  into a list of platitudes. Each line has to earn its place with a real event, and
-  adding a line should usually mean removing one.
+- **"Done means run"** — every serious bug so far passed code review and failed only
+  when the drills ran. Session 3 added the sharper version: the act of writing a
+  drill surfaced a mount-guard hole the code read as safe.
+- **The `set -e` line** — session 3 lost ~20 min to a stray `set -e` (left in phase D)
+  that turned a legitimate exit-99 breach drill into a silent whole-suite abort. No
+  error message; only bisecting phases found it.
+- **"Record, don't widen"** — a self-improving loop rots if each session quietly
+  balloons its scope. New findings become the next task, with a repro, not this one.
+- **Evidence-cited, size-capped rewrites** — each line here earns its place with a
+  real event; adding one should usually mean removing one.

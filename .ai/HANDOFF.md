@@ -4,9 +4,9 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-14 (session 2)
+- **Last updated:** 2026-09-14 (session 3)
 - **Latest release:** [v1.0.1](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.1) — security release, marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v1)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v2)
 
 ---
 
@@ -14,11 +14,11 @@
 
 | Thing | State |
 |---|---|
-| `main` | `3fa7a7a` + this handoff commit, pushed, tree clean |
+| `main` | `ff1fe75` (phase E drills) + this handoff commit, pushed, tree clean |
 | Tags | `v1.0.0` (release notes carry a "superseded by v1.0.1" warning), `v1.0.1` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.1` |
-| Local suite (Docker Desktop / Windows) | Phase A 31/31 · B exit 99 · C exit 78 · D exit 99 · `enforced=4/7` (expected there) |
-| CI suite (ext4) | all phases · `enforced=7/7` · compose handshake OK · 0 leaked volumes |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.1`; the phase-E commit's run is the one to confirm green |
+| Local suite (Docker Desktop / Windows) | Phase A 31/31 · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 |
+| CI suite (ext4) | all phases incl. E · `enforced=7/7` · compose handshake OK · 0 leaked volumes |
 | CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden`; ~70 in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
 
 ---
@@ -28,12 +28,26 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Turn the audit exploits into permanent drills (a Phase E in `verify-isolation.sh`).**
-   The four fixes in v1.0.1 — symlink redirection of the incident report, log
-   injection via `/proc/<pid>/cmdline`, the widened mount guard, the dangling canary
-   symlink — were each proven with a hand-run exploit and are *not* in the suite. A
-   fix that was tested once by hand is not protected against regression. The exact
-   exploit commands are in the session-1 log below.
+1. **Close the mount-guard gaps that phase E3 surfaced.** This is the recurring bug
+   shape: `assert_safe_mount` in `warden-cli.sh` reports itself as the guard rail
+   yet ACCEPTS three classes of dangerous target today (found by *writing* the E3
+   drill, not by reading the code):
+   - `/bin`, `/sbin`, `/lib` — usrmerge symlinks. `real="$(cd "$abs" && pwd -P)"`
+     resolves them to `/usr/bin` etc., which are not in the refuse list (`/usr` is,
+     `/usr/bin` is not). Fix: also test the LOGICAL path `pwd -L` against the same
+     `case` (input `/bin` → logical `/bin` → matches; `/var/www` → `/var/www` →
+     still allowed, so no false positive).
+   - `/media/usb` and `/cygdrive/c` — the `/media/*/` and `/cygdrive/*/` `case`
+     patterns are DEAD: `pwd -P` never yields a trailing slash, so they can never
+     match. A whole removable drive or a whole Windows drive is mountable. Fix:
+     refuse when `dirname(real)` is `/media`, `/run/media` or `/cygdrive` (the drive
+     root), while keeping `/mnt`'s existing single-letter rule so a hand-made
+     `/mnt/project` still works, and still allowing a project nested inside a drive.
+   Repro (each must be refused; none is today), inside the agent image:
+   `. scripts/warden-cli.sh; assert_safe_mount /bin` and `assert_safe_mount /media/usb`
+   both return 0 and set `RESOLVED_MOUNT`. When fixed, add these paths to phase E3
+   (the harness is already there) and **ship the fix in a tag (v1.0.2)** — it is a
+   security fix, not just a test.
 2. **Weekly scheduled rebuild + CVE gate** (`on: schedule` in CI, build with `--pull`).
    v1.0.1 found libpcre2 only because a release forced a rebuild; drift in the base
    image should be caught on a timer, not by luck.
@@ -57,7 +71,7 @@ behaviour:
 
 ```bash
 ./scripts/warden-cli.sh build          # if an image-affecting file changed (agent build ~5-10 min)
-./scripts/verify-isolation.sh          # phases A-D must all pass
+./scripts/verify-isolation.sh          # phases A-E must all pass
 ```
 
 Before a release, additionally: shellcheck + hadolint + gitleaks + trivy (all run
@@ -101,6 +115,8 @@ would I know if this silently did nothing?" — then run that.
 | trivy gate went red with no code change (base-image drift) | Both Dockerfiles run `apt-get upgrade`; rebuild with `--pull` before releasing |
 | Security fixes sitting on `main` ship to nobody | Cut a tag; flag the old release |
 | GitHub accepts some writes and changes nothing | Re-read after every release/settings edit |
+| A `set +e … set -e` pair assumes errexit is the baseline | This suite runs `set -uo pipefail` (NO `-e`). A stray `set -e` leaked out of phase D and a *legitimate* exit-99 breach drill then killed the whole suite silently. Restore with `set +e`, or save/restore `$-`. |
+| `assert_safe_mount` string-matches paths, but `cd; pwd -P` resolves symlinks | On usrmerge hosts `/bin`→`/usr/bin`, so a name-based refuse list misses `/bin /sbin /lib`. Check `pwd -L` too (see Next-steps #1). |
 
 ---
 
@@ -115,6 +131,24 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-14 — session 3 · phase E drills
+- **Did:** added Phase E to `verify-isolation.sh` — the four v1.0.1 audit exploits
+  as permanent regression drills (E1 report-symlink redirect, E2 argv log injection,
+  E3 mount guard, E4 dangling canary symlink), each written to FAIL against the
+  pre-fix behaviour. Made `warden-cli.sh` sourceable (guarded `main`) so E3 exercises
+  the real `assert_safe_mount`. Fixed a latent phase-D bug: it ended with `set -e`,
+  which — once Phase E followed it — turned a legitimate exit-99 breach drill into a
+  silent whole-suite abort with code 99. Updated README (was "3 phases", missing D
+  and E) and VERIFICATION.md to 5 phases. Suite A–E green locally, exit 0, `enforced=4/7`.
+- **Learned:** writing the E3 drill is what exposed real mount-guard holes
+  (`/media/usb`, and usrmerged `/bin /sbin /lib` accepted); reading the code had not.
+  That is the whole argument for "new behaviour gets a drill." I did NOT fold the fix
+  into E3 — the correct fix has cross-platform nuance and is a tagged security change,
+  so it is Next-steps #1 with a repro, and E3 asserts only what v1.0.1 shipped.
+- **Prompt should have said:** the suite baseline is `set -uo pipefail` (no `-e`), so
+  never write `set -e` inside a phase; and a new drill can uncover a new bug — record
+  it as a Next-step with a repro, don't silently widen scope or drop the finding.
 
 ### 2026-09-14 — session 2 · v1.0.1
 - **Did:** found the audit fixes were only on `main`, not in any tag → v1.0.1
@@ -152,3 +186,9 @@ it and say why.
 - **v1 · 2026-09-14** — first version. Built from sessions 1–2: start-of-session
   reality check (tree/tags/CI/Docker), "prove by running", the recurring bug shape,
   mandatory end-of-session handoff + prompt rewrite with evidence and a size cap.
+- **v2 · 2026-09-14** — session 3. Added: (a) "the suite is `set -uo pipefail`, never
+  add `set -e`" — a stray `set -e` in phase D silently killed the suite at exit 99
+  when phase E ran after it, ~20 min to trace because there was no error message;
+  (b) "a new drill may find a new bug — record it with a repro, don't widen scope" —
+  E3 surfaced live mount-guard holes. Dropped the v1 line about tolerating a slow
+  first `docker info` (Docker was already up; it never cost time).

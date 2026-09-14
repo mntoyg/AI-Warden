@@ -336,13 +336,15 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 3 เฟส:
+ชุดทดสอบมี 5 เฟส:
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
 | **A** | self-test ในมุมมองของ agent เอง: uid, `CapBnd`, `no_new_privs`, ตาราง mount, ยิง TCP ตรงออกเน็ต, allowlist allow/deny, IP-literal CONNECT, CONNECT พอร์ต 22, relay exfiltration, canary armed | ผ่านทุกข้อ |
 | **B** | breach drill จริง — container อ่าน canary โดยตั้งใจ | container ตายด้วย **exit 99** |
 | **C** | fail-closed drill — สั่งรันโดย **ไม่มี** `--cap-drop=ALL` | entrypoint ปฏิเสธ **exit 78** |
+| **D** | sentinel drill — agent ฆ่า inline monitor แล้วอ่าน canary | sentinel นอกกรงยังฆ่าให้ **exit 99** |
+| **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) | refuse/ป้องกันทุกกรณี |
 
 อยากลองด้วยมือก็ได้:
 

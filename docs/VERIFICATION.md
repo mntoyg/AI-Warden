@@ -40,6 +40,12 @@
   [drill] inline monitor killed; a sentinel monitor survives (root)
   PASS phase D: the sentinel contained a breach after the inline monitor was killed
 
+================= PHASE E: audit regression drills ==============
+  PASS phase E1: breach contained (99); report refused the symlink and was preserved as a tamper-tagged fallback
+  PASS phase E2: breach contained (99) and the injected escape sequences were neutralised (?[2K) in the log
+  PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
+  PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
+
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
 ```
@@ -48,8 +54,8 @@
 
 ```bash
 ./scripts/verify-isolation.sh --keep         # เก็บ workspace ที่ใช้ทดสอบไว้ดู
-./scripts/verify-isolation.sh --no-breach    # ข้ามเฟส B และ D (ทั้งสองต้องทำให้ container ตาย)
-./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D
+./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2)
+./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D (E1/E2 ยังรัน)
 ```
 
 ---
@@ -273,6 +279,10 @@ grep -n 'http_access deny all' core/network/squid.conf
 | sentinel ยังทำงานแม้ inline monitor ถูกฆ่า | `pkill -9 -f 'canary_mon[i]tor'` แล้วอ่าน canary | sentinel ฆ่า container (`mode=sentinel`) |
 | posture ไม่ครบ = ไม่ยอมเริ่ม | `docker run` โดยไม่ใส่ `--cap-drop` | exit `78` |
 | ไม่มี proxy = ไม่ยอมเริ่ม | `docker stop warden-egress-proxy` แล้ว run | exit `78` |
+| รายงานเหตุ redirect ผ่าน symlink ไม่ได้ (E1) | วาง symlink ที่ `WARDEN_SECURITY_INCIDENT.json` แล้ว trip canary | exit `99` + มี fallback ที่ติด `report_path_tampered` |
+| ชื่อ process ปลอมไม่ทำลาย forensic log (E2) | ตั้ง `argv[0]` เป็น escape sequence แล้ว trip canary | บรรทัด suspect เป็น `?[2K` (ไม่ใช่ ESC ดิบ) |
+| mount guard ปฏิเสธ path อันตราย (E3) | source `assert_safe_mount` แล้วป้อน `/ /etc /home /mnt/c ...` | refuse ทุกอัน; project dir ปกติ accept |
+| seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
 
 ---
 
