@@ -25,7 +25,9 @@
   [PASS] non-allowlisted host was blocked
   [PASS] IP-literal destination 1.1.1.1:443 refused
   [PASS] CONNECT to a non-443 port (github.com:22) refused
-  [PASS] 7 canary token(s) seeded and in place
+  [PASS] canary vault mounted on ext4 (an inotify-capable filesystem)
+  [PASS] 7 canary token(s) seeded and in place (checked with stat, never opened)
+  [PASS] 4 canary path(s) are genuinely enforced (probed, not assumed)
 
 ================= PHASE B: live breach drill ====================
   [SECURITY BREACH] Canary file accessed by Agent Process!
@@ -33,6 +35,10 @@
 
 ================= PHASE C: fail-closed drill ====================
   PASS phase C: the sandbox refused an unsafe launch posture
+
+================= PHASE D: sentinel drill =======================
+  [drill] inline monitor killed; a sentinel monitor survives (root)
+  PASS phase D: the sentinel contained a breach after the inline monitor was killed
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
@@ -42,7 +48,8 @@
 
 ```bash
 ./scripts/verify-isolation.sh --keep         # เก็บ workspace ที่ใช้ทดสอบไว้ดู
-./scripts/verify-isolation.sh --no-breach    # ข้ามเฟส B (เร็วขึ้น)
+./scripts/verify-isolation.sh --no-breach    # ข้ามเฟส B และ D (ทั้งสองต้องทำให้ container ตาย)
+./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D
 ```
 
 ---
@@ -145,7 +152,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
 [canary] watchable  : /workspace/.secrets (ext4)   - inotify delivers events
 [canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
 [canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
-[canary] v1.0.0 mode=inline action=kill enforced=4/7
+[canary] v1.0.1 mode=inline action=kill enforced=4/7
 [canary] *** 3 canary path(s) are NOT enforced on this host: /workspace/.secrets.canary, ...
 ```
 

@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.0.0"
+WARDEN_VERSION = "1.0.1"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------
@@ -77,7 +77,7 @@ IN_EXCL_UNLINK = 0x04000000
 # Events on the canary file itself that constitute a breach.
 #
 # IN_ATTRIB is deliberately NOT in this set. A bare chmod is not an exfiltration
-# attempt, and the seeding path ends with chmod 0400 - watching ATTRIB would let
+# attempt, and the seeding path ends with chmod 0440 - watching ATTRIB would let
 # the out-of-band sentinel trip on the warden's own housekeeping if it armed
 # mid-seed. Nothing is lost: a file cannot be read or written without open(2),
 # so IN_OPEN already covers every access that matters.

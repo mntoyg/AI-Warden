@@ -23,10 +23,12 @@ LABEL org.opencontainers.image.title="AI Warden Egress Proxy" \
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Package versions are deliberately unpinned - rationale in core/Dockerfile.
+# Package versions are deliberately unpinned, and pending security updates are
+# applied on every build - rationale for both in core/Dockerfile section 1.
 # hadolint ignore=DL3008
 RUN set -eux; \
     apt-get update; \
+    apt-get upgrade -y --no-install-recommends; \
     apt-get install -y --no-install-recommends \
         squid \
         ca-certificates \

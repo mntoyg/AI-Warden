@@ -4,6 +4,48 @@
 
 ---
 
+## [1.0.1] — 2026-09-14
+
+**Security release — ผู้ใช้ v1.0.0 ทุกคนควรอัปเกรด**
+
+การแก้ด้านความปลอดภัยทั้งสี่ข้อด้านล่างเข้าไปใน `main` หลังจาก tag v1.0.0 แล้ว
+ใครที่ใช้ release v1.0.0 อยู่จึงยังไม่ได้รับการแก้ รุ่นนี้รวมมาไว้ใน tag ที่ใช้ได้
+
+### Security
+
+- **Symlink redirection ของ incident report (medium)** — monitor เขียนลงไดเรกทอรีที่
+  agent เขียนได้ (`/run/warden`, `/workspace`) agent จึงวาง symlink ดักให้การเขียน
+  ไปลงไฟล์อื่นได้ ในโหมด sentinel คนเขียนคือ root
+  ตอนนี้ทุกการเขียนใช้ `O_NOFOLLOW` และถ้าเจอ symlink จะเก็บหลักฐานไว้ใต้ชื่อที่
+  agent เดาไม่ได้ พร้อมบันทึก `report_path_tampered` แทนที่จะทิ้งรายงาน
+- **Terminal / log injection (low-medium)** — ชื่อ process ใน `/proc/<pid>/cmdline`
+  ผู้โจมตีตั้งเองได้ ใส่ ANSI escape เพื่อลบบรรทัดจริงแล้วปลอมบรรทัด
+  `[canary] all clear` ได้ ตอนนี้กรอง control character ก่อนเข้า log และรายงาน
+- **Mount guard rails รั่ว (low)** — เดิมกัน `$HOME` แต่ไม่กัน `/home`
+  ตอนนี้ปฏิเสธ `/home`, `/Users`, `/mnt`, `/media`, `/srv`, `/mnt/<drive>`,
+  `/cygdrive/<drive>` ด้วย
+- **เขียนทะลุ dangling symlink บน path ของ canary (low)** — เพิ่มการเช็ค `-L`
+  ก่อน seed
+- **libpcre2 10.42-1 ในทั้งสองอิมเมจ (HIGH ×2: CVE-2026-86145, CVE-2026-89161)** —
+  ต้นเหตุจริงคือ Dockerfile ไม่เคยสั่ง `apt-get upgrade` อิมเมจจึงได้ security fix
+  ก็ต่อเมื่อ Docker Hub rebuild base tag ให้เท่านั้น ตอนนี้ทุก build ติดตั้ง
+  security update ที่ค้างอยู่ → `10.42-1+deb12u1` และ gate ของ CI กลับมาเป็น 0
+
+### Changed
+
+- venv ของ warden สร้างด้วย `--without-pip` — monitor ใช้แต่ standard library
+  จึงไม่ต้องมี package manager เลย ตัด CVE ของ `pip`/`setuptools` ซึ่งเป็น
+  component เดียวที่ AI Warden เป็นเจ้าของแล้วมี CVE → เหลือ **0**
+- CI: เพิ่ม gitleaks (สแกนทั้ง history) และ trivy (fail เมื่อเจอ HIGH/CRITICAL
+  ใน OS package หรือ `/opt/warden`; ส่วน dependency ของ agent รายงานให้เห็นแต่ไม่ gate)
+- CI: `actions/checkout@v5` แทน v4 ที่ใช้ runtime Node 20 ซึ่งถูกเลิกใช้แล้ว
+
+### Fixed
+
+- `docs/VERIFICATION.md` ยังแสดงผลลัพธ์ที่คาดไว้แค่ 3 เฟส ขาดเฟส D (sentinel drill)
+  และตัวเลือก `--no-sentinel`
+- comment ใน monitor ยังอ้าง `chmod 0400` ทั้งที่ canary เป็น `0440` แล้ว
+
 ## [1.0.0] — 2026-09-06
 
 รุ่นแรก Zero-Trust sandbox สำหรับรัน AI coding agent โดยไม่เสี่ยงกับเครื่องโฮสต์
@@ -73,4 +115,5 @@ control ที่รายงานว่าทำงานอยู่ทั้
 - บน Docker Desktop canary ที่อยู่ใน bind mount ตรง ๆ บังคับใช้ไม่ได้
   (`enforced=4/7`) — วัดและรายงานตามจริงตอนรัน บน Linux ได้ `7/7`
 
+[1.0.1]: https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.1
 [1.0.0]: https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.0

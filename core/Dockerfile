@@ -47,10 +47,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
 #    fully pinned image stops building within weeks - and an image nobody can
 #    rebuild is a worse security outcome than a floating minor version. Rebuild
 #    regularly and re-run ./scripts/verify-isolation.sh.
+#
+#    Pending Debian security updates are applied on every build. The base tag
+#    is only refreshed when Docker Hub rebuilds it, so without the upgrade an
+#    image built today inherits whatever was vulnerable the day the base was
+#    cut - this is how libpcre2 10.42-1 (CVE-2026-86145, CVE-2026-89161, both
+#    HIGH, fixed in +deb12u1) reached both images and tripped the CI gate.
 # -----------------------------------------------------------------------------
 # hadolint ignore=DL3008
 RUN set -eux; \
     apt-get update; \
+    apt-get upgrade -y --no-install-recommends; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
