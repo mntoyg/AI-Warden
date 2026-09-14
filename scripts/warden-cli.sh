@@ -767,4 +767,10 @@ main() {
     esac
 }
 
-main "$@"
+# Run main only when executed directly, never when sourced. The isolation suite
+# sources this file to exercise assert_safe_mount() against a battery of unsafe
+# paths (verify-isolation.sh, phase E3); without this guard that source would
+# fall straight through to `main` and try to run a command.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi
