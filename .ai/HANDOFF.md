@@ -4,22 +4,22 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-14 (session 3)
-- **Latest release:** [v1.0.1](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.1) — security release, marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v2)
+- **Last updated:** 2026-09-15 (session 4)
+- **Latest release:** [v1.0.2](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.2) — mount-guard hardening (security), marked Latest
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v3)
 
 ---
 
-## 1. Status (verified 2026-09-14)
+## 1. Status (verified 2026-09-15)
 
 | Thing | State |
 |---|---|
-| `main` | `ff1fe75` (phase E drills) + this handoff commit, pushed, tree clean |
-| Tags | `v1.0.0` (release notes carry a "superseded by v1.0.1" warning), `v1.0.1` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.1`; the phase-E commit's run is the one to confirm green |
-| Local suite (Docker Desktop / Windows) | Phase A 31/31 · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 |
+| `main` | `c9ecb6a` (release 1.0.2) + this handoff commit, pushed, tree clean |
+| Tags | `v1.0.0` & `v1.0.1` both carry a "superseded" warning · `v1.0.2` (Latest) |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.2` (run 34937500342) |
+| Local suite (Docker Desktop / Windows) | Phase A 31/31 · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 · monitor reports `v1.0.2` |
 | CI suite (ext4) | all phases incl. E · `enforced=7/7` · compose handshake OK · 0 leaked volumes |
-| CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden`; ~70 in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
+| CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden` (trivy on rebuilt images, debian 12.15); ~70 in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
 
 ---
 
@@ -28,39 +28,27 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Close the mount-guard gaps that phase E3 surfaced.** This is the recurring bug
-   shape: `assert_safe_mount` in `warden-cli.sh` reports itself as the guard rail
-   yet ACCEPTS three classes of dangerous target today (found by *writing* the E3
-   drill, not by reading the code):
-   - `/bin`, `/sbin`, `/lib` — usrmerge symlinks. `real="$(cd "$abs" && pwd -P)"`
-     resolves them to `/usr/bin` etc., which are not in the refuse list (`/usr` is,
-     `/usr/bin` is not). Fix: also test the LOGICAL path `pwd -L` against the same
-     `case` (input `/bin` → logical `/bin` → matches; `/var/www` → `/var/www` →
-     still allowed, so no false positive).
-   - `/media/usb` and `/cygdrive/c` — the `/media/*/` and `/cygdrive/*/` `case`
-     patterns are DEAD: `pwd -P` never yields a trailing slash, so they can never
-     match. A whole removable drive or a whole Windows drive is mountable. Fix:
-     refuse when `dirname(real)` is `/media`, `/run/media` or `/cygdrive` (the drive
-     root), while keeping `/mnt`'s existing single-letter rule so a hand-made
-     `/mnt/project` still works, and still allowing a project nested inside a drive.
-   Repro (each must be refused; none is today), inside the agent image:
-   `. scripts/warden-cli.sh; assert_safe_mount /bin` and `assert_safe_mount /media/usb`
-   both return 0 and set `RESOLVED_MOUNT`. When fixed, add these paths to phase E3
-   (the harness is already there) and **ship the fix in a tag (v1.0.2)** — it is a
-   security fix, not just a test.
-2. **Weekly scheduled rebuild + CVE gate** (`on: schedule` in CI, build with `--pull`).
+1. **Weekly scheduled rebuild + CVE gate** (`on: schedule` in CI, build with `--pull`).
    v1.0.1 found libpcre2 only because a release forced a rebuild; drift in the base
-   image should be caught on a timer, not by luck.
-3. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
+   image should be caught on a timer, not by luck. (Both v1.0.1 and v1.0.2 rebuilds
+   were clean, so drift has not bitten since — but that is exactly what a timer is for.)
+2. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
    and compose. The threat model already *recommends* gVisor for kernel-escape
    defence but nothing in the tooling supports it.
-4. **Investigate domain fronting through allowlisted CDN hosts** (e.g.
+3. **Investigate domain fronting through allowlisted CDN hosts** (e.g.
    `.githubusercontent.com` sits on a shared CDN). The proxy filters on the CONNECT
    host; whether a different `Host` inside TLS reaches another tenant is untested.
    Research item — do not claim a bypass or a defence until a probe proves it.
-5. **Decide what to do with the 3 inert canaries on 9p.** On Docker Desktop they are
+4. **Decide what to do with the 3 inert canaries on 9p.** On Docker Desktop they are
    seeded into the user's project but cannot be enforced. Options: stop seeding them
    where the probe says `DEGRADED`, or keep them as decoys. Needs a decision, not code first.
+5. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
+   guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
+   udisks layout puts the drive root two levels down (`/media/john/USB`), which is
+   structurally indistinguishable from a project nested inside a drive
+   (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
+   mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
+   source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
 
 ---
 
@@ -116,7 +104,8 @@ would I know if this silently did nothing?" — then run that.
 | Security fixes sitting on `main` ship to nobody | Cut a tag; flag the old release |
 | GitHub accepts some writes and changes nothing | Re-read after every release/settings edit |
 | A `set +e … set -e` pair assumes errexit is the baseline | This suite runs `set -uo pipefail` (NO `-e`). A stray `set -e` leaked out of phase D and a *legitimate* exit-99 breach drill then killed the whole suite silently. Restore with `set +e`, or save/restore `$-`. |
-| `assert_safe_mount` string-matches paths, but `cd; pwd -P` resolves symlinks | On usrmerge hosts `/bin`→`/usr/bin`, so a name-based refuse list misses `/bin /sbin /lib`. Check `pwd -L` too (see Next-steps #1). |
+| `assert_safe_mount` string-matches paths, but `cd; pwd -P` resolves symlinks | On usrmerge hosts `/bin`→`/usr/bin`, so a name-based refuse list misses `/bin /sbin /lib`. Fixed in v1.0.2 by also checking `pwd -L`. |
+| `warden-cli.sh build --pull` puts `--pull` AFTER the build context | `cmd_build` appends `"$@"` after `"$ctx"`, so a trailing flag is at best ignored. For a release rebuild call `docker build --pull -f … -t … "$ctx"` directly (flags before the path). Worth fixing in `cmd_build` one day. |
 
 ---
 
@@ -131,6 +120,27 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-15 — session 4 · v1.0.2 (mount-guard hardening)
+- **Did:** closed the mount-guard gaps phase E3 surfaced last session.
+  `assert_safe_mount` now checks BOTH `pwd -P` and `pwd -L` (catches usrmerge
+  `/bin /sbin /lib`) and refuses a drive root by its parent (`/media`, `/run/media`,
+  `/cygdrive`), while still allowing a project nested in a drive and keeping `/mnt`'s
+  single-letter rule. Expanded E3 to 23 refuse-cases + 2 accept-cases. Bumped
+  version to 1.0.2 (CLI, entrypoint, monitor), wrote CHANGELOG, rebuilt both images
+  with `--pull` (trivy: 0 HIGH/CRITICAL, debian 12.15), verified A–E green on the
+  fresh image, tagged **v1.0.2** (CI green on the tag, run 34937500342), and
+  amended the v1.0.1 notes with a superseded warning (they had claimed "whole
+  drives — all refused", which was untrue).
+- **Learned:** Docker Desktop was down at session start (the day rolled over) —
+  starting it cost ~1 min, as the prompt warned. `warden-cli.sh build --pull` does
+  not actually pass `--pull` (it lands after the build context); use `docker build`
+  directly for a release rebuild. The residual udisks `/media/<user>/<label>` case
+  can't be closed with a path pattern alone — it's now Next-steps #5, not a rushed fix.
+- **Prompt should have said:** it already said "start Docker Desktop first" and it
+  paid off. Added this session: for a release rebuild, call `docker build --pull`
+  directly, and a security fix (even one that only touches a host script) still owes
+  a tag + a superseded note on the release it replaces.
 
 ### 2026-09-14 — session 3 · phase E drills
 - **Did:** added Phase E to `verify-isolation.sh` — the four v1.0.1 audit exploits
@@ -192,3 +202,8 @@ it and say why.
   (b) "a new drill may find a new bug — record it with a repro, don't widen scope" —
   E3 surfaced live mount-guard holes. Dropped the v1 line about tolerating a slow
   first `docker info` (Docker was already up; it never cost time).
+- **v3 · 2026-09-15** — session 4. Added the release-rebuild note: `warden-cli.sh
+  build --pull` does not pass `--pull` (it lands after the context), so call
+  `docker build --pull` directly; and a security fix owes a tag + a superseded note
+  on the release it replaces. Restored the "start Docker Desktop first" emphasis —
+  it was down at session start and the prompt's warning saved time, so it stays.
