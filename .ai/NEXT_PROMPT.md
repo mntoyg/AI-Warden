@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v3 · 2026-09-15
+# AI Warden — next-session prompt · v4 · 2026-09-15
 
 Copy everything inside the fence into a new chat. The session that uses it must
 rewrite this file (and bump the version) before it ends — see step 3.
@@ -37,8 +37,13 @@ Talk to me in Thai. Code, comments, commit messages and CI stay in English.
      (path mangling, `\033`/backslash escapes, `git commit -F`, set traps).
    - Commit + push after every finished step. A test-only change needs no tag. A
      security fix (even one touching only a host script) ships in a TAG and gets a
-     superseded note on the release it replaces. For a release rebuild call
-     `docker build --pull` directly — `warden-cli.sh build --pull` drops the flag.
+     superseded note on the release it replaces; for a release rebuild use
+     `warden-cli.sh build --pull` (re-pulls both images) to catch base-image drift.
+   - A "Next steps" item may resolve to NO code — a user decision, or a feature you
+     can't verify on this host (gVisor needs a Linux box with runsc). That's a
+     finished item, not a gap. When the runnable backlog is clear, verify what you
+     shipped and hand off — do not manufacture code to fill the session. (CI's
+     gitleaks step also flakes on its Docker Hub pull; re-run it, don't "fix" it.)
 
 3) END — mandatory, before your final message
    a. Update .ai/HANDOFF.md: Status, re-prioritised Next steps, new Gotchas, and a
@@ -57,13 +62,7 @@ Talk to me in Thai. Code, comments, commit messages and CI stay in English.
 
 ## Why this prompt is shaped this way
 
-- **Reality check first** — sessions have opened to audit fixes only on `main`,
-  and to Docker Desktop being down. Trusting the notes would have missed both.
-- **"Done means run"** — every serious bug here passed code review and failed only
-  when the drills ran; twice now, *writing* a drill is what exposed the bug.
-- **The `set -e` line** — a stray `set -e` (session 3) turned a legit exit-99 drill
-  into a silent whole-suite abort with no error message; only bisecting found it.
-- **"Record, don't widen" + tag discipline** — the loop rots if scope balloons or if
-  security fixes sit untagged. New findings become the next task; fixes become tags.
-- **Size-capped, evidence-cited rewrites** — each line earns its place with a real
-  event; adding one should usually mean removing one.
+Reality-check first (sessions open to fixes only on `main`, or Docker down).
+Done-means-run: every serious bug here passed review and failed only when a drill ran —
+twice, *writing* the drill exposed it. `set -uo pipefail` (never `set -e` in a phase),
+tag security fixes, record-don't-widen. Each line earns its place with a real event.

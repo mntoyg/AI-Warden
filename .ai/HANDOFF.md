@@ -42,6 +42,11 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
    mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
    source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
+3. **(low) Harden CI image pulls.** The `static` job's Secret-scan step pulls
+   `zricethezav/gitleaks:latest` from Docker Hub at runtime and flaked once this session
+   (`connection reset by peer`, exit 125). Pin a version and wrap the `docker run` in a
+   small pull-retry (2–3 attempts) so a Docker Hub hiccup doesn't red a clean build. Same
+   pattern would help the trivy/shellcheck/hadolint pulls.
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -111,6 +116,7 @@ would I know if this silently did nothing?" — then run that.
 | `assert_safe_mount` string-matches paths, but `cd; pwd -P` resolves symlinks | On usrmerge hosts `/bin`→`/usr/bin`, so a name-based refuse list misses `/bin /sbin /lib`. Fixed in v1.0.2 by also checking `pwd -L`. |
 | `warden-cli.sh build --pull` used to drop the flag | Fixed: `cmd_build` now puts `"$@"` BEFORE the context and applies it to both images. `warden-cli.sh build --pull` re-pulls the base for proxy + agent. |
 | Debian's squid (5.7, `--with-gnutls`, no `--with-openssl`) has no `ssl_bump` | `squid -k parse` on any `at_step`/`ssl_bump` line dies `FATAL: Invalid ACL type 'at_step'`. Peek-and-splice / SNI enforcement needs a different squid build. Relevant to the §4.2 domain-fronting decision. |
+| CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
 
 ---
 
@@ -125,6 +131,29 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-15 — session 5 · CVE-drift gate · fronting probe · resource drill
+(same chat as session 4, continued after the v1.0.2 release)
+- **Did:** (1) shipped the **weekly scheduled CVE gate** — added a Monday cron and made
+  the CI builds `--pull`; fixed `cmd_build`, which appended `"$@"` after the context
+  (a no-op) and only on the agent image, so `warden-cli.sh build --pull` now re-pulls
+  the base for both images. (2) **Confirmed SNI domain fronting** with a working exploit
+  against our own proxy (`--connect-to octocat.github.io:443:raw.githubusercontent.com:443`
+  → 200 `<title>Octocat.github.io</title>`, squid logged CONNECT to the allowlisted host);
+  wrote it up in THREAT_MODEL §4.2. No in-proxy fix: Debian squid has no `ssl_bump`.
+  (3) **Audited cgroup resource limits** and turned the audit into a Phase-A drill
+  (memory.max, memory.swap.max=0, pids.max) — 34/34, teeth verified against an
+  unconstrained container. (4) Recorded 2 user decisions: fronting = document-only,
+  inert 9p canaries = keep as decoys. All green locally and in CI (one transient
+  gitleaks Docker Hub pull reset in `static`, fixed by `gh run rerun --failed`).
+- **Learned:** the runnable, non-decision backlog is now empty on this host — gVisor
+  needs a Linux box with `runsc`, and shipping a `--runtime` passthrough here (unverifiable)
+  would be the very bug this project hunts. A decision item can resolve to "no code"; that
+  is a finished item, not a gap. Writing a drill (E3 last time, resources this time) keeps
+  finding real things reading the code did not.
+- **Prompt should have said:** don't manufacture code to fill a session — when the
+  runnable backlog is clear, verify what you shipped and hand off. And expect the CI
+  gitleaks step to flake on its Docker Hub pull; re-run rather than "fix" it.
 
 ### 2026-09-15 — session 4 · v1.0.2 (mount-guard hardening)
 - **Did:** closed the mount-guard gaps phase E3 surfaced last session.
@@ -212,3 +241,10 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v4 · 2026-09-15** — session 5. Corrected the now-stale v3 line: `warden-cli.sh
+  build --pull` was FIXED this session and re-pulls both images, so the prompt says
+  to use it (not raw docker). Added: a Next-steps item may resolve to "no code" (a
+  decision, or a feature unverifiable on this host like gVisor) — that's finished, not
+  a gap; when the runnable backlog is clear, hand off instead of manufacturing work;
+  and the CI gitleaks step flakes on its Docker Hub pull (re-run, don't "fix"). Shrank
+  the "why" section to prose to stay under 70 lines.
