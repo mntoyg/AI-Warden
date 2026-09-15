@@ -28,17 +28,26 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Weekly scheduled rebuild + CVE gate** (`on: schedule` in CI, build with `--pull`).
-   v1.0.1 found libpcre2 only because a release forced a rebuild; drift in the base
-   image should be caught on a timer, not by luck. (Both v1.0.1 and v1.0.2 rebuilds
-   were clean, so drift has not bitten since — but that is exactly what a timer is for.)
+1. **DECISION: how far to defend SNI domain fronting (investigation done, bypass
+   confirmed 2026-09-15).** Proven: CONNECT to an allowlisted host on a shared CDN +
+   a different TLS SNI reaches a non-allowlisted origin on the same CDN IP —
+   `--connect-to octocat.github.io:443:raw.githubusercontent.com:443` returned
+   `octocat.github.io` (200) though only `*.githubusercontent.com` is allowlisted
+   (squid log: `TCP_TUNNEL/200 CONNECT raw.githubusercontent.com`). Written up in
+   `docs/THREAT_MODEL.md` §4.2 with mitigations. The only in-proxy fix is SNI
+   peek-and-splice, which needs a squid built `--with-openssl` (the Debian 5.7 image
+   here can't: `FATAL: Invalid ACL type 'at_step'`) and crosses the "no SSL-bump"
+   line in §3.1. **User decides:** (a) accept + document only (done), (b) drop
+   CDN-shared allowlist entries for a strict profile, or (c) swap to an
+   openssl/peek-splice proxy or an SNI-aware L7 egress. Don't build (c) blind — it
+   needs a host where the SNI enforcement can actually be run and proven.
 2. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
    and compose. The threat model already *recommends* gVisor for kernel-escape
-   defence but nothing in the tooling supports it.
-3. **Investigate domain fronting through allowlisted CDN hosts** (e.g.
-   `.githubusercontent.com` sits on a shared CDN). The proxy filters on the CONNECT
-   host; whether a different `Host` inside TLS reaches another tenant is untested.
-   Research item — do not claim a bypass or a defence until a probe proves it.
+   defence but nothing in the tooling supports it. **Needs a host with `runsc`
+   installed to verify** — Docker Desktop has none, and shipping a `--runtime`
+   passthrough that silently falls back to runc (or an unverified gVisor detector)
+   would be the exact "reports armed, enforces nothing" bug. Do this on a Linux host
+   where gVisor can actually be installed and the active runtime confirmed.
 4. **Decide what to do with the 3 inert canaries on 9p.** On Docker Desktop they are
    seeded into the user's project but cannot be enforced. Options: stop seeding them
    where the probe says `DEGRADED`, or keep them as decoys. Needs a decision, not code first.
@@ -105,7 +114,8 @@ would I know if this silently did nothing?" — then run that.
 | GitHub accepts some writes and changes nothing | Re-read after every release/settings edit |
 | A `set +e … set -e` pair assumes errexit is the baseline | This suite runs `set -uo pipefail` (NO `-e`). A stray `set -e` leaked out of phase D and a *legitimate* exit-99 breach drill then killed the whole suite silently. Restore with `set +e`, or save/restore `$-`. |
 | `assert_safe_mount` string-matches paths, but `cd; pwd -P` resolves symlinks | On usrmerge hosts `/bin`→`/usr/bin`, so a name-based refuse list misses `/bin /sbin /lib`. Fixed in v1.0.2 by also checking `pwd -L`. |
-| `warden-cli.sh build --pull` puts `--pull` AFTER the build context | `cmd_build` appends `"$@"` after `"$ctx"`, so a trailing flag is at best ignored. For a release rebuild call `docker build --pull -f … -t … "$ctx"` directly (flags before the path). Worth fixing in `cmd_build` one day. |
+| `warden-cli.sh build --pull` used to drop the flag | Fixed: `cmd_build` now puts `"$@"` BEFORE the context and applies it to both images. `warden-cli.sh build --pull` re-pulls the base for proxy + agent. |
+| Debian's squid (5.7, `--with-gnutls`, no `--with-openssl`) has no `ssl_bump` | `squid -k parse` on any `at_step`/`ssl_bump` line dies `FATAL: Invalid ACL type 'at_step'`. Peek-and-splice / SNI enforcement needs a different squid build. Relevant to the §4.2 domain-fronting decision. |
 
 ---
 

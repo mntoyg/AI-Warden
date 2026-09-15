@@ -21,6 +21,12 @@
 #      allowlisted proxy into an exfiltration channel.
 #    * Every addition widens the blast radius of a compromised agent.
 #      Review this file the way you would review a firewall change.
+#    * A host on a SHARED CDN (e.g. .githubusercontent.com and *.github.io both
+#      sit on Fastly 185.199.108.0/22) can be SNI-fronted: the agent CONNECTs to
+#      the allowlisted host and sets a different SNI to reach another origin on
+#      the same CDN IP. squid filters the CONNECT host only, so it cannot stop
+#      this. Confirmed with an exploit - see docs/THREAT_MODEL.md 4.2. For strict
+#      egress, avoid CDN-shared entries entirely.
 #
 #  Reload after editing:  make reload-proxy
 # =============================================================================

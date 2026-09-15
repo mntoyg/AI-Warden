@@ -61,7 +61,11 @@ Linux kernel, Docker daemon และ runtime, image ที่ build จาก r
 allowlist ควบคุมได้แค่ "คุยกับใคร" ไม่ใช่ "คุยว่าอะไร"
 
 **ถ้ายอมรับข้อแลกนี้ไม่ได้:** เพิ่ม `ssl_bump` ใน `squid.conf` และ inject CA ใน Dockerfile
-แต่ต้องยอมรับว่า proxy กลายเป็นจุดรวมความลับ
+แต่ต้องยอมรับว่า proxy กลายเป็นจุดรวมความลับ — และ squid ที่ image นี้ใช้ (Debian 5.7,
+`--with-gnutls` ไม่มี `--with-openssl`) **ทำ ssl_bump ไม่ได้เลย** ต้องเปลี่ยน base image ก่อน
+
+**ผลข้างเคียงที่ตามมาจริง:** การไม่เห็น SNI ทำให้ allowlist ถูก front ข้ามได้บน CDN ร่วม —
+ดู §4.2 (ยืนยันด้วย exploit แล้ว)
 
 ### 3.2 inotify ผ่าน ctypes ไม่พึ่ง library ภายนอกเลย
 
@@ -146,6 +150,38 @@ sandbox นี้ยืนอยู่บน Linux namespace ถ้ามี CVE
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา
 **บรรเทา:** ให้ token ที่แคบที่สุด, ตัด `deb.debian.org` ออกถ้าไม่ต้องติดตั้ง OS package,
 และอ่าน `make logs` เป็นระยะ
+
+**ยืนยันแล้ว (2026-09-15): SNI domain fronting ข้าม allowlist ได้บน CDN ที่แชร์ IP.**
+squid filter ที่ระดับ CONNECT host เท่านั้น (ไม่ทำ SSL-bump — §3.1) จึงเห็นแค่ชื่อในบรรทัด
+CONNECT ไม่เห็น SNI/Host ที่อยู่ใน TLS agent จึง CONNECT ไปโฮสต์ที่อยู่ใน allowlist ซึ่งอยู่
+บน CDN ร่วม แล้วตั้ง SNI เป็นโฮสต์อื่นบน CDN เดียวกัน เพื่อไปถึง origin ที่ไม่อยู่ใน allowlist
+ได้ พิสูจน์จากในกรง:
+
+```bash
+# CONNECT ไป raw.githubusercontent.com (อยู่ใน allowlist, Fastly 185.199.108.0/22)
+# แต่ TLS SNI/Host = octocat.github.io (ไม่อยู่ใน allowlist, Fastly เดียวกัน)
+curl -x http://warden-egress-proxy:3128 \
+     --connect-to octocat.github.io:443:raw.githubusercontent.com:443 \
+     https://octocat.github.io/
+# -> HTTP 200, <title>Octocat.github.io</title>  (ได้เนื้อหา origin ที่ไม่อนุญาต)
+# squid access.log: TCP_TUNNEL/200 CONNECT raw.githubusercontent.com:443  (นึกว่าอนุญาตถูก)
+# ขณะที่ CONNECT octocat.github.io:443 ตรง ๆ -> TCP_DENIED/403
+```
+
+ขอบเขตที่พิสูจน์: เข้าถึง `*.github.io` (GitHub Pages) ใด ๆ ได้ ทั้งที่ allowlist ตั้งใจให้แค่
+raw content การ front ไปหา origin ของผู้โจมตีเองขึ้นกับว่า Fastly จัดผู้เช่ารายนั้นไว้ IP pool
+เดียวกับ GitHub หรือไม่ (ไม่ทดสอบ เพื่อไม่ยิงบุคคลที่สาม) — แต่กลไก bypass เป็นจริง
+
+**บรรเทา (เรียงตามความเข้ม):**
+1. อย่าใส่โฮสต์บน CDN ร่วม (เช่น `.githubusercontent.com`) ถ้าต้องการ egress เข้ม — ทุก
+   entry บน CDN ร่วมเปิดทางให้ front ไปทุก origin ที่ CDN นั้นเสิร์ฟบน IP เดียวกัน
+2. ถ้าต้องใช้โฮสต์ CDN จริง ๆ ต้องกรองที่ระดับ **SNI**: squid ที่ build มากับ OpenSSL แล้วทำ
+   peek-and-splice (`ssl_bump peek step1` + `acl … ssl::server_name` + splice/terminate) —
+   อ่าน SNI จาก ClientHello โดย **ไม่ decrypt** payload จึงไม่ใช่ SSL-bump เต็มรูปแบบตาม §3.1
+   **แต่ squid ของ Debian (5.7, `--with-gnutls` ไม่มี `--with-openssl`) ทำ ssl_bump ไม่ได้**
+   (`squid -k parse` ตอบ `FATAL: Invalid ACL type 'at_step'`) ต้องเปลี่ยน base image หรือใช้
+   egress ที่รู้จัก SNI (SNI proxy / L7 firewall) — เป็น **การตัดสินใจ** เพราะกระทบเส้น
+   "ไม่ทำ SSL-bump" ใน §3.1 ไม่ใช่แค่แก้ config
 
 ### 4.3 โค้ดที่ agent เขียนแล้วเอาไปรันบนโฮสต์
 กรงคุ้มครองแค่ตอน agent รันอยู่ข้างใน `git diff` ก่อน merge เสมอ
