@@ -244,6 +244,14 @@ if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
     # nothing ran after phase D. Phase E does, and its breach drills legitimately
     # exit 99 - under a stray `set -e` that killed the whole suite silently.
     set +e
+    # No symlink was planted here, so a benign breach must leave ONE clean report.
+    # The inline monitor and the sentinel both watch the shared vault and race to
+    # write it; the loser used to hit EACCES and cry "report replaced by a symlink"
+    # (a false tamper alarm) plus an empty fallback. Capture that state before the
+    # workspace is removed.
+    d_tamper="$(grep -l report_path_tampered "${SENTINEL_WS}"/WARDEN_SECURITY_INCIDENT*.json 2>/dev/null | head -1)"
+    d_empty="$(find "${SENTINEL_WS}" -name 'WARDEN_SECURITY_INCIDENT.*.json' -size 0 2>/dev/null | head -1)"
+    d_reports="$(find "${SENTINEL_WS}" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
     rmdir "${SENTINEL_WS}/.secrets" 2>/dev/null || true
     rm -rf "$SENTINEL_WS" 2>/dev/null || true
 fi
@@ -251,6 +259,15 @@ fi
 printf '\n'
 if [ "$phase_d" -eq 99 ]; then
     good "phase D: the sentinel contained a breach after the inline monitor was killed"
+    if [ -n "${d_tamper:-}" ] || [ -n "${d_empty:-}" ]; then
+        bad "phase D: a benign breach raised a FALSE tamper alarm / empty fallback"
+        bad "         (inline+sentinel race) - tamper=${d_tamper:-none} empty=${d_empty:-none}"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    elif [ "${d_reports:-0}" -ge 1 ]; then
+        good "phase D: the breach left a single clean incident report (no false tamper alarm from the race)"
+    else
+        note "phase D: no workspace incident report to inspect here (bind-mount write restricted); false-alarm check skipped"
+    fi
 else
     bad "phase D: expected exit 99, got ${phase_d} - an agent that disarms the inline"
     bad "         monitor is not contained by the out-of-band sentinel"

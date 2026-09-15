@@ -404,9 +404,24 @@ def write_breach_record(run_dir: Path, record: dict) -> None:
         write_no_follow(primary, body)
         return
     except OSError as exc:
+        # ONLY O_NOFOLLOW hitting a symlink (ELOOP) is tampering: the agent planted
+        # a link at the report path to redirect the write. Everything else is not,
+        # and must not raise the tampering alarm - a false "someone redirected the
+        # report" cry discredits every real incident report.
+        #
+        # The common non-ELOOP case: the inline monitor and the out-of-band
+        # sentinel both watch the shared canary vault, so on a breach BOTH fire and
+        # race to write this file. The winner writes it 0444; the loser's O_TRUNC
+        # then fails EACCES. That is not tampering - the report is already there.
+        if exc.errno != errno.ELOOP:
+            if primary.exists() and not primary.is_symlink():
+                log(f"incident report already written by the peer monitor at {primary}")
+            else:
+                log(f"could not write the workspace incident report ({exc.strerror}): {primary}")
+            return
         alert(
-            f"[SECURITY BREACH] {primary} could not be written ({exc.strerror}); "
-            "it may have been replaced with a symlink to redirect this report"
+            f"[SECURITY BREACH] {primary} is a symlink - refusing to write the report "
+            "through it (redirection attempt); the link is preserved as evidence"
         )
 
     record = dict(record, report_path_tampered=str(primary))
