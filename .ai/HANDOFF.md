@@ -4,9 +4,11 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-15 (session 4)
+- **Last updated:** 2026-09-15 (session 5)
 - **Latest release:** [v1.0.2](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.2) — mount-guard hardening (security), marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v3)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v4)
+- **🚩 MILESTONE — first live test: Monday 2026-09-21.** Keep `main` green and
+  release-ready; reliability/security fixes before new features until then.
 
 ---
 
@@ -14,12 +16,13 @@
 
 | Thing | State |
 |---|---|
-| `main` | `c9ecb6a` (release 1.0.2) + this handoff commit, pushed, tree clean |
+| `main` | `8f61b3e` (CI pull-hardening), tree clean; gVisor plumbing (`65f2cbd`) + this handoff on top |
 | Tags | `v1.0.0` & `v1.0.1` both carry a "superseded" warning · `v1.0.2` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.2` (run 34937500342) |
-| Local suite (Docker Desktop / Windows) | Phase A 34/34 (incl. cgroup memory/swap/pids limits) · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 · monitor reports `v1.0.2` |
-| CI suite (ext4) | all phases incl. E · `enforced=7/7` · compose handshake OK · 0 leaked volumes |
-| CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden` (trivy on rebuilt images, debian 12.15); ~70 in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** (tag `v1.0.2`: run 34937500342; gVisor commit `65f2cbd`: run 34946167536) |
+| Local suite (Docker Desktop / Windows) | Phase A 34/34 · B exit 99 · C exit 78 · D exit 99 · E1–E4 pass · **F (runtime fail-closed) pass, passthrough proven via nvidia** · `enforced=4/7` · suite exit 0 |
+| CI suite (ext4) | all phases incl. E + F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips: no non-default runtime on CI) |
+| CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden` (trivy, debian 12.15); **74** in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
+| Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
 
 ---
 
@@ -47,12 +50,6 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
    mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
    source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
-3. **(low) Harden CI image pulls.** The `static` job's Secret-scan step pulls
-   `zricethezav/gitleaks:latest` from Docker Hub at runtime and flaked once this session
-   (`connection reset by peer`, exit 125). Pin a version and wrap the `docker run` in a
-   small pull-retry (2–3 attempts) so a Docker Hub hiccup doesn't red a clean build. Same
-   pattern would help the trivy/shellcheck/hadolint pulls.
-
 ### Decided this session (do not re-raise without new evidence)
 
 - **SNI domain fronting → accept + document only** (user call, 2026-09-15). Bypass is
