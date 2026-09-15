@@ -146,24 +146,50 @@ assert_safe_mount() {
     RESOLVED_MOUNT=""
     [ -d "$abs" ] || die "not a directory: ${abs}"
 
-    local real; real="$(cd "$abs" && pwd -P)"
+    # Resolve two ways and check both. `pwd -P` follows every symlink (the real
+    # inode we would hand the daemon); `pwd -L` keeps the logical name the user
+    # typed. Both matter: on a usrmerge host `/bin` -> `/usr/bin`, so a check
+    # against the physical path alone waves `/bin`, `/sbin`, `/lib` straight
+    # through (their real path `/usr/bin` is not in the list, only `/usr` is).
+    # Checking the logical name catches what the user actually asked for, and it
+    # false-positives on nothing: a real project like `/var/www` has the same
+    # value both ways and matches no rule.
+    local real logical
+    real="$(cd "$abs" && pwd -P)"
+    logical="$(cd "$abs" && pwd -L)"
     local home; home="$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || echo '/nonexistent')"
 
     # 1. Filesystem roots, system paths, and anything holding every user's data.
     #    /home and /Users are listed by name: $HOME is caught below, but mounting
     #    their parent would hand the agent every account on the machine.
-    case "$real" in
-        /|/root|/etc|/usr|/var|/boot|/dev|/proc|/sys|/bin|/sbin|/lib|/lib64|/opt|/srv)
-            die "refusing to mount system path: ${real}" ;;
-        /home|/home/|/Users|/Users/|/media|/mnt|/mnt/)
-            die "refusing to mount a shared parent of user data: ${real}" ;;
-        /[a-z]|/[a-z]/|/[A-Z]|/[A-Z]/)
-            die "refusing to mount a whole drive: ${real}" ;;
-        /mnt/[a-z]|/mnt/[a-z]/|/mnt/[A-Z]|/mnt/[A-Z]/|/media/*/)
-            die "refusing to mount a whole mounted drive: ${real}" ;;
-        /cygdrive/*/)
-            die "refusing to mount a whole drive: ${real}" ;;
-    esac
+    local candidate parent
+    for candidate in "$real" "$logical"; do
+        case "$candidate" in
+            /|/root|/etc|/usr|/var|/boot|/dev|/proc|/sys|/bin|/sbin|/lib|/lib64|/opt|/srv|/run)
+                die "refusing to mount system path: ${candidate}" ;;
+            /home|/home/|/Users|/Users/|/media|/mnt|/mnt/|/run/media|/cygdrive)
+                die "refusing to mount a shared parent of user data: ${candidate}" ;;
+            /[a-z]|/[a-z]/|/[A-Z]|/[A-Z]/)
+                die "refusing to mount a whole drive: ${candidate}" ;;
+            /mnt/[a-z]|/mnt/[a-z]/|/mnt/[A-Z]|/mnt/[A-Z]/)
+                die "refusing to mount a whole mounted drive: ${candidate}" ;;
+        esac
+
+        # A volume auto-mounted directly under /media, /run/media or /cygdrive is
+        # a whole drive, not a project. The old `/media/*/` and `/cygdrive/*/`
+        # patterns were dead code: `pwd` never yields a trailing slash, so they
+        # could never match and a whole USB stick or Windows drive was mountable.
+        # Match the drive root by its PARENT instead; a project folder nested
+        # deeper (e.g. /media/usb/app) has a different parent and is still
+        # allowed. /mnt keeps its single-letter rule above, because a hand-made
+        # /mnt/project is a legitimate layout. (The udisks /media/<user>/<label>
+        # form is one level deeper and is not covered here - see HANDOFF.)
+        parent="$(dirname "$candidate")"
+        case "$parent" in
+            /media|/run/media|/cygdrive)
+                die "refusing to mount what looks like a whole drive: ${candidate}" ;;
+        esac
+    done
 
     # 2. The user's home directory itself (a project *inside* it is fine).
     if [ "$real" = "$home" ]; then

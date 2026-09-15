@@ -376,18 +376,15 @@ fi
 printf '\n'
 info "E3: the mount guard must refuse every system/shared path and accept a real project"
 CLI_MOUNT="$(host_path "${SCRIPT_DIR}/warden-cli.sh")"
-# This list is the battery the v1.0.1 audit used against assert_safe_mount, so
-# E3 is a faithful regression drill for the behaviour v1.0.1 shipped.
-#
-# It deliberately does NOT include /bin /sbin /lib or a one-level drive mount
-# like /media/usb: writing this drill surfaced that the guard ACCEPTS those
-# today (usrmerge resolves /bin -> /usr/bin, which is not in the refuse list;
-# and the /media/*/ and /cygdrive/*/ patterns are dead because pwd -P never
-# yields a trailing slash). That is a genuine new gap - a guard that reports
-# itself armed while enforcing nothing - and it is tracked as its own item in
-# .ai/HANDOFF.md "Next steps", to be fixed with care and shipped in a tag,
-# rather than folded silently into a regression drill.
-e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot >/dev/null 2>&1; f=0; for p in / /home /Users /mnt /mnt/c /media /srv /etc /usr /var /root /boot /dev /proc /sys /opt; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; mkdir -p /opt/wtest-project; if ( assert_safe_mount /opt/wtest-project ) >/dev/null 2>&1; then echo ACCEPT_OK; else echo "REGRESSION:refused-a-legit-dir"; f=$((f+1)); fi; echo "E3_FAILS=$f"; exit $f'
+# The refuse-list is the v1.0.1 audit battery PLUS the paths that writing this
+# drill exposed as still-mountable and that v1.0.2 then closed: usrmerge
+# symlinks (/bin /sbin /lib, whose real path is /usr/*) and whole-drive mounts
+# one level under /media, /run/media and /cygdrive (the old /media/*/ pattern
+# was dead - pwd never yields a trailing slash). Two accept-tests guard the
+# other failure mode: a legitimate project dir, and a project nested INSIDE a
+# drive (/media/usb/app) must both still be allowed - a guard that refuses
+# everything is as broken as one that refuses nothing.
+e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot /media/usb/app /cygdrive/c /run/media/u /opt/wtest-project >/dev/null 2>&1; f=0; for p in / /run /home /Users /mnt /mnt/c /media /media/usb /cygdrive /cygdrive/c /run/media /srv /etc /usr /var /root /boot /dev /proc /sys /opt /bin /sbin /lib; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; for ok in /opt/wtest-project /media/usb/app; do if ( assert_safe_mount "$ok" ) >/dev/null 2>&1; then :; else echo "REGRESSION:refused $ok"; f=$((f+1)); fi; done; echo "E3_FAILS=$f"; exit $f'
 
 e3_out="$(docker run --rm --user 0:0 --network none --entrypoint bash \
     --name warden-verify-e3 \
