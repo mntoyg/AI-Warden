@@ -4,6 +4,35 @@
 
 ---
 
+## [1.0.3] — 2026-09-15
+
+**Correctness/trust fix — ควรอัปเกรด โดยเฉพาะก่อนโชว์/บันทึกวิดีโอ**
+
+การซ้อมเดโมจริง (`warden-cli run`, sentinel เปิด) บน Docker Desktop เผยว่า breach
+ที่ถูกต้องกลับพิมพ์ false alarm ว่า incident report ถูก symlink เปลี่ยนเส้นทาง ทั้งที่
+ไม่มีการ tamper — tripwire ร้องหมาป่า ซึ่งเป็น bug shape ประจำโปรเจกต์ (control ที่
+รายงานผิด)
+
+### Fixed
+
+- **False "report redirected by a symlink" alarm บน race ปกติ** — inline monitor กับ
+  out-of-band sentinel เฝ้า canary vault เดียวกัน พอ breach ทั้งคู่ยิงแล้ว **แข่งกันเขียน**
+  `WARDEN_SECURITY_INCIDENT.json` ตัวชนะเขียน 0444 ตัวแพ้ `O_TRUNC` เจอ EACCES เดิม
+  v1.0.1 ตีความ error ทุกชนิดว่า "ถูก symlink เปลี่ยนเส้นทาง" + ทิ้ง fallback ไฟล์ว่าง
+  ตอนนี้ **เฉพาะ errno ELOOP** (O_NOFOLLOW โดน symlink จริง) ถึงนับเป็น tamper; error
+  อื่นถ้ามี report ปกติอยู่แล้ว = peer เขียนไปแล้ว → log เงียบ ไม่มี false alarm/ไฟล์ว่าง
+  การจับ symlink redirection จริงไม่เปลี่ยน (phase E1 ยังเขียว)
+- ตัด directive `dns_v4_first` ที่ obsolete ใน squid 5 ซึ่งพิมพ์ `ERROR: ... is obsolete`
+  ตอน build proxy ทุกครั้ง
+
+### Tests
+
+- phase D ตรวจ incident report หลัง breach: **fail ถ้า** benign breach เกิด
+  `report_path_tampered` หรือ fallback ไฟล์ว่าง (การเช็คที่จะจับบั๊กนี้ได้)
+- phase A–F เขียวครบ (local exit 0); dry-run breach เหลือ report เดียวสะอาด
+
+---
+
 ## [1.0.2] — 2026-09-15
 
 **Security release — ผู้ใช้ v1.0.1 ควรอัปเกรด**
