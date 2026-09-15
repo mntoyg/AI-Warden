@@ -22,6 +22,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Weekly, Monday 06:00 UTC. The image builds below run with --pull, so this
+    # catches a HIGH/CRITICAL that lands in the Debian base AFTER our last push -
+    # without a timer that drift is only ever found by luck during a release
+    # (which is exactly how libpcre2 reached v1.0.0 and sat there for 8 days).
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
@@ -110,7 +116,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Build both images
-        run: ./scripts/warden-cli.sh build
+        run: ./scripts/warden-cli.sh build --pull
 
       # The gate is deliberately scoped. OS packages, and anything under
       # /opt/warden, are what this project chose and ships - a HIGH or CRITICAL
@@ -161,7 +167,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Build both images
-        run: ./scripts/warden-cli.sh build
+        run: ./scripts/warden-cli.sh build --pull
 
       - name: Start the egress filter
         run: ./scripts/warden-cli.sh up

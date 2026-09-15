@@ -234,12 +234,18 @@ cmd_build() {
     docker_available
     local ctx; ctx="$(host_path "$PROJECT_ROOT")"
 
+    # Extra args ("$@", e.g. --pull) are placed BEFORE the context and applied to
+    # BOTH images. Docker options must precede the PATH, and a scheduled CVE gate
+    # that rebuilds without --pull would reuse the cached base layers and silently
+    # miss base-image drift - the whole point of the timer. (Previously "$@" was
+    # appended after the context on the agent build only, so it reached neither
+    # image reliably.)
     info "building egress proxy image (${PROXY_IMAGE})"
-    docker build -f "$(host_path "${PROJECT_ROOT}/core/network/Dockerfile")" -t "$PROXY_IMAGE" "$ctx"
+    docker build "$@" -f "$(host_path "${PROJECT_ROOT}/core/network/Dockerfile")" -t "$PROXY_IMAGE" "$ctx"
     ok "egress proxy built"
 
     info "building agent sandbox image (${AGENT_IMAGE}) - this pulls Node, Python and the agent CLIs"
-    docker build -f "$(host_path "${PROJECT_ROOT}/core/Dockerfile")" -t "$AGENT_IMAGE" "$ctx" "$@"
+    docker build "$@" -f "$(host_path "${PROJECT_ROOT}/core/Dockerfile")" -t "$AGENT_IMAGE" "$ctx"
     ok "agent sandbox built"
 
     docker image inspect "$AGENT_IMAGE" --format '{{.Config.User}} {{.Config.WorkingDir}}' >/dev/null
