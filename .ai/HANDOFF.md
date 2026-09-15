@@ -28,13 +28,18 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
-   and compose. The threat model already *recommends* gVisor for kernel-escape
-   defence but nothing in the tooling supports it. **Needs a host with `runsc`
-   installed to verify** — Docker Desktop has none, and shipping a `--runtime`
-   passthrough that silently falls back to runc (or an unverified gVisor detector)
-   would be the exact "reports armed, enforces nothing" bug. Do this on a Linux host
-   where gVisor can actually be installed and the active runtime confirmed.
+1. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
+   plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
+   sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
+   unavailable runtime (never downgrades to runc), and phase F proves fail-closed +
+   that a valid runtime is actually applied e2e (using `nvidia` as a stand-in on the
+   dev box). What is NOT yet verified: gVisor itself. On a host with `runsc`
+   installed, run `WARDEN_RUNTIME=runsc ./scripts/verify-isolation.sh` — phase F's
+   passthrough check will pick runsc automatically — and specifically confirm the
+   **sentinel** works, because gVisor + a shared PID namespace (`--pid container:`)
+   is a known gVisor limitation and is untested (THREAT_MODEL §4.1). Only once that
+   is green should "gVisor support" be claimed in a release (v1.1.0 - it is a feature,
+   not a fix).
 2. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
    guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
    udisks layout puts the drive root two levels down (`/media/john/USB`), which is

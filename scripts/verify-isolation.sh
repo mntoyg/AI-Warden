@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Five phases:
+#  Proves the sandbox actually does what the README claims. Six phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -21,6 +21,9 @@
 #                                 E2 forensic-log injection via /proc cmdline
 #                                 E3 the mount guard (assert_safe_mount)
 #                                 E4 seeding through a dangling canary symlink
+#    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
+#                               refused, never silently downgraded to runc. The
+#                               gVisor happy-path is skipped where runsc is absent.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -45,7 +48,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,28p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -96,7 +99,13 @@ docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/n
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e3 \
-        warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read >/dev/null 2>&1 || true
+        warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
+        warden-verify-rt >/dev/null 2>&1 || true
+    # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
+    # its vault by label in case the suite was interrupted mid-check.
+    local rtp_leftover
+    rtp_leftover="$(docker ps -aq --filter 'name=verify-rtp' 2>/dev/null || true)"
+    if [ -n "$rtp_leftover" ]; then docker rm -f "$rtp_leftover" >/dev/null 2>&1 || true; fi
     docker volume rm -f "$VERIFY_VAULT" >/dev/null 2>&1 || true
     if [ "$KEEP" = "0" ]; then
         rm -rf "$VERIFY_WS" 2>/dev/null || true
@@ -452,6 +461,102 @@ elif [ "${e4_is_link:-0}" = "1" ] && [ "${e4_target:-1}" = "1" ]; then
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 else
     note "phase E4: skipped - this filesystem did not preserve the planted symlink (${e4_facts//$'\n'/ }); CI on ext4 enforces this"
+fi
+
+# =============================================================================
+printf '\n%s=========== PHASE F: runtime fail-closed (gVisor plumbing) ==========%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# WARDEN_RUNTIME lets a deployment run the sandbox under gVisor (runsc) or Kata.
+# The failure to guard against is a --runtime that silently downgrades to runc
+# when the requested runtime is missing: it would report itself hardened while
+# enforcing nothing. So the guard must refuse an unavailable runtime, not fall back.
+info "WARDEN_RUNTIME must be honoured or refused, never silently downgraded to runc"
+printf '\n'
+
+# F-func: assert_runtime() fails closed on a bogus runtime, accepts a valid one,
+# forces nothing when unset. Sourced in a CHILD bash so warden-cli.sh's own
+# `set -e`/readonly vars cannot leak into this suite (the phase-D lesson).
+f_out="$(CLI="${SCRIPT_DIR}/warden-cli.sh" bash -c '
+    . "$CLI"; set +eu; f=0
+    if ( assert_runtime "warden-nonexistent-runtime" ) >/dev/null 2>&1; then echo "BOGUS-ACCEPTED"; f=$((f+1)); fi
+    if ! assert_runtime "" >/dev/null 2>&1 || [ -n "$RESOLVED_RUNTIME" ]; then echo "EMPTY-BROKEN"; f=$((f+1)); fi
+    if ! assert_runtime "runc" >/dev/null 2>&1 || [ "$RESOLVED_RUNTIME" != "runc" ]; then echo "RUNC-BROKEN"; f=$((f+1)); fi
+    echo "FFAILS=$f"; exit $f' 2>&1)"
+f_func_rc=$?
+if [ "$f_func_rc" -eq 0 ]; then
+    good "phase F: assert_runtime refuses an unknown runtime and accepts a valid one"
+else
+    bad  "phase F: assert_runtime is not fail-closed"
+    note "         $(printf '%s' "$f_out" | grep -vE '^FFAILS' | tr '\n' ' ')"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# F-reflect: Docker actually applies and RECORDS the runtime it is handed.
+# HostConfig.Runtime is the authority - it is what the container ran under - and
+# it is how the wiring below could be caught silently ignoring the flag.
+docker rm -f warden-verify-rt >/dev/null 2>&1 || true
+docker run -d --name warden-verify-rt --runtime runc --entrypoint sleep "$AGENT_IMAGE" 10 >/dev/null 2>&1
+rt_seen="$(docker inspect --format '{{.HostConfig.Runtime}}' warden-verify-rt 2>/dev/null || echo '?')"
+docker rm -f warden-verify-rt >/dev/null 2>&1 || true
+if [ "$rt_seen" = "runc" ]; then
+    good "phase F: Docker records the runtime it is handed (HostConfig.Runtime=runc)"
+else
+    bad  "phase F: HostConfig.Runtime did not reflect --runtime (got '${rt_seen}')"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# F-e2e: the CLI itself must refuse an unavailable runtime and start NOTHING -
+# not error out only after spinning up the proxy, and never fall through to runc.
+RT_WS="${PROJECT_ROOT}/workspaces/.verify-rt-$$"
+mkdir -p "$RT_WS"; chmod 0777 "$RT_WS" 2>/dev/null || true
+WARDEN_RUNTIME="warden-nonexistent-runtime" NO_COLOR=1 \
+    "${SCRIPT_DIR}/warden-cli.sh" run "$RT_WS" bash -c 'echo THIS MUST NOT RUN' >/dev/null 2>&1
+rt_e2e_rc=$?
+rt_ran="$(docker ps -aq --filter 'name=verify-rt' 2>/dev/null || true)"
+[ -n "$rt_ran" ] && docker rm -f "$rt_ran" >/dev/null 2>&1
+rm -rf "$RT_WS" 2>/dev/null || true
+if [ "$rt_e2e_rc" -ne 0 ] && [ -z "$rt_ran" ]; then
+    good "phase F: warden-cli refused an unavailable WARDEN_RUNTIME and started no sandbox"
+else
+    bad  "phase F: warden-cli did NOT fail closed (rc=${rt_e2e_rc}, leftover container='${rt_ran}')"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# F-passthrough: cmd_run must actually APPLY a valid non-default runtime to the
+# agent - not just refuse bad ones. This is the silent-downgrade case: forget the
+# `args+=(--runtime ...)` line and WARDEN_RUNTIME=runsc would run under runc with
+# nothing to notice. runc can't prove it (it is the default anyway), so this uses
+# runsc if present, else any other non-default runtime (e.g. nvidia) as a stand-in.
+# Skips only where the daemon has no non-default runtime at all (some CI hosts).
+alt_rt="$(docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}' 2>/dev/null \
+          | tr ' ' '\n' | grep -vxE 'runc|io.containerd.runc.v2' | grep -v '^$' | head -1)"
+if [ -n "$alt_rt" ]; then
+    RTP_WS="${PROJECT_ROOT}/workspaces/.verify-rtp-$$"
+    mkdir -p "$RTP_WS"; chmod 0777 "$RTP_WS" 2>/dev/null || true
+    ( WARDEN_SENTINEL=0 WARDEN_REQUIRE_PROXY=0 WARDEN_RUNTIME="$alt_rt" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$RTP_WS" bash -- -lc 'sleep 20' >/dev/null 2>&1 ) &
+    rtp_bg=$!
+    rtp_seen=""; waited=0
+    while [ "$waited" -lt 30 ]; do
+        cid="$(docker ps -q --filter 'label=ai.warden.role=agent-sandbox' --filter 'name=verify-rtp' 2>/dev/null | head -1)"
+        if [ -n "$cid" ]; then
+            rtp_seen="$(docker inspect --format '{{.HostConfig.Runtime}}' "$cid" 2>/dev/null || echo '?')"
+            docker rm -f "$cid" >/dev/null 2>&1 || true
+            break
+        fi
+        sleep 1; waited=$((waited + 1))
+    done
+    wait "$rtp_bg" 2>/dev/null || true
+    docker rm -f "$(docker ps -aq --filter 'name=verify-rtp' 2>/dev/null)" >/dev/null 2>&1 || true
+    rm -rf "$RTP_WS" 2>/dev/null || true
+    if [ "$rtp_seen" = "$alt_rt" ]; then
+        good "phase F: warden-cli applies WARDEN_RUNTIME end-to-end (agent HostConfig.Runtime=${alt_rt})"
+    else
+        bad  "phase F: WARDEN_RUNTIME=${alt_rt} was not applied to the agent (saw '${rtp_seen:-none}')"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
+else
+    note "phase F: no non-default runtime available - cmd_run passthrough not exercised e2e (fail-closed + reflect still cover it)"
 fi
 
 # =============================================================================

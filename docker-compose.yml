@@ -128,6 +128,10 @@ services:
       warden_internal: {}       # internal only - no external network here
     user: "1001:1001"
     working_dir: /workspace
+    # Optional hardened runtime (e.g. runsc for gVisor). Default runc. If you set
+    # WARDEN_RUNTIME to something the daemon does not have, compose fails to start
+    # this service - it never downgrades silently. See docs/THREAT_MODEL.md 4.1.
+    runtime: ${WARDEN_RUNTIME:-runc}
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -195,6 +199,7 @@ services:
     pid: "service:warden-agent-sandbox"
     user: "0:0"
     group_add: ["1001"]
+    runtime: ${WARDEN_RUNTIME:-runc}
     read_only: true
     cap_drop: [ALL]
     cap_add: [KILL]             # the ONLY capability granted anywhere here

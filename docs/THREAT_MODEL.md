@@ -146,6 +146,16 @@ sandbox นี้ยืนอยู่บน Linux namespace ถ้ามี CVE
 **บรรเทา:** รัน rootless Docker (หลุดออกมาก็ไม่ได้ root ของโฮสต์),
 ใช้ gVisor `--runtime=runsc` หรือ Kata Containers, และอัปเดต kernel สม่ำเสมอ
 
+**รองรับใน tooling แล้ว:** ตั้ง `WARDEN_RUNTIME=runsc` (หรือ runtime อื่นที่ daemon
+ลงทะเบียนไว้) แล้ว `warden-cli.sh` และ compose จะส่ง `--runtime` ให้ทั้ง agent และ
+sentinel `assert_runtime` เช็คกับรายชื่อ runtime ของ daemon **ก่อน** สร้าง container
+ถ้าไม่มี runtime นั้นจะ **ปฏิเสธที่จะเริ่ม** ไม่ตกไป runc เงียบ ๆ (phase F ใน
+verify-isolation.sh พิสูจน์: fail-closed + ส่ง runtime ผ่านจริง e2e).
+**ยังไม่ทดสอบบน gVisor จริง** — เครื่องพัฒนา/CI ยังไม่มี `runsc` ติดตั้ง จึงพิสูจน์ได้แค่
+ว่า runtime ถูกส่งผ่านถูกต้อง (ใช้ runtime อื่นเป็น stand-in) ยังไม่ยืนยันว่า gVisor +
+shared PID namespace ของ sentinel (`--pid container:`) ทำงานเข้ากันได้ — gVisor มี
+ข้อจำกัดเรื่องนี้ ต้องรันบน host ที่มี gVisor เพื่อยืนยัน (Next-steps ใน HANDOFF)
+
 ### 4.2 การรั่วผ่านช่องทางที่อนุญาต
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา
 **บรรเทา:** ให้ token ที่แคบที่สุด, ตัด `deb.debian.org` ออกถ้าไม่ต้องติดตั้ง OS package,

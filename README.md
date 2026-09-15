@@ -371,8 +371,10 @@ AI Warden ยกระดับความปลอดภัยได้จร�
 
 1. **Container escape ระดับ kernel** — sandbox นี้ใช้ namespace ของ Linux
    ถ้ามีช่องโหว่ใน kernel หรือ runtime ที่หลุดออกจาก namespace ได้ AI Warden ก็หยุดไม่ได้
-   ถ้าต้องการชั้นนี้ด้วย ให้ใช้ gVisor (`--runtime=runsc`) หรือ Kata Containers
-   และรัน Docker แบบ rootless เพื่อให้การหลุดออกมาไม่ได้ root ของโฮสต์ทันที
+   ถ้าต้องการชั้นนี้ด้วย ตั้ง `WARDEN_RUNTIME=runsc` (gVisor) หรือ runtime อื่นที่ daemon
+   ลงทะเบียนไว้ — warden จะส่ง `--runtime` ให้ทั้ง agent และ sentinel และ **ปฏิเสธที่จะเริ่ม**
+   ถ้า daemon ไม่มี runtime นั้น (ไม่ตกไป runc เงียบ ๆ) และรัน Docker แบบ rootless ด้วย
+   > gVisor path ยังไม่ได้ทดสอบบน host จริงที่ลง gVisor — ดู `docs/THREAT_MODEL.md` §4.1
 
 2. **การรั่วผ่านช่องทางที่อนุญาต** — ถ้า agent มีสิทธิ์คุยกับ `api.anthropic.com` ได้
    มันก็ส่งซอร์สโค้ดของคุณไปในนั้นได้ allowlist ควบคุมได้แค่ "คุยกับใคร" ไม่ใช่ "คุยว่าอะไร"

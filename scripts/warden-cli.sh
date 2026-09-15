@@ -46,6 +46,7 @@ WARDEN_CPUS="${WARDEN_CPUS:-2}"
 WARDEN_PIDS_LIMIT="${WARDEN_PIDS_LIMIT:-512}"
 WARDEN_SENTINEL="${WARDEN_SENTINEL:-1}"
 WARDEN_WORKSPACE_MODE="${WARDEN_WORKSPACE_MODE:-rw}"   # rw | ro
+WARDEN_RUNTIME="${WARDEN_RUNTIME:-}"                   # empty = Docker default (runc); e.g. runsc for gVisor
 
 # --- Secrets that are forwarded by NAME only (never by value) ----------------
 readonly FORWARDED_SECRETS=(
@@ -83,7 +84,7 @@ load_env_file() {
     local key value
     while IFS='=' read -r key value; do
         case "$key" in
-            WARDEN_MEMORY|WARDEN_CPUS|WARDEN_PIDS_LIMIT|WARDEN_SENTINEL|WARDEN_WORKSPACE_MODE)
+            WARDEN_MEMORY|WARDEN_CPUS|WARDEN_PIDS_LIMIT|WARDEN_SENTINEL|WARDEN_WORKSPACE_MODE|WARDEN_RUNTIME)
                 value="${value%\"}"; value="${value#\"}"
                 if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
                 ;;
@@ -225,6 +226,38 @@ container_name_for() {
     base="$(printf '%s' "$base" | tr -c 'a-zA-Z0-9_.-' '-' | sed 's/^-*//;s/-*$//')"
     if [ -z "$base" ]; then base="workspace"; fi
     printf 'warden-sbx-%s' "$base"
+}
+
+# =============================================================================
+#  Container runtime (optional gVisor / Kata hardening)
+# -----------------------------------------------------------------------------
+#  WARDEN_RUNTIME empty  -> Docker's default runtime (runc); nothing is forced.
+#  WARDEN_RUNTIME=runsc  -> gVisor, if the daemon actually has it registered.
+#
+#  This must FAIL CLOSED. A `--runtime` that silently falls back to runc when the
+#  requested runtime is missing is the exact failure this project exists to catch:
+#  a control that reports itself armed (WARDEN_RUNTIME=runsc) while enforcing
+#  nothing (still runc). So the runtime is verified against the daemon's own list
+#  BEFORE any container is created, and a mismatch aborts rather than downgrades.
+#  The result is published in RESOLVED_RUNTIME (empty = use the default).
+# =============================================================================
+RESOLVED_RUNTIME=""
+assert_runtime() {
+    RESOLVED_RUNTIME=""
+    local want="${1:-}"
+    if [ -z "$want" ]; then return 0; fi
+
+    local available
+    available="$(docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}' 2>/dev/null || true)"
+    case " ${available} " in
+        *" ${want} "*)
+            RESOLVED_RUNTIME="$want" ;;
+        *)
+            die "WARDEN_RUNTIME=${want} is not a runtime this Docker daemon knows about.
+        Registered runtimes: ${available:-none}
+        Install and register it (e.g. gVisor's runsc) or unset WARDEN_RUNTIME.
+        Refusing to fall back to the default runtime silently." ;;
+    esac
 }
 
 # =============================================================================
@@ -405,7 +438,14 @@ start_sentinel() {
         sleep 0.5; waited=$((waited + 1))
     done
 
+    # Match the agent's runtime so both live under the same isolation boundary.
+    # NOTE: gVisor + a shared PID namespace (--pid container:) is UNTESTED (no
+    # gVisor host available yet); see docs/THREAT_MODEL.md 4.1. Empty = default.
+    local -a rt=()
+    if [ -n "$RESOLVED_RUNTIME" ]; then rt=(--runtime "$RESOLVED_RUNTIME"); fi
+
     if docker run -d --rm \
+        "${rt[@]}" \
         --name "$sentinel" \
         --network none \
         --pid "container:${agent_container}" \
@@ -479,6 +519,10 @@ cmd_run() {
     local name; name="$(container_name_for "$abs")"
     local vault; vault="$(vault_name_for "$name")"
 
+    # Resolve the container runtime before starting anything, so an unavailable
+    # WARDEN_RUNTIME aborts here rather than after the proxy and vault are up.
+    assert_runtime "$WARDEN_RUNTIME"
+
     cmd_up
     ensure_vault "$vault" || die "the canary vault could not be prepared"
 
@@ -515,6 +559,13 @@ cmd_run() {
         -e "TERM=${TERM:-xterm-256color}"
     )
 
+    # Optional hardened runtime (gVisor/Kata). Verified available by assert_runtime
+    # above; empty means Docker's default. Guarded with if/then, not `&&`, because
+    # `set -e` would treat the false test as a failure and abort.
+    if [ -n "$RESOLVED_RUNTIME" ]; then
+        args+=(--runtime "$RESOLVED_RUNTIME")
+    fi
+
     # Secrets: by NAME only. The value is read by the docker client from this
     # process's environment and never appears in argv, so it stays out of `ps`,
     # out of shell history and out of any container layer.
@@ -549,6 +600,7 @@ cmd_run() {
     info "container  : ${name}"
     info "agent      : ${agent_cmd[*]}"
     info "isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=${INTERNAL_NET} (internal)"
+    info "runtime    : ${RESOLVED_RUNTIME:-default (runc)}"
     printf '\n'
 
     if [ "$WARDEN_SENTINEL" = "1" ]; then
