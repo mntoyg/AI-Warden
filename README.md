@@ -259,7 +259,7 @@ AI Warden จึง **วัดความสามารถจริง** ต�
 [canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
                         Canaries on this path CANNOT be enforced.
 [canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
-[canary] v1.0.1 mode=inline action=kill enforced=4/7
+[canary] v1.0.2 mode=inline action=kill enforced=4/7
 [canary] *** 3 canary path(s) are NOT enforced on this host: ...
 ```
 

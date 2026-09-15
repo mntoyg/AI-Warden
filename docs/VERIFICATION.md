@@ -158,7 +158,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
 [canary] watchable  : /workspace/.secrets (ext4)   - inotify delivers events
 [canary] *** DEGRADED : /workspace (9p) does NOT deliver inotify events.
 [canary] watchable  : /home/ai_user/.aws (overlay) - inotify delivers events
-[canary] v1.0.1 mode=inline action=kill enforced=4/7
+[canary] v1.0.2 mode=inline action=kill enforced=4/7
 [canary] *** 3 canary path(s) are NOT enforced on this host: /workspace/.secrets.canary, ...
 ```
 

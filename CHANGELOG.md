@@ -4,6 +4,45 @@
 
 ---
 
+## [1.0.2] — 2026-09-15
+
+**Security release — ผู้ใช้ v1.0.1 ควรอัปเกรด**
+
+ตอนเปลี่ยน exploit ของ audit ให้เป็น drill ถาวร (phase E) การ *เขียน* drill E3
+เผยว่า `assert_safe_mount` — guard rail เดียวที่ตัดสินว่า mount อะไรได้ —
+รายงานตัวว่าทำงานแต่จริง ๆ ยัง "รับ" เป้าหมายอันตราย 3 กลุ่ม (คือ bug shape
+ประจำโปรเจกต์: control ที่บอกว่า armed แต่ไม่บังคับใช้อะไร) v1.0.1 changelog
+เคลม coverage ของ mount guard ไว้เกินจริง — รุ่นนี้แก้ให้ตรง
+
+### Security
+
+- **usrmerge symlink หลุด (`/bin`, `/sbin`, `/lib`)** — guard resolve ด้วย
+  `cd; pwd -P` ซึ่งตาม symlink ไปเป็น `/usr/bin` ฯลฯ และ refuse list มีแค่ `/usr`
+  path จริงจึงหลุด mount ทั้ง system dir ได้ ตอนนี้ตรวจทั้ง physical (`pwd -P`)
+  และ logical (`pwd -L`) — ชื่อที่ผู้ใช้พิมพ์ก็ถูกจับด้วย โดยไม่ false-positive
+  กับโปรเจกต์จริงอย่าง `/var/www`
+- **ไดรฟ์ทั้งลูกใต้ `/media`, `/run/media`, `/cygdrive` หลุด** — pattern
+  `/media/*/` และ `/cygdrive/*/` เดิมเป็น dead code (`pwd` ไม่เคยลงท้ายด้วย `/`
+  จึงไม่มีทาง match) `/media/usb` และ `/cygdrive/c` (ไดรฟ์ Windows ทั้งลูก) จึง
+  mount ได้ ตอนนี้ refuse โดยดูจาก parent เป็น `/media`/`/run/media`/`/cygdrive`
+  ส่วนโปรเจกต์ที่ซ้อนในไดรฟ์ (`/media/usb/app`) ยังอนุญาต และ `/mnt` คงกฎ
+  drive-letter เดิมไว้ (มือทำ `/mnt/project` ยังใช้ได้)
+- เพิ่ม `/run` และ bare `/run/media`, `/cygdrive` เข้า refuse list
+
+### Tests
+
+- phase E3 ป้อน 23 path อันตรายข้างต้น + accept-test 2 อัน (โปรเจกต์ปกติ และ
+  โปรเจกต์ซ้อนในไดรฟ์) ล็อกไว้กันทั้ง over- และ under-refusal
+- `verify-isolation.sh` phase A–E เขียวครบ (local exit 0, `enforced=4/7` บน
+  Docker Desktop 9p; CI บน ext4 `enforced=7/7`)
+
+### Known limitation
+
+- ไดรฟ์รูปแบบ udisks สองชั้น `/media/<user>/<label>` ยังไม่ครอบคลุม (แยกจาก
+  project ที่ซ้อนในไดรฟ์ไม่ได้แบบ structural) — บันทึกไว้ใน `.ai/HANDOFF.md`
+
+---
+
 ## [1.0.1] — 2026-09-14
 
 **Security release — ผู้ใช้ v1.0.0 ทุกคนควรอัปเกรด**
