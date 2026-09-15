@@ -17,7 +17,7 @@
 | `main` | `c9ecb6a` (release 1.0.2) + this handoff commit, pushed, tree clean |
 | Tags | `v1.0.0` & `v1.0.1` both carry a "superseded" warning · `v1.0.2` (Latest) |
 | CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** on `main` and on tag `v1.0.2` (run 34937500342) |
-| Local suite (Docker Desktop / Windows) | Phase A 31/31 · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 · monitor reports `v1.0.2` |
+| Local suite (Docker Desktop / Windows) | Phase A 34/34 (incl. cgroup memory/swap/pids limits) · B exit 99 · C exit 78 · D exit 99 · **E1–E4 all pass** · `enforced=4/7` (expected there) · suite exit 0 · monitor reports `v1.0.2` |
 | CI suite (ext4) | all phases incl. E · `enforced=7/7` · compose handshake OK · 0 leaked volumes |
 | CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden` (trivy on rebuilt images, debian 12.15); ~70 in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
 
@@ -28,36 +28,31 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **DECISION: how far to defend SNI domain fronting (investigation done, bypass
-   confirmed 2026-09-15).** Proven: CONNECT to an allowlisted host on a shared CDN +
-   a different TLS SNI reaches a non-allowlisted origin on the same CDN IP —
-   `--connect-to octocat.github.io:443:raw.githubusercontent.com:443` returned
-   `octocat.github.io` (200) though only `*.githubusercontent.com` is allowlisted
-   (squid log: `TCP_TUNNEL/200 CONNECT raw.githubusercontent.com`). Written up in
-   `docs/THREAT_MODEL.md` §4.2 with mitigations. The only in-proxy fix is SNI
-   peek-and-splice, which needs a squid built `--with-openssl` (the Debian 5.7 image
-   here can't: `FATAL: Invalid ACL type 'at_step'`) and crosses the "no SSL-bump"
-   line in §3.1. **User decides:** (a) accept + document only (done), (b) drop
-   CDN-shared allowlist entries for a strict profile, or (c) swap to an
-   openssl/peek-splice proxy or an SNI-aware L7 egress. Don't build (c) blind — it
-   needs a host where the SNI enforcement can actually be run and proven.
-2. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
+1. **Optional gVisor runtime** — `WARDEN_RUNTIME=runsc` passed through `warden-cli.sh`
    and compose. The threat model already *recommends* gVisor for kernel-escape
    defence but nothing in the tooling supports it. **Needs a host with `runsc`
    installed to verify** — Docker Desktop has none, and shipping a `--runtime`
    passthrough that silently falls back to runc (or an unverified gVisor detector)
    would be the exact "reports armed, enforces nothing" bug. Do this on a Linux host
    where gVisor can actually be installed and the active runtime confirmed.
-4. **Decide what to do with the 3 inert canaries on 9p.** On Docker Desktop they are
-   seeded into the user's project but cannot be enforced. Options: stop seeding them
-   where the probe says `DEGRADED`, or keep them as decoys. Needs a decision, not code first.
-5. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
+2. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
    guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
    udisks layout puts the drive root two levels down (`/media/john/USB`), which is
    structurally indistinguishable from a project nested inside a drive
    (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
    mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
    source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
+
+### Decided this session (do not re-raise without new evidence)
+
+- **SNI domain fronting → accept + document only** (user call, 2026-09-15). Bypass is
+  real and written up in `docs/THREAT_MODEL.md` §4.2; the proxy stays simple. A strict
+  deployment drops CDN-shared allowlist entries. Only revisit if someone needs a
+  hardened egress profile — then it is a peek-and-splice proxy on a Linux host, item 1's
+  cousin, not a config tweak.
+- **3 inert canaries on 9p → keep seeding as decoys** (user call, 2026-09-15). They are
+  honeytokens with value even unenforced; the monitor already reports `enforced=4/7`
+  honestly and lists the DEGRADED paths, so nothing is claimed falsely.
 
 ---
 

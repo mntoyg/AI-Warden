@@ -316,6 +316,60 @@ else
 fi
 
 # =============================================================================
+section "5. Resource containment"
+# =============================================================================
+
+# These limits are set on `docker run`, but "set on the flag" is not "enforced by
+# the kernel" - and the failure is silent. The most dangerous one is swap: if
+# --memory-swap is ever dropped, the memory cap can be sidestepped by swapping,
+# and nothing else would notice. So the cgroup itself is asked, not the flags.
+if [ -f /sys/fs/cgroup/memory.max ]; then                       # cgroup v2
+    mem="$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)"
+    if [ "$mem" != "max" ]; then
+        pass "memory is capped in the cgroup (memory.max=${mem})"
+    else
+        fail "memory.max is 'max'" "no memory limit is enforced - launch with --memory"
+    fi
+    if [ -f /sys/fs/cgroup/memory.swap.max ]; then
+        sw="$(cat /sys/fs/cgroup/memory.swap.max 2>/dev/null || echo max)"
+        if [ "$sw" = "0" ]; then
+            pass "swap is disabled (memory.swap.max=0) - the memory cap can't be sidestepped"
+        else
+            fail "swap is NOT disabled (memory.swap.max=${sw})" "set --memory-swap equal to --memory"
+        fi
+    else
+        skip "memory.swap.max absent (swap accounting off); cannot assert swap is disabled"
+    fi
+elif [ -f /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then   # cgroup v1
+    mem="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo 0)"
+    if [ "$mem" -lt 9223372036854000000 ] 2>/dev/null; then
+        pass "memory is capped in the cgroup (v1 limit_in_bytes=${mem})"
+    else
+        fail "no memory limit (v1 limit_in_bytes=${mem})" "launch with --memory"
+    fi
+else
+    skip "no cgroup memory controller found; cannot assert a memory cap"
+fi
+
+if [ -f /sys/fs/cgroup/pids.max ]; then                         # cgroup v2
+    pmax="$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo max)"
+    if [ "$pmax" != "max" ]; then
+        pass "process count is capped (pids.max=${pmax}) - fork bombs are bounded"
+    else
+        fail "pids.max is 'max'" "no fork-bomb limit - launch with --pids-limit"
+    fi
+elif [ -f /sys/fs/cgroup/pids/pids.max ]; then                  # cgroup v1
+    pmax="$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || echo max)"
+    if [ "$pmax" != "max" ]; then
+        pass "process count is capped (v1 pids.max=${pmax})"
+    else
+        fail "pids.max is 'max' (v1)" "launch with --pids-limit"
+    fi
+else
+    skip "no cgroup pids controller found; cannot assert a pid cap"
+fi
+
+# =============================================================================
 section "Summary"
 # =============================================================================
 printf '  %s passed, %s failed, %s skipped\n\n' "$PASS" "$FAIL" "$SKIP"
