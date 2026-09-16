@@ -4,8 +4,13 @@
 > รัน Claude Code, Aider, Codex CLI, Hermes และ Cursor Dev Container ได้อย่างปลอดภัย
 > โดยที่ agent เข้าไม่ถึงเครื่องโฮสต์ ส่งข้อมูลออกนอกไม่ได้ และขยับด้านข้างไม่ได้
 
+[![CI](https://github.com/mntoyg/AI-Warden/actions/workflows/ci.yml/badge.svg)](https://github.com/mntoyg/AI-Warden/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Docker%20%7C%20Linux%20%7C%20WSL2%20%7C%20macOS-blue)
+
+**[Demo 60 วินาที](#demo-60-วินาที) · [เริ่มใช้งาน](#เริ่มใช้งานใน-4-คำสั่ง) ·
+[พิสูจน์ว่าทำงานจริง](#พิสูจน์ว่ามันทำงานจริง) · [ข้อจำกัด](#ข้อจำกัดที่ต้องรู้-พูดตรง-ๆ) ·
+[Threat model](docs/THREAT_MODEL.md)**
 
 ---
 
@@ -25,6 +30,77 @@ AI coding agent สมัยนี้รันคำสั่ง shell เอง
 
 AI Warden ปิดทั้ง 5 ทางนี้ที่ระดับ **OS / kernel** ไม่ใช่ระดับ prompt
 เพราะกฎที่เขียนใน prompt นั้น agent เลือกไม่ทำตามได้ แต่ capability ที่ถูก drop ไปแล้วนั้นเรียกคืนไม่ได้
+
+---
+
+## Demo 60 วินาที
+
+ใน workspace มี honeypot credential ที่ไม่มีใครบอก agent ว่ามีอยู่
+สมมติว่า agent ถูกยึดแล้วไปอ่านมัน
+
+output ข้างล่างนี้คัดลอกมาจาก run จริงบน Docker Desktop (Windows) ไม่ได้เขียนขึ้นใหม่
+
+```console
+$ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c \
+    'exec 3< /workspace/.secrets/credentials; cat <&3; sleep 25'
+
+[warden] isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)
+[canary] v1.0.3 mode=inline action=kill enforced=4/7 watching=...
+[canary] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
+[canary] *** [SECURITY BREACH] suspect pid=103 uid=1001 evidence=open file descriptor exe=/usr/bin/bash
+[canary] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [103]
+[canary] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
+
+  SECURITY BREACH: the canary tripwire terminated this sandbox.
+  Incident report: ./workspaces/demo/WARDEN_SECURITY_INCIDENT.json
+  Treat the agent session as hostile: rotate any key it was given.
+
+$ echo $?
+99
+```
+
+ทั้งหมดนี้จบภายใน 1 วินาที และเหลือหลักฐานไว้บนโฮสต์ นอก container ที่ตายไปแล้ว
+
+```json
+{
+  "schema": "ai-warden/breach/1",
+  "warden_version": "1.0.3",
+  "canary_path": "/workspace/.secrets/credentials",
+  "inotify_event": "OPEN",
+  "mode": "sentinel",
+  "action": "kill",
+  "suspects": [
+    { "pid": 103, "uid": 1001, "evidence": "canary named in argv",
+      "cmdline": "bash -l -c exec 3< /workspace/.secrets/credentials; cat <&3; ..." }
+  ],
+  "timestamp_utc": "2026-09-16T08:12:55Z"
+}
+```
+
+(`mode: sentinel` = ใบรายงานนี้เขียนโดย monitor นอกกรง ไม่ใช่ตัวในกรงที่ agent
+เอื้อมถึงได้ ส่วน `evidence` ของมันละเอียดน้อยกว่าที่เห็นใน log เพราะ sentinel
+ถือแค่ `CAP_KILL` — อ่าน `/proc/<pid>/fd` ไม่ได้ ดู [`docs/DEMO.md`](docs/DEMO.md) §3)
+
+สิ่งที่เห็นในกรงเดียวกันนั้น — ยืนยันจากในตัว sandbox เอง ไม่ใช่จากคำโฆษณา
+
+```
+uid=1001(ai_user)  CapBnd: 0000000000000000  NoNewPrivs: 1
+  PASS no host filesystem and no docker socket - only /workspace is shared
+  PASS no direct TCP egress at all - the sandbox network is internal:true
+  PASS allowlisted api.anthropic.com tunnels through the proxy (HTTP 401)
+  PASS non-allowlisted example.com refused by the proxy with 403
+  PASS IP-literal destinations are refused too (no allowlist bypass by address)
+```
+
+รันเองได้ทั้งชุดด้วยคำสั่งเดียว — สคริปต์นี้ **ตรวจข้ออ้างของตัวเองทุกข้อ**
+ถ้าอะไรไม่เกิดขึ้นจริงมันจะ FAIL ไม่ใช่เล่าต่อ
+
+```bash
+./scripts/demo.sh --auto
+```
+
+ขั้นตอนเต็ม + สิ่งที่ควรพูดตอนสาธิตอยู่ใน [`docs/DEMO.md`](docs/DEMO.md)
 
 ---
 
@@ -336,7 +412,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 5 เฟส:
+ชุดทดสอบมี 6 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -345,6 +421,7 @@ agent container is GONE - killed by the sentinel
 | **C** | fail-closed drill — สั่งรันโดย **ไม่มี** `--cap-drop=ALL` | entrypoint ปฏิเสธ **exit 78** |
 | **D** | sentinel drill — agent ฆ่า inline monitor แล้วอ่าน canary | sentinel นอกกรงยังฆ่าให้ **exit 99** |
 | **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) | refuse/ป้องกันทุกกรณี |
+| **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
 
 อยากลองด้วยมือก็ได้:
 
@@ -417,13 +494,15 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 3 เฟส
+│   ├── verify-isolation.sh      # ชุดทดสอบ 6 เฟส (A-F)
+│   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/
 │   └── devcontainer.json        # Cursor / VS Code
 ├── docs/
 │   ├── THREAT_MODEL.md
-│   └── VERIFICATION.md
+│   ├── VERIFICATION.md
+│   └── DEMO.md                  # runbook ของการสาธิต
 └── workspaces/
     └── default/                 # โปรเจกต์ที่จะ mount เข้า sandbox
 ```
