@@ -40,7 +40,17 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    `./scripts/demo.sh --agent claude` rehearsal following `docs/DEMO.md` act 4.
    The agent's Bash tool does not inherit the user's terminal exports, so if the
    user runs the rehearsal themselves, read their terminal instead of re-running.
-2. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
+2. **(AFTER the 2026-09-21 demo — not before) Local self-trained model for aider.**
+   User call 2026-09-16: train with LoRA in Colab, export GGUF, serve it on THIS box
+   in a `warden-model` llama.cpp container with no route out, and point aider at it.
+   The design, threat-model delta (M1–M7) and ordered plan are in
+   [`.ai/design-local-model.md`](design-local-model.md). The notebook side already
+   exists in a separate PRIVATE repo (name/path in the user's memory, deliberately
+   not in this public repo) and its smoke test passed on CPU. Start with the drills
+   (M1–M6) and watch them FAIL; the one that matters most is **M3**: a "local" session
+   must not silently send code to `api.openai.com` (allowlisted, and aider reads
+   `OPENAI_API_KEY`). It is a feature -> v1.1.0.
+3. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
    plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
    sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
    unavailable runtime (never downgrades to runc), and phase F proves fail-closed +
@@ -52,7 +62,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    is a known gVisor limitation and is untested (THREAT_MODEL §4.1). Only once that
    is green should "gVisor support" be claimed in a release (v1.1.0 - it is a feature,
    not a fix).
-3. **(low, idea) Surface the inline monitor's richer record without new privileges.**
+4. **(low, idea) Surface the inline monitor's richer record without new privileges.**
    v1.0.4 makes the sentinel's report honest (`restricted`), but the full view
    (open-descriptor proof, exe) still only reaches the terminal log. The entrypoint's
    USR1 trap could print `/run/warden/breach.flag` the way the normal-exit path
@@ -60,14 +70,14 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    so the agent can replace it: anything printed from it must be labelled as
    agent-forgeable, never as "the record". Decide the labelling before coding; do
    not merge it into the sentinel's report.
-4. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
+5. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
    guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
    udisks layout puts the drive root two levels down (`/media/john/USB`), which is
    structurally indistinguishable from a project nested inside a drive
    (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
    mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
    source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
-5. **(cosmetic, low) Two glitch-looking lines on video after a breach:**
+6. **(cosmetic, low) Two glitch-looking lines on video after a breach:**
    `SIGUSR1 received from the canary tripwire` prints twice (both monitors signal
    PID 1 on purpose; the entrypoint's USR1 trap runs twice), and bash prints
    `warden-entrypoint: line 454: <pid> Killed "$@"`. Both are documented/expected
@@ -76,6 +86,14 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    not worth it in the last days before a recording.
 
 ### Decided this session (do not re-raise without new evidence)
+
+- **Self-trained model → local container + aider, code after the demo** (user call,
+  2026-09-16). Option B (GGUF served on this box, no egress) over option A (Colab
+  endpoint via tunnel): a tunnel URL changes every session, code leaves the box, and a
+  wildcard tunnel domain in the allowlist would open exfiltration to anyone's tunnel.
+  aider over Codex/Claude Code (OpenAI-compatible base URL, tolerates small models).
+  Notebook + training data in a separate private repo. Details:
+  [`.ai/design-local-model.md`](design-local-model.md).
 
 - **Sentinel attribution → honest verdict, not more privilege or a wait** (session 7,
   shipped v1.0.4). The sentinel keeps `CAP_KILL` only and says `"attribution":
@@ -215,6 +233,19 @@ would I know if this silently did nothing?" — then run that.
   Lesson: a session is not over at `git push` - it is over when CI on the LAST push
   is green; this one would have ended on a red main before the Monday cron
   (`0 6 * * 1` = 13:00 Thai time on demo day).
+- **Cont. 2 (user asked about training their own model):** user chose option (ก):
+  train in Colab, agent in AI Warden uses it. Checked the box first (RTX 3050 4 GB,
+  aider 0.86.2 in the image, NO_PROXY contents), asked 4 decisions (answers in
+  "Decided"), then built the notebook side in a new PRIVATE repo and wrote
+  `.ai/design-local-model.md` - no AI Warden code, no change to the demo image.
+  The libraries were newer than my own knowledge (transformers 5.17, trl 1.13), so
+  the notebook was proven by executing it, not by reading it: smoke on CPU passed
+  (validator refuses 6 bad-data cases, 3 LoRA steps, GGUF, llama.cpp server answers
+  `/v1/chat/completions`). Inspecting `llama-server --help` found that the Web UI and
+  `/slots` are ON by default and that `--tools` would hand an untrusted client
+  `read_file`/`grep_search` - recorded as flags the design must pin (M4).
+  NEXT_PROMPT unchanged: nothing here changed how a session should work; the
+  decision lives in this file's Next steps #2, where the prompt already points.
 
 ### 2026-09-16 — session 6 · demo deliverables for the Monday first test
 - **Did:** shipped the three Monday deliverables and ran them. `scripts/demo.sh`
