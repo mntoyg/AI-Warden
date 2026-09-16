@@ -17,7 +17,7 @@
 
 | Thing | State |
 |---|---|
-| `main` | `46ae4bd` (docs: NEXT_PROMPT v5, 1 commit after tag `v1.0.3`), tree clean, in sync with origin |
+| `main` | `6cbaa7e` (docs only since tag `v1.0.3`: demo.sh, DEMO.md, README, handoff), tree clean, in sync with origin |
 | Tags | `v1.0.0`/`v1.0.1`/`v1.0.2` all carry a "superseded" warning · `v1.0.3` (Latest) |
 | CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.3`** (run 34949707045) and on `main`; run 35071222417 for `46ae4bd`; static/CVE now pre-pull tool images with retry |
 | Local suite (Docker Desktop / Windows) | re-verified 2026-09-16 (session 6): A 34/34 · B exit 99 · C exit 78 · D exit 99 **+ single clean incident report** · E1–E4 pass · F (runtime fail-closed, passthrough proven via nvidia) · `enforced=4/7` · exit 0 · monitor reports `v1.0.3` |
@@ -44,6 +44,13 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    **no attribution at all**, which is the forensic version of this project's
    recurring bug: a control that reports itself working while telling the human
    nothing.
+
+   **Correction (session 7, by re-running repro A):** A is *not* a sentinel
+   weakness. The inline monitor's own log for A also says "no process still holds
+   the file open": bash 5.2 execs the last command of a `-c` list, so by the time
+   either monitor scans /proc, `cat` is gone and PID 102 is `sleep 25` with no
+   canary in argv. What is wrong in A is that the record says `"suspects": []`
+   with no explanation. B is the real sentinel defect.
 
    Repro on Docker Desktop (agent image v1.0.3):
    ```bash
@@ -168,7 +175,7 @@ would I know if this silently did nothing?" — then run that.
 | `warden-cli.sh build --pull` used to drop the flag | Fixed: `cmd_build` now puts `"$@"` BEFORE the context and applies it to both images. `warden-cli.sh build --pull` re-pulls the base for proxy + agent. |
 | Debian's squid (5.7, `--with-gnutls`, no `--with-openssl`) has no `ssl_bump` | `squid -k parse` on any `at_step`/`ssl_bump` line dies `FATAL: Invalid ACL type 'at_step'`. Peek-and-splice / SNI enforcement needs a different squid build. Relevant to the §4.2 domain-fronting decision. |
 | A test that reads `$HOME/.aws/credentials` inside the sandbox trips the tripwire | That path (and `~/.ssh/id_rsa_backup`) is a **seeded canary**, not a host secret. A host-leak probe must skip anything listed in the live `$WARDEN_CANARY_FILES` and use `[ -f ]` (access(2), never opens the file). Cost 1 demo run to find. |
-| The drills' incident report is the *inline* monitor's; the real CLI's is the *sentinel's* | Phases B/D use raw `docker run` with no sentinel, so the report on disk is the rich one. `warden-cli.sh run` attaches a sentinel that wins the write race and has weaker attribution (no `CAP_SYS_PTRACE`). Any claim about report **content** must be checked on the CLI path. |
+| The drills' incident report is the *inline* monitor's; the real CLI's is the *sentinel's* | Phase B uses raw `docker run` with no sentinel, so the report on disk is the rich one (phase D does go through `warden-cli.sh run`, but kills the inline monitor first, so it only ever sees the sentinel's report). `warden-cli.sh run` attaches a sentinel that wins the write race and has weaker attribution (no `CAP_SYS_PTRACE`). Any claim about report **content** must be checked on the CLI path. |
 | `gh api /markdown` becomes `C:/Program Files/Git/markdown` | Git Bash rewrites the leading slash. Call `gh api markdown` (no leading slash) and pass a **Windows** path to `--input`; `MSYS_NO_PATHCONV=1` fixes the endpoint but then breaks the file path. To really check a README's links/anchors: `gh api repos/<owner>/<repo>/readme -H 'Accept: application/vnd.github.html'` and grep for `id="user-content-..."` (the plain `markdown` endpoint emits no heading anchors). |
 | Windows python dies printing Thai (`UnicodeEncodeError: charmap`) | stdout is cp1252. Prefix with `PYTHONIOENCODING=utf-8`, or print ASCII labels only. |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
