@@ -20,6 +20,17 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 
 ## 1. Pre-flight (T-30 นาที ก่อนกล้องเดิน)
 
+**รันทุกคำสั่งใน Git Bash ที่เปิดอยู่ใน terminal แบบ ConPTY** (Windows Terminal หรือ terminal
+panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่า ๆ ใน PowerShell**: บนเครื่องนี้มันคือ
+`C:\Windows\system32\bash.exe` = WSL (kali-linux) ไม่ใช่ Git Bash ที่ทุกอย่างถูกทดสอบมา
+และอย่าใช้หน้าต่าง mintty ของ Git Bash สำหรับองก์ 4: bash ใน mintty เห็นว่าเป็น terminal จึงใส่
+`-it` ให้ docker แต่ `docker.exe` (โปรแกรม Windows) ไม่เห็น terminal และมักล้มด้วย
+`the input device is not a TTY` (พฤติกรรมที่รู้กันของ Docker + mintty — ยังไม่ได้ทดสอบบนเครื่องนี้)
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" -l
+```
+
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
