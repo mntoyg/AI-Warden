@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v7 · 2026-09-16
+# AI Warden — next-session prompt · v8 · 2026-09-16
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -70,7 +70,9 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
       step that wasted time, add a check that caught a real bug, encode a decision.
       Every change cites a concrete event from THIS session; delete stale lines;
       under 70 lines; bump the version; one line in HANDOFF "Prompt changelog".
-   d. Commit + push, then paste the full new prompt text into your final reply.
+   d. Commit + push, WAIT for CI on that last push to go green (v8: session 7's handoff
+      commit went red on a NodeSource flake after "done"; `gh run view --log-failed`),
+      then paste the full new prompt text into your final reply.
 ```
 
 ---
@@ -82,4 +84,5 @@ git/CI state. Done-means-run on the real CLI path. v7 adds the loop that made se
 productive (assertion first → fails on old image → fix → passes) and the adversarial
 question that found its second bug, plus the two traps that cost it runs (editing a
 running script; a drill payload racing itself). The API key is flagged at START because
-the rehearsal is the one mandatory task an agent's shell can never do on its own.
+the rehearsal is the one mandatory task an agent's shell can never do on its own. v8: a
+push is not the end of a session — green CI on the last push is.

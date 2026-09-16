@@ -6,7 +6,7 @@
 
 - **Last updated:** 2026-09-16 (session 7)
 - **Latest release:** [v1.0.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.4) — forensic honesty fix (attribution verdict + argv-impersonation evasion), marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v7)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v8)
 - **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
   run on THIS Windows Docker Desktop, real agent + live breach, enforced=4/7). Keep
   `main` green and release-ready; reliability/trust fixes before new features.
@@ -17,9 +17,9 @@
 
 | Thing | State |
 |---|---|
-| `main` | handoff/prompt commit on top of `9bdae58` (the v1.0.4 fix, = tag `v1.0.4`), tree clean, in sync with origin |
+| `main` | tag `v1.0.4` (`9bdae58`) + docs commits + a build-only Dockerfile commit (NodeSource fail-closed guard, no tag: identical image when NodeSource works), tree clean, in sync with origin |
 | Tags | `v1.0.0`…`v1.0.3` all carry a "superseded" warning · `v1.0.4` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `9bdae58`** (run 35076143327: phase D `restricted` + E5 pass, `enforced=7/7`) and on tag `v1.0.4` (run 35076865482) |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.4`** (run 35076865482; phase D `restricted` + E5 pass, `enforced=7/7`). `ef58323` went red on a NodeSource key-download reset (see Gotchas), green on rerun. The handoff commit carrying the Dockerfile guard was pushed with its CI still running (writing its result here would need another push) — **the START reality check must confirm it green**; the side-tag build of the same Dockerfile passed locally. Weekly cron `0 6 * * 1` = Monday 13:00 Thai time, demo day. |
 | Local suite (Docker Desktop / Windows) | re-verified on the v1.0.4 image: A · B exit 99 · C exit 78 · D exit 99 + single clean report + **sentinel report `"attribution": "restricted"`** · E1–E5 · F · `enforced=4/7` · exit 0 |
 | CI suite (ext4) | all phases A–F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
 | CVEs | trivy on the v1.0.4 images: 0 HIGH/CRITICAL OS packages (both images) · 0 in `/opt/warden` · **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
@@ -159,6 +159,7 @@ would I know if this silently did nothing?" — then run that.
 | bash 5.2 execs the last command of a `-c` list | `bash -c 'cat canary; sleep 25'` leaves the PID as `sleep 25` with no canary in argv, so a "short-lived reader" leaves no trace for either monitor. Session 6's repro A blamed the sentinel for this; re-running it showed the inline monitor was equally blind. Re-run a logged repro before trusting its diagnosis. |
 | A drill payload that changes identity mid-flight is timing-dependent | E5's first payload opened fd 3 in bash, then `exec -a`'d into sleep; when the monitor scanned before the exec it saw plain bash, so the drill FAILED on a fixed build. One manual run of the payload found it. The adversary must be ONE process that holds its identity for the whole window (E5 now uses `exec -a ... python3 -c "f = open(...)"`). |
 | Proving a new assertion has teeth | Write it first and run it on the OLD image (must FAIL) before rebuilding. For a monitor function, `git show v1.0.3:monitors/canary_monitor.py` + a `python:3.11-slim` container with `setpriv --reuid=1001` (inline-like) or root with `setpriv --bounding-set=-all,+kill` (sentinel-like) compares old vs new in seconds, no image build. |
+| NodeSource's setup script exits 0 when it fails | CI (run 35077858862, image CVE job): `curl: (35) Connection reset` on the signing key -> `Error: Failed to download and import the NodeSource signing key (Exit Code: 0)` -> `apt-get install nodejs` silently took Debian's node 18 (no npm), caught only by `npm --version`. `core/Dockerfile` §2 now retries until `apt-cache policy nodejs` shows `Candidate: 20.`, refuses the fallback and checks `node --version`. A red image job that says `npm: not found` is this; `gh run rerun <id> --failed`. |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
 
 ---
@@ -203,6 +204,17 @@ would I know if this silently did nothing?" — then run that.
   agent's shell never has - ask for it (via `.env`, never in chat) at START, not
   discover it at the end; never edit a script a background run is executing; prove
   an assertion's teeth on the old image before rebuilding.
+- **Cont. (after the handoff commit):** CI on the handoff commit went RED - not code:
+  NodeSource's setup script failed to fetch its key and exited 0, so the image build
+  silently fell back to Debian's node 18 and died on `npm --version`. Re-ran (green),
+  proved the exit-0 behaviour and a guard for it with the EXACT Dockerfile RUN block
+  under dash in `debian:bookworm-slim` (key blocked: 3 retries then refuses, exit 1;
+  normal: exit 0, npm 10.8.2), hadolint clean, full image built to a side tag
+  `ai-warden/agent:nodeguard` so the demo image (claude 2.1.197) is untouched.
+  Build-time only, identical image when NodeSource works -> main commit, no tag.
+  Lesson: a session is not over at `git push` - it is over when CI on the LAST push
+  is green; this one would have ended on a red main before the Monday cron
+  (`0 6 * * 1` = 13:00 Thai time on demo day).
 
 ### 2026-09-16 — session 6 · demo deliverables for the Monday first test
 - **Did:** shipped the three Monday deliverables and ran them. `scripts/demo.sh`
@@ -366,6 +378,11 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v8 · 2026-09-16** — session 7 (cont.). END now **waits for CI on the last push to be
+  green** before handing off: the v7 handoff commit went red (NodeSource key download
+  reset, setup script exited 0, build fell back to Debian node 18) after the session had
+  pushed and considered itself done; without the check the next chat would have
+  started on a red main three working days before the Monday demo + cron run.
 - **v7 · 2026-09-16** — session 7. (a) **START asks for the API key** (`.env`, never in
   chat) — the session found "API key: NOT set" at start and could not do the mandatory
   `--agent claude` rehearsal; default task is now that rehearsal, and "read my terminal
