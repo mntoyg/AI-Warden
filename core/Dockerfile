@@ -89,15 +89,37 @@ RUN set -eux; \
 
 # -----------------------------------------------------------------------------
 # 2. Node.js (NodeSource) - required by Claude Code and the Codex CLI
+#
+#    NodeSource's setup script exits 0 even when it fails to import its signing
+#    key (seen in CI: "curl: (35) Recv failure: Connection reset by peer" ->
+#    "Error: Failed to download and import the NodeSource signing key (Exit
+#    Code: 0)"). set -e cannot see that, and `apt-get install nodejs` then
+#    silently installs Debian's nodejs 18 instead - a build step reporting
+#    success while doing nothing. So retry until apt's candidate really is
+#    ${NODE_MAJOR}.x, refuse the fallback, and check the installed major too.
 # -----------------------------------------------------------------------------
 # hadolint ignore=DL3008
 RUN set -eux; \
     curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh; \
-    bash /tmp/nodesource_setup.sh; \
+    for attempt in 1 2 3; do \
+        bash /tmp/nodesource_setup.sh; \
+        case "$(apt-cache policy nodejs)" in \
+            *"Candidate: ${NODE_MAJOR}."*) break ;; \
+        esac; \
+        echo "NodeSource ${NODE_MAJOR}.x repo not configured (attempt ${attempt}/3)" >&2; \
+        sleep $((attempt * 10)); \
+    done; \
+    case "$(apt-cache policy nodejs)" in \
+        *"Candidate: ${NODE_MAJOR}."*) ;; \
+        *) echo "refusing Debian's nodejs: NodeSource ${NODE_MAJOR}.x is unavailable" >&2; exit 1 ;; \
+    esac; \
     apt-get install -y --no-install-recommends nodejs; \
     rm -f /tmp/nodesource_setup.sh; \
     rm -rf /var/lib/apt/lists/*; \
-    node --version; \
+    case "$(node --version)" in \
+        "v${NODE_MAJOR}."*) ;; \
+        *) echo "installed node $(node --version) is not ${NODE_MAJOR}.x" >&2; exit 1 ;; \
+    esac; \
     npm --version
 
 # -----------------------------------------------------------------------------
