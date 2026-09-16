@@ -4,7 +4,7 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-15 (session 5)
+- **Last updated:** 2026-09-16 (session 6)
 - **Latest release:** [v1.0.3](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.3) — incident-report false-alarm fix, marked Latest
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v5)
 - **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
@@ -13,13 +13,13 @@
 
 ---
 
-## 1. Status (verified 2026-09-15)
+## 1. Status (verified 2026-09-16)
 
 | Thing | State |
 |---|---|
-| `main` | `eb6c833` (release 1.0.3), tree clean |
+| `main` | `46ae4bd` (docs: NEXT_PROMPT v5, 1 commit after tag `v1.0.3`), tree clean, in sync with origin |
 | Tags | `v1.0.0`/`v1.0.1`/`v1.0.2` all carry a "superseded" warning · `v1.0.3` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.3`** (run 34949707045) and on `main`; static/CVE now pre-pull tool images with retry |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.3`** (run 34949707045) and on `main`; run 35071222417 for `46ae4bd`; static/CVE now pre-pull tool images with retry |
 | Local suite (Docker Desktop / Windows) | A 34/34 · B exit 99 · C exit 78 · D exit 99 **+ single clean incident report** · E1–E4 pass · F (runtime fail-closed, passthrough proven via nvidia) · `enforced=4/7` · exit 0 · monitor reports `v1.0.3` |
 | CI suite (ext4) | all phases A–F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
 | CVEs | 0 HIGH/CRITICAL OS packages & `/opt/warden` (trivy, debian 12.15); **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
