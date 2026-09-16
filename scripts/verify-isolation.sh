@@ -14,13 +14,14 @@
 #    D. Sentinel drill        - the agent kills the inline monitor, then reads a
 #                               canary. The out-of-band sentinel must still
 #                               contain it (exit code 99).
-#    E. Audit regression drills - the four exploits fixed in v1.0.1, each turned
+#    E. Audit regression drills - the exploits fixed in v1.0.1 (E1-E4) and v1.0.4 (E5), each turned
 #                               into a permanent drill so a fix proven once by
 #                               hand cannot silently regress:
 #                                 E1 incident-report symlink redirection
 #                                 E2 forensic-log injection via /proc cmdline
 #                                 E3 the mount guard (assert_safe_mount)
 #                                 E4 seeding through a dangling canary symlink
+#                                 E5 hiding from attribution behind a warden argv
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
@@ -48,7 +49,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,28p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,29p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -98,7 +99,7 @@ docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/n
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
-        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e3 \
+        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt >/dev/null 2>&1 || true
     # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
@@ -252,6 +253,17 @@ if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
     d_tamper="$(grep -l report_path_tampered "${SENTINEL_WS}"/WARDEN_SECURITY_INCIDENT*.json 2>/dev/null | head -1)"
     d_empty="$(find "${SENTINEL_WS}" -name 'WARDEN_SECURITY_INCIDENT.*.json' -size 0 2>/dev/null | head -1)"
     d_reports="$(find "${SENTINEL_WS}" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
+    # The inline monitor is dead here, so the report is the sentinel's - and the
+    # sentinel holds CAP_KILL only, so it cannot read /proc/<pid>/fd or exe. A
+    # record that hides that ("suspects": [] or argv-only evidence, stated as if
+    # it were the whole picture) is a forensic control reporting nothing. The
+    # report must carry an attribution verdict, and the sentinel's must be
+    # "restricted": "complete" would be a claim it structurally cannot back.
+    d_mode=""; d_attr=""
+    if [ -f "${SENTINEL_WS}/WARDEN_SECURITY_INCIDENT.json" ]; then
+        d_mode="$(sed -n 's/^ *"mode": "\([a-z]*\)".*/\1/p' "${SENTINEL_WS}/WARDEN_SECURITY_INCIDENT.json" | head -1)"
+        d_attr="$(sed -n 's/^ *"attribution": "\([a-z]*\)".*/\1/p' "${SENTINEL_WS}/WARDEN_SECURITY_INCIDENT.json" | head -1)"
+    fi
     rmdir "${SENTINEL_WS}/.secrets" 2>/dev/null || true
     rm -rf "$SENTINEL_WS" 2>/dev/null || true
 fi
@@ -265,6 +277,16 @@ if [ "$phase_d" -eq 99 ]; then
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     elif [ "${d_reports:-0}" -ge 1 ]; then
         good "phase D: the breach left a single clean incident report (no false tamper alarm from the race)"
+        if [ "$d_mode" = "sentinel" ] && [ "$d_attr" = "restricted" ]; then
+            good "phase D: the sentinel's report says its attribution is restricted (no CAP_SYS_PTRACE) instead of implying it saw everything"
+        elif [ "$d_mode" != "sentinel" ]; then
+            bad "phase D: the report came from mode='${d_mode}', not the sentinel - the inline monitor was not really killed"
+            PHASE_FAILURES=$((PHASE_FAILURES + 1))
+        else
+            bad "phase D: the sentinel's report has attribution='${d_attr:-<missing>}', expected 'restricted' -"
+            bad "         an empty or argv-only suspects list would read as the whole picture"
+            PHASE_FAILURES=$((PHASE_FAILURES + 1))
+        fi
     else
         note "phase D: no workspace incident report to inspect here (bind-mount write restricted); false-alarm check skipped"
     fi
@@ -478,6 +500,63 @@ elif [ "${e4_is_link:-0}" = "1" ] && [ "${e4_target:-1}" = "1" ]; then
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 else
     note "phase E4: skipped - this filesystem did not preserve the planted symlink (${e4_facts//$'\n'/ }); CI on ext4 enforces this"
+fi
+
+# --- E5: hiding from attribution by impersonating a warden process ------------
+# The monitor ignores processes whose argv carries a warden marker, so that it
+# never names itself. argv is attacker-chosen: before v1.0.4 a reader that held
+# a canary open under `exec -a /opt/warden/canary_monitor.py` was skipped
+# entirely, and the report said no process held the file - a forensic control
+# stating something false. Contained either way (exit 99); the drill is about
+# the record. Raw docker = inline monitor only, which CAN see the descriptor,
+# so it must name the impersonator and must not call attribution unavailable.
+# The reader is ONE process that is already impersonating when it opens the
+# canary and never execs again. An earlier payload opened fd 3 in bash and only
+# then `exec -a`'d into sleep; whenever the monitor scanned before that exec it
+# saw a plain bash holding the fd, so the drill failed on a fixed build - a
+# timing-dependent assertion, found by the suite's own final run.
+if [ "$RUN_BREACH" = "1" ]; then
+    printf '\n'
+    info "E5: a canary reader must not hide from attribution behind a warden-like argv"
+    E5_WS="${PROJECT_ROOT}/workspaces/.verify-e5-$$"
+    mkdir -p "$E5_WS"; chmod 0777 "$E5_WS" 2>/dev/null || true
+    E5_WS_MOUNT="$(host_path "$E5_WS")"
+    E5_ERR="$(mktemp)"
+
+    docker run --rm \
+        --network "$INTERNAL_NET" \
+        --user 1001:1001 --workdir /workspace \
+        --cap-drop=ALL --security-opt no-new-privileges:true \
+        --memory 1g --pids-limit 128 \
+        --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+        -e WARDEN_REQUIRE_PROXY=0 \
+        -v "${VERIFY_VAULT}:/workspace/.secrets" \
+        -v "${E5_WS_MOUNT}:/workspace" \
+        --name warden-verify-e5 \
+        "$AGENT_IMAGE" \
+        bash -c 'exec -a /opt/warden/canary_monitor.py python3 -c "import time; f = open(\"/workspace/.secrets/credentials\"); time.sleep(20)"' \
+        >/dev/null 2>"$E5_ERR"
+    e5_rc=$?
+
+    e5_named=0
+    if grep -qF 'argv impersonates a warden process' "$E5_ERR"; then e5_named=1; fi
+    e5_attr="$(sed -n 's/^ *"attribution": "\([a-z]*\)".*/\1/p' "${E5_WS}/WARDEN_SECURITY_INCIDENT.json" 2>/dev/null | head -1)"
+    rm -f "$E5_ERR" 2>/dev/null || true
+    rmdir "${E5_WS}/.secrets" 2>/dev/null || true
+    rm -rf "$E5_WS" 2>/dev/null || true
+
+    if [ "$e5_rc" -ne 99 ]; then
+        bad  "phase E5: expected exit 99, got ${e5_rc} - the impersonating reader was not contained"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    elif [ "$e5_named" -ne 1 ]; then
+        bad  "phase E5: contained, but no suspect line names the reader as an impersonator - it hid from attribution"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    elif [ -n "$e5_attr" ] && [ "$e5_attr" != "complete" ]; then
+        bad  "phase E5: the impersonator was named, but the report says attribution='${e5_attr}' (expected complete)"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    else
+        good "phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=${e5_attr:-no report file on this host})"
+    fi
 fi
 
 # =============================================================================

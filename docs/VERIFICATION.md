@@ -21,17 +21,19 @@
   [PASS] no_new_privs is set (setuid escalation impossible)
   [PASS] no setuid binaries remain in the image
   ...
+  [PASS] canary vault mounted on ext4 (an inotify-capable filesystem)
   [PASS] no direct TCP egress (the sandbox network is internal)
-  [PASS] non-allowlisted host was blocked
+  [PASS] non-allowlisted http://example.com refused with 403
   [PASS] IP-literal destination 1.1.1.1:443 refused
   [PASS] CONNECT to a non-443 port (github.com:22) refused
-  [PASS] canary vault mounted on ext4 (an inotify-capable filesystem)
   [PASS] 7 canary token(s) seeded and in place (checked with stat, never opened)
   [PASS] 4 canary path(s) are genuinely enforced (probed, not assumed)
+  PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-  [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-16T08:48:00Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
+  PASS phase B: forensic incident report written to the workspace
 
 ================= PHASE C: fail-closed drill ====================
   PASS phase C: the sandbox refused an unsafe launch posture
@@ -39,12 +41,21 @@
 ================= PHASE D: sentinel drill =======================
   [drill] inline monitor killed; a sentinel monitor survives (root)
   PASS phase D: the sentinel contained a breach after the inline monitor was killed
+  PASS phase D: the breach left a single clean incident report (no false tamper alarm from the race)
+  PASS phase D: the sentinel's report says its attribution is restricted (no CAP_SYS_PTRACE) instead of implying it saw everything
 
 ================= PHASE E: audit regression drills ==============
   PASS phase E1: breach contained (99); report refused the symlink and was preserved as a tamper-tagged fallback
   PASS phase E2: breach contained (99) and the injected escape sequences were neutralised (?[2K) in the log
   PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
   PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
+  PASS phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=complete)
+
+=========== PHASE F: runtime fail-closed (gVisor plumbing) ==========
+  PASS phase F: assert_runtime refuses an unknown runtime and accepts a valid one
+  PASS phase F: Docker records the runtime it is handed (HostConfig.Runtime=runc)
+  PASS phase F: warden-cli refused an unavailable WARDEN_RUNTIME and started no sandbox
+  PASS phase F: warden-cli applies WARDEN_RUNTIME end-to-end (agent HostConfig.Runtime=nvidia)
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
@@ -54,7 +65,7 @@
 
 ```bash
 ./scripts/verify-isolation.sh --keep         # เก็บ workspace ที่ใช้ทดสอบไว้ดู
-./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2)
+./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2, E5)
 ./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D (E1/E2 ยังรัน)
 ```
 
@@ -283,6 +294,8 @@ grep -n 'http_access deny all' core/network/squid.conf
 | ชื่อ process ปลอมไม่ทำลาย forensic log (E2) | ตั้ง `argv[0]` เป็น escape sequence แล้ว trip canary | บรรทัด suspect เป็น `?[2K` (ไม่ใช่ ESC ดิบ) |
 | mount guard ปฏิเสธ path อันตราย (E3) | source `assert_safe_mount` แล้วป้อน `/ /etc /home /mnt/c ...` | refuse ทุกอัน; project dir ปกติ accept |
 | seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
+| ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |
+| รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
 
 ---
 

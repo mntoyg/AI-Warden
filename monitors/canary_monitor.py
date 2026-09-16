@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.0.3"
+WARDEN_VERSION = "1.0.4"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------
@@ -255,6 +255,14 @@ class ProcInfo:
     exe: str
     open_canaries: List[str] = field(default_factory=list)
     evidence: str = ""
+    # True when this monitor was refused (EACCES/EPERM) something it needed to
+    # attribute the process: its exe link or its fd table. ENOENT - the process
+    # exited mid-scan - is not a refusal.
+    denied: bool = False
+
+
+# Errors that mean "not permitted to look", as opposed to "nothing there".
+_DENIED_ERRNOS = (errno.EACCES, errno.EPERM)
 
 
 def _read(path: str) -> str:
@@ -285,11 +293,13 @@ def iter_processes() -> Iterable[ProcInfo]:
         if not cmdline:
             cmdline = _read(f"/proc/{pid}/comm").strip()
         cmdline = sanitize(cmdline)
+        denied = False
         try:
             exe = sanitize(os.readlink(f"/proc/{pid}/exe"), 256)
-        except OSError:
+        except OSError as exc:
             exe = ""
-        yield ProcInfo(pid=pid, uid=uid, cmdline=cmdline, exe=exe)
+            denied = exc.errno in _DENIED_ERRNOS
+        yield ProcInfo(pid=pid, uid=uid, cmdline=cmdline, exe=exe, denied=denied)
 
 
 # A warden process naturally carries canary paths in its own argv. Without this
@@ -299,39 +309,98 @@ def iter_processes() -> Iterable[ProcInfo]:
 WARDEN_SELF_MARKERS = ("canary_monitor.py", "/opt/warden/", "warden-entrypoint")
 
 
-def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> List[ProcInfo]:
-    """Find processes that currently hold a canary open, or that mention one."""
+def attribute_breach(canary_paths: Sequence[str], self_pid: int) -> tuple:
+    """Find processes that currently hold a canary open, or that mention one.
+
+    Returns (suspects, denied_pids). denied_pids lists every candidate process
+    this monitor was not permitted to inspect fully, so the caller can say so
+    instead of presenting a partial list as the whole picture.
+    """
     suspects: List[ProcInfo] = []
+    denied_pids: List[int] = []
     canary_set = set(canary_paths)
     basenames = {os.path.basename(p) for p in canary_paths}
 
     for proc in iter_processes():
         if proc.pid in (self_pid, 1):
             continue
-        if any(marker in proc.cmdline for marker in WARDEN_SELF_MARKERS):
-            continue
+        # The marker filter may only silence the argv HINT. argv is chosen by the
+        # process (`exec -a /opt/warden/canary_monitor.py sleep 25`), so skipping
+        # marker-named processes outright let a reader holding a canary open
+        # vanish from the report - which then claimed nobody held it. No genuine
+        # warden process holds a canary open (inotify watches hold no descriptor),
+        # so open-descriptor proof is checked for every process.
+        warden_named = any(marker in proc.cmdline for marker in WARDEN_SELF_MARKERS)
         holding: List[str] = []
         fd_dir = f"/proc/{proc.pid}/fd"
         try:
             for fd_name in os.listdir(fd_dir):
                 try:
                     target = os.readlink(os.path.join(fd_dir, fd_name))
-                except OSError:
+                except OSError as exc:
+                    if exc.errno in _DENIED_ERRNOS:
+                        proc.denied = True
                     continue
                 if target in canary_set:
                     holding.append(target)
-        except (OSError, PermissionError):
-            pass
+        except OSError as exc:
+            if exc.errno in _DENIED_ERRNOS:
+                proc.denied = True
+        # Being refused a root-owned warden process (the sentinel, seen from the
+        # inline monitor) is expected and hides nothing: the agent cannot run as
+        # uid 0. A refused process of any other uid is a blind spot, whatever its
+        # argv claims to be.
+        if proc.denied and not (warden_named and proc.uid == 0):
+            denied_pids.append(proc.pid)
 
-        mentions = any(b in proc.cmdline for b in basenames)
+        mentions = not warden_named and any(b in proc.cmdline for b in basenames)
         if holding or mentions:
             proc.open_canaries = holding
-            proc.evidence = "open file descriptor" if holding else "canary named in argv"
+            if holding and warden_named:
+                proc.evidence = "open file descriptor (argv impersonates a warden process)"
+            elif holding:
+                proc.evidence = "open file descriptor"
+            else:
+                proc.evidence = "canary named in argv"
             suspects.append(proc)
 
     # An open descriptor is proof; a matching command line is only a hint.
     suspects.sort(key=lambda p: 0 if p.open_canaries else 1)
-    return suspects
+    return suspects, denied_pids
+
+
+# The on-disk report is written by whichever monitor wins the write race, and
+# in practice that is the sentinel - which holds CAP_KILL only and so cannot read
+# another uid's /proc/<pid>/fd or exe. Without a verdict, its partial view was
+# indistinguishable from a complete one: an fd-holding reader showed up as
+# "canary named in argv" with no exe, or not at all, and "suspects": [] read as
+# "nobody did it". Granting the sentinel CAP_SYS_PTRACE would fix the view by
+# letting the anti-tamper layer read every process in the container - so the
+# record states its own limits instead.
+def attribution_verdict(suspects: Sequence[ProcInfo], denied_pids: Sequence[int]) -> tuple:
+    """Return (verdict, note) describing how far the suspects list can be trusted."""
+    if denied_pids:
+        return (
+            "restricted",
+            f"this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe "
+            f"for {len(denied_pids)} process(es) {sorted(denied_pids)[:16]}, so open-descriptor "
+            "evidence and exe paths are missing and the suspects list may be incomplete or "
+            "empty even though a process held the canary. Expected for the out-of-band "
+            "sentinel, which holds CAP_KILL only by design; the inline monitor's "
+            "'[SECURITY BREACH] suspect' log line has the full view.",
+        )
+    if not suspects:
+        return (
+            "unavailable",
+            "every process was inspectable, but none still held a canary open or named one "
+            "in its argv: the reader was short-lived (e.g. `cat`) and exited before the "
+            "scan. This means 'not attributable', never 'no process read it'.",
+        )
+    return (
+        "complete",
+        "every process was inspectable; suspects lists each one that held a canary open "
+        "(proof) or named one in its argv (a hint only).",
+    )
 
 
 # =============================================================================
@@ -619,14 +688,20 @@ class CanaryMonitor:
         alert("[SECURITY BREACH] Canary file accessed by Agent Process!")
         alert(f"[SECURITY BREACH] file={path} event={event} mode={self.mode}")
 
-        suspects = attribute_breach(self.canaries, self.self_pid)
+        suspects, denied_pids = attribute_breach(self.canaries, self.self_pid)
+        verdict, note = attribution_verdict(suspects, denied_pids)
         for proc in suspects:
             alert(
                 f"[SECURITY BREACH] suspect pid={proc.pid} uid={proc.uid} "
                 f"evidence={proc.evidence} exe={proc.exe or '?'} "
                 f"cmd={proc.cmdline[:180]!r}"
             )
-        if not suspects:
+        if verdict == "restricted":
+            alert(
+                f"[SECURITY BREACH] attribution restricted: /proc/<pid>/fd and exe not "
+                f"readable for {len(denied_pids)} process(es) - the suspects above may be incomplete"
+            )
+        elif verdict == "unavailable":
             alert(
                 "[SECURITY BREACH] no process still holds the file open "
                 "(short-lived reader such as `cat`); attribution unavailable"
@@ -641,6 +716,8 @@ class CanaryMonitor:
             "mode": self.mode,
             "action": self.action,
             "monitor_pid": self.self_pid,
+            "attribution": verdict,
+            "attribution_note": note,
             "suspects": [
                 {
                     "pid": p.pid,

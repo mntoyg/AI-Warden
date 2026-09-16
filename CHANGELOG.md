@@ -4,6 +4,47 @@
 
 ---
 
+## [1.0.4] — 2026-09-16
+
+**Forensic honesty fix — ควรอัปเกรด โดยเฉพาะก่อนโชว์/บันทึกวิดีโอ**
+
+incident report บนดิสก์มักเป็นของ out-of-band sentinel (ชนะการแข่งเขียน) ซึ่งถือแค่
+`CAP_KILL` จึงอ่าน `/proc/<pid>/fd` และ `/proc/<pid>/exe` ของ agent ไม่ได้ แต่รายงานไม่เคย
+บอกเรื่องนี้ — process ที่ถือ fd ของ canary อยู่ออกมาเป็น `"canary named in argv"` โดย `exe`
+ว่าง หรือถ้า argv ไม่มีชื่อ canary ก็เป็น `"suspects": []` ที่อ่านแล้วเหมือน "ไม่มีใครทำ"
+ทั้งที่ inline monitor ใน breach เดียวกันเห็นหลักฐานครบ นี่คือ bug shape ประจำโปรเจกต์ในเวอร์ชัน
+นิติวิทยา: control ที่รายงานว่าทำงาน แต่ไม่บอกอะไรมนุษย์เลย
+
+### Fixed
+
+- **รายงานระบุว่า attribution เชื่อได้แค่ไหน** — ทุก incident report มีฟิลด์ใหม่
+  `attribution` (`complete` / `restricted` / `unavailable`) และ `attribution_note` ที่อธิบาย
+  เป็นประโยค monitor นับ `EACCES`/`EPERM` ตอนอ่าน fd table และ exe link ของแต่ละ process
+  (process ที่ออกไประหว่างสแกน = `ENOENT` ไม่นับ) sentinel จึงรายงาน `restricted` ตามจริง
+  และ reader อายุสั้นอย่าง `cat` ได้ `unavailable` แทน list ว่างที่ไม่มีคำอธิบาย
+  บรรทัด log `[SECURITY BREACH]` บอกสถานะเดียวกัน schema ยังเป็น `ai-warden/breach/1`
+  (เพิ่มฟิลด์อย่างเดียว)
+- **หลบการระบุตัวด้วย argv ปลอมเป็น warden ไม่ได้อีกแล้ว** — monitor ข้าม process ที่ argv มี
+  marker ของ warden (`canary_monitor.py`, `/opt/warden/`, `warden-entrypoint`) เพื่อไม่ชี้ตัวเอง
+  แต่ argv เป็นสิ่งที่ process ตั้งเองได้: ผู้อ่านที่ถือ canary ไว้ภายใต้
+  `exec -a /opt/warden/canary_monitor.py sleep 25` หายไปจากการระบุตัวทั้งสอง monitor และ log
+  บอกว่า "no process still holds the file open" ซึ่งเป็นเท็จ (พบระหว่างทดสอบ verdict ใหม่ผ่าน
+  `warden-cli.sh run` — การควบคุมยังทำงาน exit 99) ตอนนี้ marker ปิดได้แค่ *เบาะแส argv*
+  ส่วนหลักฐาน fd ตรวจทุก process และ process ที่ปลอมตัวถูกระบุเป็น
+  `"open file descriptor (argv impersonates a warden process)"`
+- **ไม่เปลี่ยน** ลำดับ/เวลาของ kill และ SIGUSR1 และ**ไม่เพิ่ม capability** ให้ sentinel —
+  เหตุผลอยู่ใน `docs/THREAT_MODEL.md` §3.3
+
+### Tests
+
+- phase D (sentinel drill ผ่าน `warden-cli.sh run`) **fail ถ้า** รายงานของ sentinel ไม่มี
+  `"attribution": "restricted"` — ตรวจแล้วว่า assertion นี้ fail กับ image v1.0.3 จริง
+- phase **E5** ใหม่: ผู้อ่าน canary ที่ปลอม argv เป็น warden ต้องถูกควบคุม (99), ถูกระบุตัวด้วย fd
+  และรายงานต้องไม่บอกว่าระบุตัวไม่ได้
+- `scripts/demo.sh` act 3 ตรวจว่ารายงานมี attribution verdict ที่ใช้ได้
+
+---
+
 ## [1.0.3] — 2026-09-15
 
 **Correctness/trust fix — ควรอัปเกรด โดยเฉพาะก่อนโชว์/บันทึกวิดีโอ**

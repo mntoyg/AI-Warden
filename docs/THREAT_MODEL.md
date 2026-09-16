@@ -116,6 +116,39 @@ sentinel ที่รันเป็น uid 1002 จะได้ `EPERM` ตอ�
 **ข้อจำกัดที่เหลือ:** ถ้าปิด sentinel (`WARDEN_SENTINEL=0`) จะเหลือ tripwire ชั้นเดียว
 และ entrypoint ยังตรวจ breach flag ตอนจบ session อยู่ แต่การฆ่าแบบทันทีจะหายไป
 
+**sentinel ระบุตัวผู้อ่านได้ไม่ครบ — และรายงานบอกตรง ๆ (v1.0.4):** ด้วยเหตุผลเดียวกับข้างบน
+(root ที่ไม่มี `CAP_DAC_OVERRIDE`/`CAP_SYS_PTRACE`) sentinel อ่าน `/proc/<pid>/fd` และ
+`/proc/<pid>/exe` ของ process uid 1001 **ไม่ได้** จึงไม่เห็นหลักฐาน "ถือ file descriptor ของ
+canary อยู่" และไม่รู้ path ของ exe เห็นได้แค่ argv ซึ่งเป็นแค่ *เบาะแส* ในทางปฏิบัติ sentinel
+มักเป็นฝ่ายชนะการแข่งเขียน `WARDEN_SECURITY_INCIDENT.json` ดังนั้นรายงานบนดิสก์จึงมักเป็นมุมมอง
+ที่แคบกว่าของ inline monitor ก่อน v1.0.4 รายงานไม่ได้บอกเรื่องนี้เลย: process ที่ถือ fd อยู่แต่ argv
+ไม่มีชื่อ canary จะออกมาเป็น `"suspects": []` ซึ่งอ่านแล้วเหมือน "ไม่มีใครทำ"
+
+ตั้งแต่ v1.0.4 ทุกรายงานมี `attribution` บอกว่า `suspects` เชื่อได้แค่ไหน
+
+| `attribution` | ความหมาย |
+|---|---|
+| `complete` | monitor ตัวที่เขียนตรวจได้ทุก process — `suspects` คือทั้งหมดที่เห็น (fd = หลักฐาน, argv = เบาะแส) |
+| `restricted` | ถูกปฏิเสธการอ่าน fd/exe ของ process อย่างน้อยหนึ่งตัว — `suspects` อาจไม่ครบหรือว่างทั้งที่มีคนถือ canary อยู่ (ปกติของ sentinel) มุมมองเต็มอยู่ในบรรทัด log `[SECURITY BREACH] suspect` ของ inline monitor |
+| `unavailable` | ตรวจได้ทุก process แต่ไม่มีใครถือ canary หรือมีชื่อใน argv แล้ว — ผู้อ่านอายุสั้น (เช่น `cat`) หมายถึง "ระบุตัวไม่ได้" ไม่ใช่ "ไม่มีใครอ่าน" |
+
+**ไม่แก้ด้วยการให้ `CAP_SYS_PTRACE` กับ sentinel** เพราะจะทำให้ชั้น anti-tamper อ่าน memory
+และ fd ของทุก process ใน container ได้ และไม่แก้ด้วยการให้ sentinel "รอ" รายงานของ inline ก่อน
+เพราะลำดับเวลาของ kill/SIGUSR1 ผูกกับ exit code 99 และการที่ PID 1 ออกจะฆ่า sentinel
+(ซึ่งอยู่ใน PID namespace เดียวกัน) ก่อนมันได้เขียนรายงาน — การบอกข้อจำกัดตรง ๆ ปลอดภัยกว่า
+การเพิ่ม race ใหม่ใน monitor
+
+**argv เป็นเบาะแส ไม่ใช่ตัวตน:** monitor ไม่ชี้ process ของ warden เองด้วยการกรอง argv
+(`canary_monitor.py`, `/opt/warden/`, `warden-entrypoint`) แต่ process ตั้ง argv เองได้
+ก่อน v1.0.4 ตัวกรองนี้ข้าม process ทั้งตัว ผู้อ่านที่ `exec -a /opt/warden/canary_monitor.py`
+จึงหายจากรายงาน ตอนนี้ตัวกรองปิดแค่เบาะแส argv ส่วนหลักฐาน fd ตรวจทุก process
+(process ของ warden จริงไม่เคยถือ fd ของ canary — inotify watch ไม่เปิดไฟล์) และถูกระบุเป็น
+`argv impersonates a warden process` (drill E5)
+
+การระบุตัวไม่มีผลกับการ **ควบคุม** เลย: การ kill เลือกเป้าตาม uid ของ agent ไม่ใช่ตามรายชื่อ `suspects`
+จึงทำงานเหมือนเดิมไม่ว่าจะระบุตัวได้หรือไม่ (กรณี PID 1 ออกแล้ว sentinel ตายตาม ตรวจด้วยการรันจริง:
+container ที่ `--pid container:<A>` หายไปทันทีเมื่อ PID 1 ของ A ตาย)
+
 ### 3.4 canary payload ที่ scanner ไม่จับ
 
 ค่าปลอมทุกตัวใส่ prefix จริงไว้ (`AKIA`, `sk_live_`, `ghp_`, `sk-ant-`)

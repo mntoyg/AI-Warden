@@ -126,35 +126,44 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
 ```json
 {
   "action": "kill",
+  "attribution": "restricted",
+  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 108], so open-descriptor evidence and exe paths are missing ...",
   "canary_path": "/workspace/.secrets/credentials",
   "inotify_event": "OPEN",
   "mode": "sentinel",
   "schema": "ai-warden/breach/1",
   "suspects": [
-    { "pid": 103, "uid": 1001, "cmdline": "bash -l -c exec 3< ...",
-      "evidence": "canary named in argv" }
+    { "pid": 108, "uid": 1001, "cmdline": "bash -l -c exec 3< ...",
+      "evidence": "canary named in argv", "exe": "", "open_canaries": [] }
   ],
-  "warden_version": "1.0.3"
+  "warden_version": "1.0.4"
 }
 ```
 
-และ 4 ข้อยืนยันที่ตรวจตัว report เอง
+และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.4)
 
 ```
   PASS exactly one report - no duplicate fallback from the monitor/sentinel race
   PASS no false tamper alarm - the report says only what happened
   PASS the report names which canary was read, and when
   PASS the report attributes the breach to a process (pid, uid, cmdline)
+  PASS attribution: restricted - the sentinel states what it could NOT see (CAP_KILL only, by design)
 ```
 
 **พูดว่า:** agent อ่านไฟล์ได้จริง — sandbox ไม่เสแสร้งว่าไม่ได้อ่าน และเห็นเนื้อไฟล์
 บนจอด้วย สิ่งที่มันทำไม่ได้คือ **รอดชีวิตจากการอ่านนั้น** คีย์ทั้งหมดเป็น honeytoken
 สังเคราะห์, container ที่อ่านมันไม่มีอยู่แล้ว, และ incident report อยู่รอดต่อจาก container
 
-`PASS` 4 บรรทัดสุดท้ายควรพูดถึงสักประโยค: incident report เองก็เป็น security control
+`PASS` 5 บรรทัดสุดท้ายควรพูดถึงสักประโยค: incident report เองก็เป็น security control
 ตัวหนึ่ง demo จึงตรวจมันด้วยวิธีที่มันเคย "โกหก" มาก่อน — false alarm ว่ามีคน
-redirect report (แก้ใน v1.0.3) และ report ซ้ำจากการที่ 2 monitor แข่งกันเขียน
-(แก้ใน v1.0.3) — รวมถึงกรณี `suspects` ว่าง ซึ่งเป็นความล้มเหลวเชิงนิติวิทยาแบบเงียบ ๆ
+redirect report (แก้ใน v1.0.3), report ซ้ำจากการที่ 2 monitor แข่งกันเขียน
+(แก้ใน v1.0.3) และรายงานที่ไม่บอกว่าตัวเองมองเห็นได้แค่บางส่วน (แก้ใน v1.0.4)
+
+**ถ้ามีคนถามว่าทำไม `evidence` ในไฟล์อ่อนกว่าใน log:** รายงานบนดิสก์มักเป็นของ sentinel
+ซึ่งถือแค่ `CAP_KILL` เลยอ่าน `/proc/<pid>/fd` ไม่ได้ — log ของ inline monitor ข้างบนเห็น
+`evidence=open file descriptor` แต่ไฟล์เห็นแค่ argv และ**บอกไว้เอง**ว่า `"attribution": "restricted"`
+เราเลือกไม่ให้ `CAP_SYS_PTRACE` กับ sentinel เพราะจะทำให้ชั้น anti-tamper อ่านได้ทุก process
+(`docs/THREAT_MODEL.md` §3.3)
 
 **ความแปลกที่คาดไว้แล้ว ไม่ใช่บั๊ก:** บรรทัด `SIGUSR1 received from the canary
 tripwire` จะขึ้น **2 ครั้ง** เพราะทั้ง inline monitor และ out-of-band sentinel
@@ -191,11 +200,12 @@ tripwire` จะขึ้น **2 ครั้ง** เพราะทั้ง i
 - **SNI domain fronting เป็นช่องที่รู้อยู่** — agent สามารถไปถึงเว็บที่ไม่อยู่ใน
   allowlist ได้ถ้ามันแชร์ CDN กับเว็บที่อยู่ใน allowlist การปิดต้องใช้ proxy ที่
   peek-and-splice ได้ ซึ่ง Squid ของ Debian ไม่มี `ssl_bump` ดู §4.2
-- **attribution ของ sentinel ไม่สมบูรณ์** — มันถือแค่ `CAP_KILL` จึงอ่าน
-  `/proc/<pid>/fd` และ `/proc/<pid>/exe` ไม่ได้ และมันมักเป็นตัวที่ชนะการแข่งเขียน
-  report ถ้าผู้อ่าน canary อายุสั้น (เช่น `cat` เปล่า ๆ) report จะระบุได้ว่า canary
-  ไหนถูกอ่านเมื่อไร แต่ไม่ระบุ process การกักกันไม่กระทบ (ยัง exit 99)
-  ติดตามอยู่ใน [`.ai/HANDOFF.md`](../.ai/HANDOFF.md) หัวข้อ Next steps
+- **attribution ของ sentinel ไม่สมบูรณ์ — และรายงานบอกเอง** — มันถือแค่ `CAP_KILL`
+  จึงอ่าน `/proc/<pid>/fd` และ `/proc/<pid>/exe` ไม่ได้ และมันมักเป็นตัวที่ชนะการแข่งเขียน
+  report ตั้งแต่ v1.0.4 รายงานจึงมี `"attribution": "restricted"` พร้อมคำอธิบาย ส่วนผู้อ่าน
+  canary อายุสั้น (เช่น `cat` เปล่า ๆ) ที่ไม่มี monitor ไหนจับทัน จะได้ `"unavailable"` —
+  แปลว่า "ระบุตัวไม่ได้" ไม่ใช่ "ไม่มีใครอ่าน" การกักกันไม่กระทบ (ยัง exit 99)
+  ดู [THREAT_MODEL](THREAT_MODEL.md) §3.3
 - **นี่ไม่ใช่ VM** — เป็น isolation ที่แชร์ kernel kernel LPE เจาะได้
   `WARDEN_RUNTIME=runsc` (gVisor) ต่อสายไว้แล้วและ fail closed แต่ happy path ของ
   gVisor ยังไม่ได้ verify ดู §4.1

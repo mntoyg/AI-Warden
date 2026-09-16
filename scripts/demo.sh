@@ -342,8 +342,8 @@ act_breach() {
     # The reader opens the canary and stays alive, which is what an exfiltrating
     # agent does: read, then send. It also keeps the reader in /proc while the
     # monitors attribute the breach. A short-lived `cat` is contained exactly the
-    # same way (exit 99) but may not be attributed - see docs/DEMO.md and
-    # .ai/HANDOFF.md "Next steps" for that known limitation.
+    # same way (exit 99) but cannot be attributed; the report then says
+    # "attribution": "unavailable" rather than implying nobody read it.
     local rc=0
     "$CLI" run "$DEMO_WS" bash -- -c \
         'exec 3< /workspace/.secrets/credentials; cat <&3; echo; echo "[agent] got the keys, now exfiltrating..."; sleep 25' \
@@ -401,9 +401,21 @@ act_breach() {
         good "the report attributes the breach to a process (pid, uid, cmdline)"
     else
         bad "\"suspects\" is empty - the report contains no attribution at all"
-        note "known limitation: the sentinel cannot read /proc/<pid>/fd or exe"
-        note "without CAP_SYS_PTRACE (see .ai/HANDOFF.md, Next steps)."
     fi
+    # Since v1.0.4 the report also states how far that list can be trusted. The
+    # sentinel cannot read another uid's /proc/<pid>/fd or exe, so its honest
+    # verdict is "restricted"; a report with no verdict leaves a partial list
+    # looking like the whole picture.
+    local attr
+    attr="$(sed -n 's/^ *"attribution": "\([a-z]*\)".*/\1/p' "$REPORT" | head -1)"
+    case "$attr" in
+        complete)
+            good "attribution: complete - the writing monitor could inspect every process" ;;
+        restricted)
+            good "attribution: restricted - the sentinel states what it could NOT see (CAP_KILL only, by design)" ;;
+        *)
+            bad "the report carries no usable attribution verdict ('${attr:-missing}')" ;;
+    esac
 
     say "Nothing about the host was risked: the honeypot keys are synthetic,"
     say "and the container that read them no longer exists."

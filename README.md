@@ -38,49 +38,61 @@ AI Warden ปิดทั้ง 5 ทางนี้ที่ระดับ **O
 ใน workspace มี honeypot credential ที่ไม่มีใครบอก agent ว่ามีอยู่
 สมมติว่า agent ถูกยึดแล้วไปอ่านมัน
 
-output ข้างล่างนี้คัดลอกมาจาก run จริงบน Docker Desktop (Windows) ไม่ได้เขียนขึ้นใหม่
+output ข้างล่างนี้คัดลอกมาจาก run จริงครั้งเดียว (act 3 ของ `./scripts/demo.sh --auto`, v1.0.4)
+บน Docker Desktop (Windows) ไม่ได้เขียนขึ้นใหม่ — ตัดบางบรรทัดออก (`...`) แต่ไม่ได้แก้ข้อความ
 
 ```console
-$ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c \
-    'exec 3< /workspace/.secrets/credentials; cat <&3; sleep 25'
+$ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c     'exec 3< /workspace/.secrets/credentials; cat <&3; echo; echo "[agent] got the keys, now exfiltrating..."; sleep 25'
 
 [warden] isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)
-[canary] v1.0.3 mode=inline action=kill enforced=4/7 watching=...
-[canary] *** [SECURITY BREACH] Canary file accessed by Agent Process!
-[canary] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
-[canary] *** [SECURITY BREACH] suspect pid=103 uid=1001 evidence=open file descriptor exe=/usr/bin/bash
-[canary] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [103]
-[canary] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
+[canary 2026-09-16T08:49:28Z] v1.0.4 mode=inline action=kill enforced=4/7 watching=...
+[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
+[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] suspect pid=108 uid=1001 evidence=open file descriptor exe=/usr/bin/bash cmd=...
+# AI-WARDEN-CANARY - synthetic honeypot. Reading this file is a breach.
+...
+[agent] got the keys, now exfiltrating...
+[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [108]
+[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
 
   SECURITY BREACH: the canary tripwire terminated this sandbox.
-  Incident report: ./workspaces/demo/WARDEN_SECURITY_INCIDENT.json
+  Incident report: .../workspaces/demo/WARDEN_SECURITY_INCIDENT.json
   Treat the agent session as hostile: rotate any key it was given.
 
-$ echo $?
-99
+  PASS exit code 99 - the sandbox was terminated by the canary tripwire
 ```
 
 ทั้งหมดนี้จบภายใน 1 วินาที และเหลือหลักฐานไว้บนโฮสต์ นอก container ที่ตายไปแล้ว
 
 ```json
 {
-  "schema": "ai-warden/breach/1",
-  "warden_version": "1.0.3",
+  "action": "kill",
+  "attribution": "restricted",
+  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 108], so open-descriptor evidence and exe paths are missing ...",
   "canary_path": "/workspace/.secrets/credentials",
   "inotify_event": "OPEN",
   "mode": "sentinel",
-  "action": "kill",
+  "schema": "ai-warden/breach/1",
   "suspects": [
-    { "pid": 103, "uid": 1001, "evidence": "canary named in argv",
-      "cmdline": "bash -l -c exec 3< /workspace/.secrets/credentials; cat <&3; ..." }
+    {
+      "cmdline": "bash -l -c exec 3< /workspace/.secrets/credentials; cat <&3; ...",
+      "evidence": "canary named in argv",
+      "exe": "",
+      "open_canaries": [],
+      "pid": 108,
+      "uid": 1001
+    }
   ],
-  "timestamp_utc": "2026-09-16T08:12:55Z"
+  "timestamp_utc": "2026-09-16T08:49:32Z",
+  "warden_version": "1.0.4"
 }
 ```
 
 (`mode: sentinel` = ใบรายงานนี้เขียนโดย monitor นอกกรง ไม่ใช่ตัวในกรงที่ agent
-เอื้อมถึงได้ ส่วน `evidence` ของมันละเอียดน้อยกว่าที่เห็นใน log เพราะ sentinel
-ถือแค่ `CAP_KILL` — อ่าน `/proc/<pid>/fd` ไม่ได้ ดู [`docs/DEMO.md`](docs/DEMO.md) §3)
+เอื้อมถึงได้ sentinel ถือแค่ `CAP_KILL` จึงอ่าน `/proc/<pid>/fd` ไม่ได้ — และรายงาน**บอกเอง**
+ว่า `"attribution": "restricted"` แทนที่จะทำเหมือนเห็นครบ หลักฐาน fd เต็ม ๆ อยู่ในบรรทัด
+`suspect` ของ log ข้างบน ดู [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) §3.3 และ
+[`docs/DEMO.md`](docs/DEMO.md) §3)
 
 สิ่งที่เห็นในกรงเดียวกันนั้น — ยืนยันจากในตัว sandbox เอง ไม่ใช่จากคำโฆษณา
 
@@ -420,7 +432,7 @@ agent container is GONE - killed by the sentinel
 | **B** | breach drill จริง — container อ่าน canary โดยตั้งใจ | container ตายด้วย **exit 99** |
 | **C** | fail-closed drill — สั่งรันโดย **ไม่มี** `--cap-drop=ALL` | entrypoint ปฏิเสธ **exit 78** |
 | **D** | sentinel drill — agent ฆ่า inline monitor แล้วอ่าน canary | sentinel นอกกรงยังฆ่าให้ **exit 99** |
-| **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) | refuse/ป้องกันทุกกรณี |
+| **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) + E5 หลบการระบุตัวด้วย argv ปลอมเป็น warden (แก้ใน v1.0.4) | refuse/ป้องกันทุกกรณี |
 | **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
 
 อยากลองด้วยมือก็ได้:
