@@ -19,8 +19,7 @@ VERIFICATION, DEMO all follow this) — don't draft a new doc in English.
    b. Reality check: git status, git fetch + commits on origin not in HEAD, latest
       tag vs commits after it, `gh run list --limit 3`, `docker info` — Docker Desktop
       is often DOWN at start (PowerShell Start-Process; poll `docker info`, ~1 min).
-   c. Where HANDOFF disagrees with reality, fix HANDOFF first (it was stale again: it
-      claimed main was at the release commit, one docs commit behind).
+   c. Where HANDOFF disagrees with reality, fix HANDOFF first (stale twice running).
    d. Report in 3-5 lines: state, first task, anything surprising. Then start.
 
 2) WORK
@@ -29,9 +28,8 @@ VERIFICATION, DEMO all follow this) — don't draft a new doc in English.
      options are in the item; option (c) says what NOT to do. Monitor behaviour
      change: needs a drill + a tag, so ship it before Monday only if green with time
      to spare — a documented limitation beats a fresh regression.
-   - Mandatory before Monday: `export ANTHROPIC_API_KEY=...`, then
-     `./scripts/demo.sh --auto` (must end "DEMO COMPLETE", exit 0) and one
-     `--agent claude` rehearsal. docs/DEMO.md is the runbook.
+   - Mandatory before Monday: `export ANTHROPIC_API_KEY=...`, `./scripts/demo.sh
+     --auto` (must end "DEMO COMPLETE", exit 0), one `--agent claude` rehearsal.
    - Done means RUN — and run the PATH I WILL RUN. `./scripts/verify-isolation.sh`
      stays green A-F (exit 0), but any claim about the incident report's CONTENT must
      be checked through `warden-cli.sh run`: phases B/D use raw docker with no
