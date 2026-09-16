@@ -4,27 +4,27 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-16 (session 6)
-- **Latest release:** [v1.0.3](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.3) — incident-report false-alarm fix, marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v6)
+- **Last updated:** 2026-09-16 (session 7)
+- **Latest release:** [v1.0.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.4) — forensic honesty fix (attribution verdict + argv-impersonation evasion), marked Latest
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v7)
 - **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
   run on THIS Windows Docker Desktop, real agent + live breach, enforced=4/7). Keep
   `main` green and release-ready; reliability/trust fixes before new features.
 
 ---
 
-## 1. Status (verified 2026-09-16)
+## 1. Status (verified 2026-09-16, session 7)
 
 | Thing | State |
 |---|---|
-| `main` | `6cbaa7e` (docs only since tag `v1.0.3`: demo.sh, DEMO.md, README, handoff), tree clean, in sync with origin |
-| Tags | `v1.0.0`/`v1.0.1`/`v1.0.2` all carry a "superseded" warning · `v1.0.3` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.3`** (run 34949707045) and on `main`; run 35071222417 for `46ae4bd`; static/CVE now pre-pull tool images with retry |
-| Local suite (Docker Desktop / Windows) | re-verified 2026-09-16 (session 6): A 34/34 · B exit 99 · C exit 78 · D exit 99 **+ single clean incident report** · E1–E4 pass · F (runtime fail-closed, passthrough proven via nvidia) · `enforced=4/7` · exit 0 · monitor reports `v1.0.3` |
+| `main` | handoff/prompt commit on top of `9bdae58` (the v1.0.4 fix, = tag `v1.0.4`), tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.0.3` all carry a "superseded" warning · `v1.0.4` (Latest) |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `9bdae58`** (run 35076143327: phase D `restricted` + E5 pass, `enforced=7/7`) and on tag `v1.0.4` (run 35076865482) |
+| Local suite (Docker Desktop / Windows) | re-verified on the v1.0.4 image: A · B exit 99 · C exit 78 · D exit 99 + single clean report + **sentinel report `"attribution": "restricted"`** · E1–E5 · F · `enforced=4/7` · exit 0 |
 | CI suite (ext4) | all phases A–F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
-| CVEs | 0 HIGH/CRITICAL OS packages & `/opt/warden` (trivy, debian 12.15); **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
+| CVEs | trivy on the v1.0.4 images: 0 HIGH/CRITICAL OS packages (both images) · 0 in `/opt/warden` · **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
 | Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
-| Demo readiness | **Deliverables shipped (session 6):** `scripts/demo.sh` (4 acts, self-verifying, 24 PASS/0 FAIL/exit 0 on Docker Desktop), `docs/DEMO.md` (runbook + failure playbook), README leads with the demo. Still needs `export ANTHROPIC_API_KEY` on demo day for act 4 (no key on the box). |
+| Demo readiness | `./scripts/demo.sh --auto` on v1.0.4: **DEMO COMPLETE, exit 0** (act 3 now also asserts the attribution verdict). `claude --version` inside the v1.0.4 sandbox → `2.1.197 (Claude Code)`, exit 0. **Not done: the `--agent claude` rehearsal — there is no `ANTHROPIC_API_KEY` on this box** (the agent's shell never has it; the user must provide it via `.env` or their own terminal). |
 
 ---
 
@@ -33,53 +33,13 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **The incident report loses its attribution: the sentinel wins the write race
-   but cannot see `/proc/<pid>/fd` or `/proc/<pid>/exe`.** Found by running the
-   demo (session 6), never by the drills. Both monitors write a report; the
-   *sentinel* is consistently the one that lands on disk (`"mode": "sentinel"`),
-   and it holds `CAP_KILL` only, so `PTRACE_MODE_READ` operations fail: no fd
-   list, no exe path. The inline monitor - same breach, same second - has the
-   full picture and writes it to `/run/warden/breach.flag`, a tmpfs that dies
-   with the container. Against a short-lived reader the on-disk report can carry
-   **no attribution at all**, which is the forensic version of this project's
-   recurring bug: a control that reports itself working while telling the human
-   nothing.
-
-   **Correction (session 7, by re-running repro A):** A is *not* a sentinel
-   weakness. The inline monitor's own log for A also says "no process still holds
-   the file open": bash 5.2 execs the last command of a `-c` list, so by the time
-   either monitor scans /proc, `cat` is gone and PID 102 is `sleep 25` with no
-   canary in argv. What is wrong in A is that the record says `"suspects": []`
-   with no explanation. B is the real sentinel defect.
-
-   Repro on Docker Desktop (agent image v1.0.3):
-   ```bash
-   # A. short-lived reader -> on-disk report has "suspects": []
-   ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c 'cat /workspace/.secrets/credentials; sleep 25'
-   cat workspaces/demo/WARDEN_SECURITY_INCIDENT.json     # suspects: []
-   # B. reader holds the fd -> named, but still degraded
-   ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c 'exec 3< /workspace/.secrets/credentials; cat <&3; sleep 25'
-   # log (inline) : evidence=open file descriptor exe=/usr/bin/bash
-   # report (sentinel): evidence="canary named in argv", exe="", open_canaries: []
-   # C. control: no sentinel -> the inline report is rich
-   docker volume create wattr-vault
-   docker run --rm --network warden_internal --user 1001:1001 --cap-drop=ALL --security-opt no-new-privileges:true --tmpfs /run/warden:rw,nosuid,size=16m,uid=1001,gid=1001 -v wattr-vault:/workspace/.secrets -e WARDEN_CANARY_ACTION=log -e WARDEN_EXPECT_SENTINEL=0 ai-warden/agent:latest bash -l -c 'cat /workspace/.secrets/credentials >/dev/null; sleep 4; cat /run/warden/breach.flag'
-   ```
-   Fix options, cheapest first: (a) make the degradation *honest* - when
-   `os.listdir("/proc/<pid>/fd")` or the `exe` readlink raises EACCES, say so in
-   the record (`"attribution_degraded": "..."`) instead of emitting an empty
-   suspects list that reads like "nobody did it"; (b) let the richer record win -
-   have the sentinel wait a short grace period (~300 ms) for the peer report
-   before writing its own, since containment (the kill) is independent of who
-   writes the report, and the sentinel's solo path still works when the inline
-   monitor is dead (phase D); (c) grant nothing extra - do NOT add
-   `CAP_SYS_PTRACE` to the sentinel to solve this; it would hand the anti-tamper
-   layer the ability to read every process in the container.
-   Both (a) and (b) are behaviour changes in the security-critical monitor: they
-   need a phase-D style drill that asserts the on-disk report carries
-   attribution (demo.sh act 3 already asserts this, and is the fastest repro),
-   plus a tag with a superseded note.
-
+1. **Monday rehearsal — blocked on the user's API key, not on code.** Needs
+   `ANTHROPIC_API_KEY` in `.env` (gitignored; `warden-cli.sh` passes it with
+   `--env-file`) or exported in the user's own terminal — never pasted into chat.
+   Then: `./scripts/demo.sh --auto` (must end `DEMO COMPLETE`, exit 0) and one
+   `./scripts/demo.sh --agent claude` rehearsal following `docs/DEMO.md` act 4.
+   The agent's Bash tool does not inherit the user's terminal exports, so if the
+   user runs the rehearsal themselves, read their terminal instead of re-running.
 2. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
    plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
    sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
@@ -92,21 +52,38 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    is a known gVisor limitation and is untested (THREAT_MODEL §4.1). Only once that
    is green should "gVisor support" be claimed in a release (v1.1.0 - it is a feature,
    not a fix).
-3. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
+3. **(low, idea) Surface the inline monitor's richer record without new privileges.**
+   v1.0.4 makes the sentinel's report honest (`restricted`), but the full view
+   (open-descriptor proof, exe) still only reaches the terminal log. The entrypoint's
+   USR1 trap could print `/run/warden/breach.flag` the way the normal-exit path
+   already does - BUT that file is written by uid 1001 into a tmpfs the agent owns,
+   so the agent can replace it: anything printed from it must be labelled as
+   agent-forgeable, never as "the record". Decide the labelling before coding; do
+   not merge it into the sentinel's report.
+4. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
    guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
    udisks layout puts the drive root two levels down (`/media/john/USB`), which is
    structurally indistinguishable from a project nested inside a drive
    (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
    mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
    source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
-4. **(cosmetic, low) `SIGUSR1 received from the canary tripwire` prints twice.**
-   Both the inline monitor and the sentinel signal PID 1 independently - the
-   redundancy is deliberate - but the entrypoint's USR1 trap runs twice and the
-   duplicate line looks like a glitch on video. Documented as expected in
-   `docs/DEMO.md` act 3. If fixed, make the trap idempotent (a run-dir flag);
-   do not remove either signal.
+5. **(cosmetic, low) Two glitch-looking lines on video after a breach:**
+   `SIGUSR1 received from the canary tripwire` prints twice (both monitors signal
+   PID 1 on purpose; the entrypoint's USR1 trap runs twice), and bash prints
+   `warden-entrypoint: line 454: <pid> Killed "$@"`. Both are documented/expected
+   (`docs/DEMO.md` act 3). If fixed: make the trap idempotent with a shell variable
+   and keep both signals; it is an entrypoint change, so rebuild + drills + tag -
+   not worth it in the last days before a recording.
 
 ### Decided this session (do not re-raise without new evidence)
+
+- **Sentinel attribution → honest verdict, not more privilege or a wait** (session 7,
+  shipped v1.0.4). The sentinel keeps `CAP_KILL` only and says `"attribution":
+  "restricted"`. Rejected with evidence: `CAP_SYS_PTRACE` (anti-tamper layer could
+  read every process); "sentinel waits ~300 ms for the inline report" (delaying
+  SIGUSR1 turns exit 99 into 137 when the inline monitor is dead, and a sidecar in a
+  shared PID namespace is SIGKILLed the moment PID 1 exits - run and confirmed with
+  two containers, `--pid container:<A>` vanished when A died).
 
 - **SNI domain fronting → accept + document only** (user call, 2026-09-15). Bypass is
   real and written up in `docs/THREAT_MODEL.md` §4.2; the proxy stays simple. A strict
@@ -178,6 +155,10 @@ would I know if this silently did nothing?" — then run that.
 | The drills' incident report is the *inline* monitor's; the real CLI's is the *sentinel's* | Phase B uses raw `docker run` with no sentinel, so the report on disk is the rich one (phase D does go through `warden-cli.sh run`, but kills the inline monitor first, so it only ever sees the sentinel's report). `warden-cli.sh run` attaches a sentinel that wins the write race and has weaker attribution (no `CAP_SYS_PTRACE`). Any claim about report **content** must be checked on the CLI path. |
 | `gh api /markdown` becomes `C:/Program Files/Git/markdown` | Git Bash rewrites the leading slash. Call `gh api markdown` (no leading slash) and pass a **Windows** path to `--input`; `MSYS_NO_PATHCONV=1` fixes the endpoint but then breaks the file path. To really check a README's links/anchors: `gh api repos/<owner>/<repo>/readme -H 'Accept: application/vnd.github.html'` and grep for `id="user-content-..."` (the plain `markdown` endpoint emits no heading anchors). |
 | Windows python dies printing Thai (`UnicodeEncodeError: charmap`) | stdout is cp1252. Prefix with `PYTHONIOENCODING=utf-8`, or print ASCII labels only. |
+| Editing a bash script while a background run of it is in flight | bash reads the script from disk as it goes; a header edit shifted offsets and the running suite died with `syntax error near unexpected token` at a line that was fine on disk. Cost one full suite run (session 7). Finish editing, `bash -n`, THEN start the run - and don't touch it until it reports. |
+| bash 5.2 execs the last command of a `-c` list | `bash -c 'cat canary; sleep 25'` leaves the PID as `sleep 25` with no canary in argv, so a "short-lived reader" leaves no trace for either monitor. Session 6's repro A blamed the sentinel for this; re-running it showed the inline monitor was equally blind. Re-run a logged repro before trusting its diagnosis. |
+| A drill payload that changes identity mid-flight is timing-dependent | E5's first payload opened fd 3 in bash, then `exec -a`'d into sleep; when the monitor scanned before the exec it saw plain bash, so the drill FAILED on a fixed build. One manual run of the payload found it. The adversary must be ONE process that holds its identity for the whole window (E5 now uses `exec -a ... python3 -c "f = open(...)"`). |
+| Proving a new assertion has teeth | Write it first and run it on the OLD image (must FAIL) before rebuilding. For a monitor function, `git show v1.0.3:monitors/canary_monitor.py` + a `python:3.11-slim` container with `setpriv --reuid=1001` (inline-like) or root with `setpriv --bounding-set=-all,+kill` (sentinel-like) compares old vs new in seconds, no image build. |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
 
 ---
@@ -193,6 +174,35 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-16 — session 7 · v1.0.4 (attribution honesty + argv-impersonation evasion)
+- **Did:** fixed HANDOFF first (stale `main` hash; the phase-D gotcha wrongly said
+  D was raw docker). Re-ran the attribution repros through `warden-cli.sh run`:
+  repro B confirmed the sentinel defect, repro A turned out NOT to be one (bash 5.2
+  exec'd `sleep`, so the inline monitor was blind too) - corrected the item. Chose
+  fix (a), honest degradation, and rejected (b) with two runs (a shared-PID-ns
+  sidecar dies with PID 1). Wrote the phase-D content assertion first and proved it
+  FAILED on the v1.0.3 image; added `attribution` / `attribution_note` to every
+  record. Testing the new verdict on the CLI path exposed a second defect: the
+  warden-marker filter let `exec -a /opt/warden/canary_monitor.py` hide a reader
+  holding a canary from both monitors, while the log said no one held it. Fixed
+  (marker silences only the argv hint), added drill E5 (FAILED pre-fix, v1.0.3's
+  function returns `[]`, passes now). Rebuilt `--pull`, suite A-F green exit 0,
+  `demo.sh --auto` DEMO COMPLETE, trivy 0/0, CI green on main + tag, shipped
+  **v1.0.4** with v1.0.3 marked superseded. Quoted output in README / DEMO.md /
+  VERIFICATION.md replaced from single runs. `claude --version` smoke in v1.0.4: OK.
+- **Learned:** (1) a new *honesty* field is itself a control that can lie - the first
+  thing to test is how the adversary makes it say something false (E5 came from
+  exactly that question, on the real CLI path). (2) Drills can be flaky in a way
+  that looks like a regression: E5 failed on the fixed build because its payload
+  changed identity mid-flight; one manual run of the payload settled it. (3) I
+  edited `verify-isolation.sh` while a background run was executing it and lost the
+  run to a bogus syntax error. (4) A logged repro's diagnosis can be wrong even
+  when its output is right - repro A's `suspects: []` was real, the blame was not.
+- **Prompt should have said:** the rehearsal needs the user's API key, which the
+  agent's shell never has - ask for it (via `.env`, never in chat) at START, not
+  discover it at the end; never edit a script a background run is executing; prove
+  an assertion's teeth on the old image before rebuilding.
 
 ### 2026-09-16 — session 6 · demo deliverables for the Monday first test
 - **Did:** shipped the three Monday deliverables and ran them. `scripts/demo.sh`
@@ -356,6 +366,20 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v7 · 2026-09-16** — session 7. (a) **START asks for the API key** (`.env`, never in
+  chat) — the session found "API key: NOT set" at start and could not do the mandatory
+  `--agent claude` rehearsal; default task is now that rehearsal, and "read my terminal
+  if I run it myself". (b) **verify a Next-steps DIAGNOSIS by re-running its repro** —
+  session 6's repro A blamed the sentinel; one re-run showed bash had exec'd `sleep` and
+  the inline monitor was blind too. (c) **assertion first, watch it FAIL on the old
+  image, then fix** — did this for phase D and E5; both failed pre-fix, proving teeth.
+  (d) **ask how the agent makes a new guard/field lie** — that question, on the CLI path,
+  found the `exec -a /opt/warden/...` attribution evasion. (e) **a drill failing on a
+  fixed build: run its payload by hand first** — E5's failure was its own race, found
+  in one manual run. (f) **never edit a script a background run is executing** — lost a
+  full suite run to a bogus syntax error. (g) corrected "phases B/D are raw docker"
+  (only B is). Cut: the inline GitHub-anchor check (still in Gotchas; no anchors changed
+  this session) and v6's `WARDEN_CANARY_ACTION=log` example, to stay under 70 lines.
 - **v6 · 2026-09-16** — session 6. Workflow upgrades, each from an event in this
   session: (a) **encode the docs convention** (Thai prose + English commands) — DEMO.md
   was drafted in English and had to be rewritten, pure waste; (b) **"when output

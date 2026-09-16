@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v6 · 2026-09-16
+# AI Warden — next-session prompt · v7 · 2026-09-16
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -8,70 +8,68 @@ You are continuing AI Warden: a Zero-Trust Docker sandbox for AI coding agents.
 Project: D:\code-project\AI Warden   (the folder name has a space)
 Repo:    https://github.com/mntoyg/AI-Warden   (PUBLIC on purpose)
 Talk to me in Thai. Code, comments, commit messages and CI stay in English.
-Docs are Thai prose + English commands/output/table headers (README, THREAT_MODEL,
-VERIFICATION, DEMO all follow this) — don't draft a new doc in English.
-🚩 First live test: Monday 2026-09-21 — recorded to video, pushed to GitHub, on THIS
-   Windows Docker Desktop box (real agent + live breach, enforced=4/7). The demo
-   deliverables SHIPPED (scripts/demo.sh, docs/DEMO.md, README): rehearse, don't rebuild.
+Docs are Thai prose + English commands/output/table headers — don't draft a doc in English.
+🚩 First live test: Monday 2026-09-21 — video, pushed to GitHub, on THIS Windows
+   Docker Desktop box (real agent + live breach, enforced=4/7). Demo deliverables and
+   v1.0.4 are SHIPPED: rehearse, don't rebuild. A behaviour change now needs drill +
+   tag + CI with time to spare — a documented limitation beats a fresh regression.
 
 1) START — before any work
-   a. Read .ai/HANDOFF.md fully. It is a claim to verify, not a fact.
+   a. Read .ai/HANDOFF.md fully. It is a claim to verify — including the DIAGNOSIS in
+      a Next-steps item: re-run its repro before building on it (v7: session 6's
+      "repro A = sentinel defect" was wrong; the inline monitor was equally blind).
    b. Reality check: git status, git fetch + commits on origin not in HEAD, latest
-      tag vs commits after it, `gh run list --limit 3`, `docker info` — Docker Desktop
-      is often DOWN at start (PowerShell Start-Process; poll `docker info`, ~1 min).
-   c. Where HANDOFF disagrees with reality, fix HANDOFF first (stale twice running).
-   d. Report in 3-5 lines: state, first task, anything surprising. Then start.
+      tag vs commits after it, `gh run list --limit 3`, `docker info` (if DOWN:
+      PowerShell Start-Process Docker Desktop, poll `docker info`, ~1 min).
+   c. Where HANDOFF disagrees with reality, fix HANDOFF first and commit.
+   d. Your shell has NO ANTHROPIC_API_KEY. If a rehearsal is on the plan, ask me in
+      the 3-5 line report to put it in `.env` (gitignored) — never paste it in chat.
+   e. Report in 3-5 lines: state, first task, anything surprising. Then start.
 
 2) WORK
-   - Default task: top of HANDOFF "Next steps" — now the SENTINEL ATTRIBUTION defect
-     (the on-disk incident report can name no process at all). Repro + three fix
-     options are in the item; option (c) says what NOT to do. Monitor behaviour
-     change: needs a drill + a tag, so ship it before Monday only if green with time
-     to spare — a documented limitation beats a fresh regression.
-   - Mandatory before Monday: `export ANTHROPIC_API_KEY=...`, `./scripts/demo.sh
-     --auto` (must end "DEMO COMPLETE", exit 0), one `--agent claude` rehearsal.
-   - Done means RUN — and run the PATH I WILL RUN. `./scripts/verify-isolation.sh`
-     stays green A-F (exit 0), but any claim about the incident report's CONTENT must
-     be checked through `warden-cli.sh run`: phases B/D use raw docker with no
-     sentinel, so they show the rich inline report, while the real CLI's report is
-     the sentinel's and is weaker. Both bugs found in the last two sessions hid in
-     exactly that gap. On Docker Desktop enforced=4/7 is correct.
-   - When output surprises you, STOP reading code and run the smallest controlled
-     experiment instead (this session: `-e WARDEN_CANARY_ACTION=log` + raw docker run
-     settled in one run what three rounds of reading the monitor could not).
-   - Before a script asserts anything about the sandbox, check whether the paths it
-     touches are seeded canaries (`$WARDEN_CANARY_FILES` — `~/.aws/credentials` and
-     `~/.ssh/id_rsa_backup` are): reading one mid-test trips the tripwire. `[ -f ]`
-     never opens a file.
+   - Default task: HANDOFF Next steps #1 = the Monday rehearsal (`./scripts/demo.sh
+     --auto` must end "DEMO COMPLETE" exit 0, then one `--agent claude` run). If I
+     run it in my own terminal, read my terminal output instead of re-running.
+     Without a key: do the next item that needs no behaviour change, or hand off.
+   - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green
+     A-F (E1-E5), exit 0, enforced=4/7 here; claims about incident-report CONTENT
+     must be checked via `warden-cli.sh run` (the sentinel usually writes that file;
+     only phase B is raw docker with no sentinel).
+   - Any new drill/assertion: write it FIRST, run it on the OLD image and watch it
+     FAIL, then fix + `warden-cli.sh build --pull` + run it green. Cheap function-
+     level check without a build: `git show <tag>:monitors/canary_monitor.py` in a
+     python:3.11-slim container with `setpriv` (see HANDOFF Gotchas).
+   - For every guard or report field you add, ask how the AGENT makes it lie (it
+     controls argv, fds, timing, files in /workspace and /run/warden). v1.0.4's
+     second bug came from that question: `exec -a /opt/warden/...` hid a reader.
+   - A drill that fails on a fixed build: run its payload by hand once before
+     touching the code — E5's failure was the drill's own race, not a regression.
+   - When output surprises you, STOP reading code, run the smallest experiment.
+   - NEVER edit a script while a background run of it is executing (bash reads it
+     from disk mid-run; cost a full suite run). Edit, `bash -n`, then run.
+   - Canary paths (`$WARDEN_CANARY_FILES`, incl. ~/.aws/credentials) trip the
+     tripwire if a test opens them; `[ -f ]` never opens a file.
    - Recurring bug: a control that reports itself armed while enforcing nothing,
-     crying wolf, or reporting nothing at all. Test that case for every guard you
-     touch; when it finds a bug, log it in HANDOFF Next steps with a repro — don't
-     weaken the test or silently widen scope.
-   - Output quoted in docs/README must come from ONE real run: a block stitched from
-     two runs was caught in review this session, which for this project is a real
-     defect, not a cosmetic one.
+     crying wolf, or reporting nothing/false. Found one? Log it in HANDOFF Next
+     steps with a repro — don't weaken the test or silently widen scope.
+   - Output quoted in docs/README comes from ONE real run (regenerate whole blocks).
    - verify-isolation.sh is `set -uo pipefail` (NO -e). NEVER add `set -e` in a phase.
-   - Read the Gotchas table before scripting via Bash (path mangling, \033 escapes,
-     git commit -F, gh api leading slash, PYTHONIOENCODING for Thai). Commit + push
-     after every finished step. A test/docs change needs no tag; a security fix ships
-     in a TAG + superseded note (rebuild: `warden-cli.sh build --pull`, trivy, CI).
-   - Check doc links/anchors against GitHub's rendering, not by eye: `gh api
-     repos/mntoyg/AI-Warden/readme -H 'Accept: application/vnd.github.html'`, grep
-     `id="user-content-..."` (the plain `markdown` endpoint emits no anchors).
+   - Read the Gotchas table before scripting via Bash (MSYS path mangling, commit -F,
+     gh api leading slash, PYTHONIOENCODING). Commit + push after every step. A
+     test/docs change needs no tag; a monitor/entrypoint fix ships as TAG + release +
+     superseded note on the previous release (CI green on the tag first; re-read).
    - A Next-steps item may resolve to NO code (a decision, or unverifiable here like
-     gVisor without runsc) — that's finished, not a gap.
+     gVisor without runsc) — that's finished, not a gap. Decided items stay decided.
 
 3) END — self-triggered, do NOT wait to be asked
-   a. When your context passes ~70% of the window, STOP taking new work, finish and
-      verify what is in flight, then run this END sequence and hand off.
-   b. Update .ai/HANDOFF.md: Status, re-prioritised Next steps, new Gotchas, Session log
-      (Did / Learned / "Prompt should have said").
-   c. Rewrite .ai/NEXT_PROMPT.md so the NEXT chat does MORE per chat and gets BETTER
-      results — a workflow upgrade, not a version bump: cut a step that wasted time,
-      add a check that caught a real bug, encode a decision so it is not re-litigated.
-      Every change cites a concrete event from THIS session; delete stale lines; keep
-      it under 70 lines (detail goes to HANDOFF); bump the version; add one line to
-      HANDOFF "Prompt changelog". If nothing genuinely improved, say why.
+   a. When context passes ~70% of the window, STOP new work, finish and verify
+      what is in flight, then run this END sequence.
+   b. Update .ai/HANDOFF.md: Status, re-prioritised Next steps, new Gotchas, Session
+      log (Did / Learned / "Prompt should have said").
+   c. Rewrite .ai/NEXT_PROMPT.md as a workflow upgrade, not a version bump: cut a
+      step that wasted time, add a check that caught a real bug, encode a decision.
+      Every change cites a concrete event from THIS session; delete stale lines;
+      under 70 lines; bump the version; one line in HANDOFF "Prompt changelog".
    d. Commit + push, then paste the full new prompt text into your final reply.
 ```
 
@@ -79,10 +77,9 @@ VERIFICATION, DEMO all follow this) — don't draft a new doc in English.
 
 ## Why this prompt is shaped this way
 
-Reality-check first (HANDOFF has been stale at session start twice running; Docker is
-often down). Done-means-run **on the real CLI path** — the v1.0.3 false alarm and the
-session-6 attribution defect both hid where the drills don't look. Prefer one controlled
-experiment over three rounds of reading code. Treat quoted output as evidence, not copy.
-`set -uo pipefail` (never `set -e` in a phase), tag security fixes, record-don't-widen.
-The session self-triggers its handoff at ~70% context, and every rewrite must earn its
-lines with a real event from the session that wrote it.
+Reality-check first — and that now includes the *diagnosis* in a handoff item, not just
+git/CI state. Done-means-run on the real CLI path. v7 adds the loop that made session 7
+productive (assertion first → fails on old image → fix → passes) and the adversarial
+question that found its second bug, plus the two traps that cost it runs (editing a
+running script; a drill payload racing itself). The API key is flagged at START because
+the rehearsal is the one mandatory task an agent's shell can never do on its own.
