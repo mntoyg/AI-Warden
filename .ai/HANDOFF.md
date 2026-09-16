@@ -5,10 +5,11 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-15 (session 5)
-- **Latest release:** [v1.0.2](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.2) — mount-guard hardening (security), marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v4)
-- **🚩 MILESTONE — first live test: Monday 2026-09-21.** Keep `main` green and
-  release-ready; reliability/security fixes before new features until then.
+- **Latest release:** [v1.0.3](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.3) — incident-report false-alarm fix, marked Latest
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v5)
+- **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
+  run on THIS Windows Docker Desktop, real agent + live breach, enforced=4/7). Keep
+  `main` green and release-ready; reliability/trust fixes before new features.
 
 ---
 
@@ -16,13 +17,14 @@
 
 | Thing | State |
 |---|---|
-| `main` | `8f61b3e` (CI pull-hardening), tree clean; gVisor plumbing (`65f2cbd`) + this handoff on top |
-| Tags | `v1.0.0` & `v1.0.1` both carry a "superseded" warning · `v1.0.2` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green** (tag `v1.0.2`: run 34937500342; gVisor commit `65f2cbd`: run 34946167536) |
-| Local suite (Docker Desktop / Windows) | Phase A 34/34 · B exit 99 · C exit 78 · D exit 99 · E1–E4 pass · **F (runtime fail-closed) pass, passthrough proven via nvidia** · `enforced=4/7` · suite exit 0 |
-| CI suite (ext4) | all phases incl. E + F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips: no non-default runtime on CI) |
-| CVEs | 0 HIGH/CRITICAL in OS packages and in `/opt/warden` (trivy, debian 12.15); **74** in the bundled agents' own trees (reported, deliberately not gated — see `SECURITY.md`) |
+| `main` | `eb6c833` (release 1.0.3), tree clean |
+| Tags | `v1.0.0`/`v1.0.1`/`v1.0.2` all carry a "superseded" warning · `v1.0.3` (Latest) |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.3`** (run 34949707045) and on `main`; static/CVE now pre-pull tool images with retry |
+| Local suite (Docker Desktop / Windows) | A 34/34 · B exit 99 · C exit 78 · D exit 99 **+ single clean incident report** · E1–E4 pass · F (runtime fail-closed, passthrough proven via nvidia) · `enforced=4/7` · exit 0 · monitor reports `v1.0.3` |
+| CI suite (ext4) | all phases A–F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
+| CVEs | 0 HIGH/CRITICAL OS packages & `/opt/warden` (trivy, debian 12.15); **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
 | Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
+| Demo readiness | Dry-run on Docker Desktop: agent (claude 2.1.197) launches under warden, egress reaches api.anthropic.com via proxy, live breach → exit 99 + one clean incident report. **Demo day needs `ANTHROPIC_API_KEY` exported** (none on the box now). |
 
 ---
 
@@ -31,7 +33,23 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
+1. **Demo deliverables for the Monday 2026-09-21 first test (video → public GitHub).**
+   The scenario is decided: real agent + live breach, on THIS Windows Docker Desktop
+   box (enforced=4/7; the vault canary still trips, so the breach demo works). Build:
+   - `scripts/demo.sh` — a scripted, narrated, on-camera walkthrough: ensure proxy up →
+     launch the agent under warden → show the isolation proofs (id/uid 1001, CapBnd=0,
+     no direct egress, allowlist allow vs 403 deny) → trigger the live breach
+     (`cat /workspace/.secrets/credentials`) → exit 99 + the single clean
+     `WARDEN_SECURITY_INCIDENT.json`. Add pauses/echo banners so it reads on video.
+     Verify by RUNNING it end-to-end (it must be smooth, no scary false lines).
+   - `docs/DEMO.md` — the runbook: pre-flight checklist (Docker up, `export
+     ANTHROPIC_API_KEY`, `warden-cli.sh build`), the exact command sequence with
+     expected output, and the "type in a real agent session" live portion.
+   - README polish for the public push: a quickstart + a "what you'll see" demo section
+     near the top; check every link renders. First impression on GitHub.
+   Note: no API key on the box now — the real-agent-doing-a-task part needs the user to
+   export `ANTHROPIC_API_KEY` on demo day; rehearse the breach with `bash` as the agent.
+2. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
    plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
    sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
    unavailable runtime (never downgrades to runc), and phase F proves fail-closed +
@@ -43,7 +61,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    is a known gVisor limitation and is untested (THREAT_MODEL §4.1). Only once that
    is green should "gVisor support" be claimed in a release (v1.1.0 - it is a feature,
    not a fix).
-2. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
+3. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
    guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
    udisks layout puts the drive root two levels down (`/media/john/USB`), which is
    structurally indistinguishable from a project nested inside a drive
@@ -133,6 +151,24 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-15 — session 5 (cont.) · demo prep · v1.0.3
+- **Did:** with a first live test (video → GitHub) set for Mon 2026-09-21 on this
+  Docker Desktop box, dry-ran the actual demo path (`warden-cli run`, sentinel on) —
+  which surfaced a real bug the raw-docker drills never hit: a benign breach printed a
+  **false "report redirected by a symlink" alarm** + an empty fallback, because the
+  inline monitor and the sentinel race to write the workspace report and the loser
+  mistook `EACCES` for tampering. Fixed (only `ELOOP` = tamper), added a phase-D guard
+  that fails on a false tamper report, dropped the obsolete `dns_v4_first` squid
+  directive (it printed `ERROR:` on every build), and shipped **v1.0.3** (rebuilt
+  --pull, trivy 0, A–F green, v1.0.2 marked superseded). Confirmed the demo works:
+  claude 2.1.197 launches under warden, egress reaches api.anthropic.com via the proxy.
+- **Learned:** the drills used raw `docker run` (one monitor); the real CLI runs the
+  inline monitor AND the sentinel, so the report-writer race only ever appears on the
+  real path. "Done means run" has to mean run the PATH THE USER WILL RUN, not a proxy
+  for it. The dry-run for the demo was itself the highest-value test this session.
+- **Prompt should have said:** before a demo/release, run `warden-cli run` end-to-end
+  (agent launch + live breach) and read the incident report, not just the drills.
 
 ### 2026-09-15 — session 5 · CVE-drift gate · fronting probe · resource drill
 (same chat as session 4, continued after the v1.0.2 release)
@@ -243,6 +279,13 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v5 · 2026-09-16** — session 5 (cont.), at the user's request: (a) the handoff is now
+  **self-triggered at ~70% context** (stop, verify, hand off) instead of waiting to be told;
+  (b) the rewrite is explicitly a **workflow upgrade, not a version bump** — each edition must
+  let the next chat do more per chat and get better results, citing a real event; (c) "done
+  means run **the path the user will run**" — v1.0.3's false-alarm bug showed only in a real
+  `warden-cli run` demo dry-run, never in the raw-docker drills; (d) named the concrete next
+  task (Monday demo deliverables) + the first-test milestone up top.
 - **v4 · 2026-09-15** — session 5. Corrected the now-stale v3 line: `warden-cli.sh
   build --pull` was FIXED this session and re-pulls both images, so the prompt says
   to use it (not raw docker). Added: a Next-steps item may resolve to "no code" (a
