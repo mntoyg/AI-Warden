@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Six phases:
+#  Proves the sandbox actually does what the README claims. Seven phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -25,6 +25,8 @@
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
+#    G. Agent launch (codex)  - warden-cli must log codex in from OPENAI_API_KEY
+#                               and turn codex's own (unworkable) sandbox off.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -49,7 +51,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,29p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,31p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -653,6 +655,38 @@ if [ -n "$alt_rt" ]; then
     fi
 else
     note "phase F: no non-default runtime available - cmd_run passthrough not exercised e2e (fail-closed + reflect still cover it)"
+fi
+
+# =============================================================================
+printf '\n%s================= PHASE G: agent launch (codex) ==================%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# `warden-cli.sh run <ws> codex` used to hand the user a codex that could do
+# nothing, while looking fine:
+#   - codex 0.154 ignores OPENAI_API_KEY in the environment ("Not logged in",
+#     then 401 retry loops against api.openai.com), and
+#   - its own sandbox needs bubblewrap, which the image does not have and which
+#     could not create namespaces under cap-drop=ALL anyway: every shell command
+#     failed "due to sandbox permissions" while `codex exec` still exited 0.
+# The launcher must log codex in from OPENAI_API_KEY (read from the environment,
+# never argv) and run it with sandbox_mode=danger-full-access, because AI Warden
+# is the sandbox. Checked with a FAKE key: `codex login --with-api-key` does not
+# call the API, so this phase spends nothing and needs no secret in CI.
+G_WS="${PROJECT_ROOT}/workspaces/.verify-codex-$$"
+mkdir -p "$G_WS"; chmod 0777 "$G_WS" 2>/dev/null || true
+g_out="$(OPENAI_API_KEY="sk-warden-drill-not-a-real-key-0000000000" NO_COLOR=1 \
+    "${SCRIPT_DIR}/warden-cli.sh" run "$G_WS" codex -- login status 2>&1)"
+g_rc=$?
+rmdir "${G_WS}/.secrets" 2>/dev/null || true
+rm -rf "$G_WS" 2>/dev/null || true
+g_logged_in=0; g_sandbox=0
+if printf '%s' "$g_out" | grep -q 'Logged in using an API key'; then g_logged_in=1; fi
+if printf '%s' "$g_out" | grep -q 'launching agent .*sandbox_mode="danger-full-access"'; then g_sandbox=1; fi
+if [ "$g_rc" -eq 0 ] && [ "$g_logged_in" = "1" ] && [ "$g_sandbox" = "1" ]; then
+    good "phase G: warden-cli logs codex in from OPENAI_API_KEY and launches it with sandbox_mode=danger-full-access"
+else
+    bad  "phase G: codex launch is not usable (rc=${g_rc}, logged_in=${g_logged_in}, sandbox_off=${g_sandbox})"
+    note "         $(printf '%s' "$g_out" | grep -E 'launching agent|Not logged in|Logged in' | sed -E 's/sk-[A-Za-z0-9_*-]+/sk-REDACTED/g' | tr '\n' ' ' | cut -c1-300)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
 
 # =============================================================================

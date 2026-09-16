@@ -356,11 +356,26 @@ cmd_down() {
 # =============================================================================
 #  Sub-command: run
 # =============================================================================
+# codex needs two things done for it inside the sandbox, or it launches looking
+# fine and can do nothing (both found by running it, codex-cli 0.154.0):
+#   1. It ignores OPENAI_API_KEY in the environment ("Not logged in", then 401
+#      retry loops). The key is piped from the environment into
+#      `codex login --with-api-key` - never placed on argv, where the canary
+#      monitor's /proc scan and `ps` would see it. The auth file lands in the
+#      container's home and dies with the container (--rm).
+#   2. Its own sandbox needs bubblewrap and user namespaces; under cap-drop=ALL
+#      every shell command failed "due to sandbox permissions" while `codex exec`
+#      still exited 0. AI Warden is the sandbox, so codex's is turned off
+#      explicitly (sandbox_mode=danger-full-access) rather than left silently
+#      broken. Its approval prompts are unaffected.
+# Phase G of verify-isolation.sh checks both with a fake key.
+CODEX_WRAPPER='if [ -n "${OPENAI_API_KEY:-}" ]; then printenv OPENAI_API_KEY | codex login --with-api-key >/dev/null 2>&1 || { echo "[warden] codex could not log in with OPENAI_API_KEY" >&2; exit 1; }; else echo "[warden] OPENAI_API_KEY is not set - codex will ask for a sign-in" >&2; fi; exec codex -c sandbox_mode="danger-full-access" "$@"'
+
 resolve_agent_cmd() {
     case "${1:-bash}" in
         claude)          printf '%s\n' claude ;;
         aider)           printf '%s\n' aider ;;
-        codex)           printf '%s\n' codex ;;
+        codex)           printf '%s\n' bash -c "$CODEX_WRAPPER" codex ;;
         hermes)          printf '%s\n' hermes ;;
         bash|sh|shell)   printf '%s\n%s\n' bash -l ;;
         *)               printf '%s\n' "$1" ;;

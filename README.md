@@ -227,6 +227,11 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 `agent` ที่รองรับ: `claude` | `aider` | `codex` | `bash` — ติดตั้งมาให้ใน image แล้ว
 
+`codex` ใช้ `OPENAI_API_KEY` จาก `.env` — launcher จะ login ให้จาก environment (ไม่ผ่าน argv)
+และเปิด codex ด้วย sandbox ของมันเองปิดอยู่ เพราะ sandbox นั้นทำงานใน container ที่ไม่มี
+capability ไม่ได้ ส่วนขอบเขตจริงคือ AI Warden ดูเหตุผลใน
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) §3.6
+
 ตัวอื่น (เช่น `hermes`) เพิ่มได้ตอน build แล้วเรียกชื่อได้เลย:
 
 ```bash
@@ -424,7 +429,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 6 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 7 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -434,6 +439,7 @@ agent container is GONE - killed by the sentinel
 | **D** | sentinel drill — agent ฆ่า inline monitor แล้วอ่าน canary | sentinel นอกกรงยังฆ่าให้ **exit 99** |
 | **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) + E5 หลบการระบุตัวด้วย argv ปลอมเป็น warden (แก้ใน v1.0.4) | refuse/ป้องกันทุกกรณี |
 | **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
+| **G** | agent launch — `codex` ต้อง login จาก `OPENAI_API_KEY` ได้ (ทดสอบด้วย key ปลอม) และเปิดโดยปิด sandbox ของ codex ที่ใช้ไม่ได้ใน container | `Logged in using an API key` + `sandbox_mode="danger-full-access"` |
 
 อยากลองด้วยมือก็ได้:
 
@@ -506,7 +512,7 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 6 เฟส (A-F)
+│   ├── verify-isolation.sh      # ชุดทดสอบ 7 เฟส (A-G)
 │   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/

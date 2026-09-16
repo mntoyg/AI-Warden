@@ -170,6 +170,23 @@ entrypoint รัน agent เป็น foreground process แทนที่จ
 (หมายเหตุ: kernel ป้องกัน PID 1 ใน namespace จาก signal ที่มี default action —
 `SIGKILL` จากภายในจึงใช้ไม่ได้ ต้องเป็น signal ที่ PID 1 ดักไว้เองเท่านั้น)
 
+### 3.6 codex: ปิด sandbox ของตัวมันเอง เพราะ AI Warden คือ sandbox
+
+`codex` มี sandbox ของตัวเองสำหรับคำสั่ง shell ที่มันรัน ซึ่งต้องใช้ `bubblewrap` และ user
+namespace ภายใต้ `--cap-drop=ALL` ของ AI Warden สิ่งนี้ใช้ไม่ได้ ทดสอบกับ codex-cli 0.154.0
+แล้วพบว่า **คำสั่ง shell ทุกคำสั่งล้ม "due to sandbox permissions" แต่ `codex exec` ยัง exit 0**
+แปลว่า agent ดูเหมือนทำงาน แต่จริง ๆ ทำอะไรไม่ได้ ซึ่งเป็น bug shape เดียวกับที่โปรเจกต์นี้ตามล่า
+
+`warden-cli.sh run <folder> codex` จึงเปิด codex ด้วย `-c sandbox_mode="danger-full-access"`
+อย่างชัดแจ้ง ขอบเขตจริงคือ container ของ AI Warden (uid 1001, ไม่มี capability, mount
+แค่ workspace, ออกเน็ตได้แค่ผ่าน allowlist, มี canary) ซึ่งเป็นสิ่งเดียวกับที่ `claude` และ
+`aider` ได้อยู่แล้ว การขออนุมัติคำสั่ง (approval prompt) ของ codex ไม่ได้ถูกปิด
+
+codex 0.154.0 ไม่อ่าน `OPENAI_API_KEY` จาก environment ด้วย (ได้ "Not logged in" แล้ว 401 วนซ้ำ)
+launcher จึง pipe key จาก environment เข้า `codex login --with-api-key` ก่อนเปิด —
+key ไม่เคยอยู่บน argv (ที่ `ps` และ monitor อ่าน `/proc/<pid>/cmdline` ได้) และไฟล์ auth
+อยู่ใน home ของ container ที่ถูกลบตอนจบ (`--rm`) ทั้งสองข้อตรวจโดย phase G ด้วย key ปลอม
+
 ---
 
 ## 4. สิ่งที่ AI Warden ป้องกันไม่ได้

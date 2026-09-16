@@ -4,6 +4,34 @@
 
 ---
 
+## [Unreleased]
+
+ยังไม่ออก tag โดยตั้งใจ: tag ต้อง rebuild image ซึ่งจะดึง codex/claude รุ่นใหม่ก่อนถ่ายเดโม
+2026-09-21 — จะออกเป็น 1.0.5 หลังเดโม (การเปลี่ยนแปลงทั้งหมดอยู่ในสคริปต์ฝั่งโฮสต์ image ไม่เปลี่ยน)
+
+### Fixed
+
+- **`warden-cli.sh run <folder> codex` ใช้งานไม่ได้จริงกับ API key** — codex-cli 0.154.0 ไม่อ่าน
+  `OPENAI_API_KEY` จาก environment ("Not logged in" แล้ว 401 วนซ้ำ) และ sandbox ของ codex เอง
+  (ต้องมี bubblewrap + user namespace) ทำงานไม่ได้ภายใต้ `--cap-drop=ALL`: ทุกคำสั่ง shell ล้ม
+  "due to sandbox permissions" แต่ `codex exec` ยัง exit 0 ตอนนี้ launcher pipe key จาก
+  environment เข้า `codex login --with-api-key` (ไม่ผ่าน argv) และเปิด codex ด้วย
+  `-c sandbox_mode="danger-full-access"` อย่างชัดแจ้ง — AI Warden คือ sandbox (THREAT_MODEL §3.6)
+- **`demo.sh` องก์ 4 ข้ามการส่งต่อ agent ทั้งที่มี key** — เช็คแค่ key ที่ `export` ไว้ ขณะที่ที่เก็บ key
+  ที่แนะนำคือ `.env` และไม่มีการเช็คเลยสำหรับ codex ตอนนี้เช็คทั้งสองที่ (ไม่อ่านค่า) และ agent ที่
+  ขอไว้ต้องพิสูจน์ว่า login + ตอบ `READY` ผ่าน sandbox ได้จริง ไม่อย่างนั้นองก์ 4 FAIL
+
+### Tests
+
+- phase **G** ใหม่: ด้วย key ปลอม launcher ต้อง login codex ได้ (`Logged in using an API key`) และเปิด
+  codex ด้วย `sandbox_mode="danger-full-access"` — fail กับโค้ดก่อนแก้ (`Not logged in`)
+
+### Docs
+
+- runbook เดโมเปลี่ยนเป็น codex + `OPENAI_API_KEY` ใน `.env` และ **ห้าม build ใหม่วันถ่าย**
+
+---
+
 ## [1.0.4] — 2026-09-16
 
 **Forensic honesty fix — ควรอัปเกรด โดยเฉพาะก่อนโชว์/บันทึกวิดีโอ**

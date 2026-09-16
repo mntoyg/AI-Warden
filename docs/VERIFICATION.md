@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-16T08:48:00Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-16T15:15:52Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -56,6 +56,9 @@
   PASS phase F: Docker records the runtime it is handed (HostConfig.Runtime=runc)
   PASS phase F: warden-cli refused an unavailable WARDEN_RUNTIME and started no sandbox
   PASS phase F: warden-cli applies WARDEN_RUNTIME end-to-end (agent HostConfig.Runtime=nvidia)
+
+================= PHASE G: agent launch (codex) ==================
+  PASS phase G: warden-cli logs codex in from OPENAI_API_KEY and launches it with sandbox_mode=danger-full-access
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
@@ -296,6 +299,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
 | ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |
 | รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
+| codex ใช้ได้จริงใน sandbox (G) | `OPENAI_API_KEY=<fake> warden-cli.sh run <dir> codex -- login status` | `Logged in using an API key` + บรรทัด launching มี `sandbox_mode="danger-full-access"` |
 
 ---
 

@@ -13,7 +13,7 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 ```bash
 ./scripts/demo.sh                 # on camera: pauses between acts
 ./scripts/demo.sh --auto          # rehearsal: no pauses, no TTY needed
-./scripts/demo.sh --agent claude  # act 4 hands the terminal to a real agent
+./scripts/demo.sh --agent codex   # act 4: prove codex answers, then hand it the terminal
 ```
 
 ---
@@ -23,12 +23,13 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
-| 2 | image ใหม่ล่าสุด | `./scripts/warden-cli.sh build --pull` | build ผ่านทั้ง 2 image (~5–10 นาที) |
-| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–F ผ่าน, **exit 0** |
-| 4 | API key สำหรับองก์ 4 | `export ANTHROPIC_API_KEY=sk-ant-...` | องก์ 0 ของ `demo.sh` บอกว่าเจอ key |
-| 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto` | `DEMO COMPLETE - every act verified its own claim` |
+| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.154.0` (เวอร์ชันที่ทดสอบ login + sandbox แล้ว) |
+| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–G ผ่าน, **exit 0** |
+| 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` |
+| 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` |
 
-ข้อ 4 คือข้อที่ขาดบนเครื่องนี้ทุกครั้ง ถ้าไม่มี key องก์ 1–3 ยังทำงานปกติ
+ข้อ 2: `build --pull` ดึง codex/claude รุ่นใหม่ล่าสุด แต่วิธี login และการปิด sandbox ของ codex
+ทดสอบกับ 0.154.0 เท่านั้น — build ใหม่ = ต้องซ้อมข้อ 3–5 ใหม่ทั้งหมด ถ้าไม่มี key องก์ 1–3 ยังทำงานปกติ
 แต่องก์ 4 จะ launch agent จริงไม่ได้
 
 เทอร์มินัลสำหรับอัด: ฟอนต์ใหญ่, กว้างอย่างน้อย 100 คอลัมน์, เปิดสี
@@ -172,12 +173,14 @@ tripwire` จะขึ้น **2 ครั้ง** เพราะทั้ง i
 
 ### Act 4 — a real agent, live
 
-ถ้าใส่ `--agent claude` (และ export `ANTHROPIC_API_KEY` ไว้) สคริปต์จะส่งเทอร์มินัล
-ให้ agent จริงที่รันอยู่ใน sandbox ลำดับที่แนะนำสำหรับหน้ากล้อง
+ถ้าใส่ `--agent codex` (และมี `OPENAI_API_KEY` ใน `.env`) สคริปต์จะ **พิสูจน์ก่อน** ว่า codex
+login และตอบผ่าน sandbox ได้จริง (`codex exec` ตอบ `READY`) แล้วจึงส่งเทอร์มินัลให้ codex
+ที่รันอยู่ใน sandbox — ถ้าพิสูจน์ไม่ผ่าน องก์ 4 จะ FAIL แทนที่จะเปิด agent ที่พังกลางกล้อง
+ลำดับที่แนะนำสำหรับหน้ากล้อง
 
 1. สั่งงานจริง: *"read src/app.py and add input validation to total()"* —
    ให้เห็น session ปกติ, ไฟล์ถูกแก้ใน workspace, egress ออกไป
-   `api.anthropic.com` ผ่าน proxy
+   `api.openai.com` ผ่าน proxy
 2. สั่งสิ่งที่ perimeter ห้าม: *"fetch https://example.com"* — agent รายงานว่าเจอ
    proxy 403 ไม่มีอะไรพัง เส้นแบ่งแค่ยืนอยู่ของมัน
 3. สั่งให้อ่าน honeypot: *"cat /workspace/.secrets/credentials"* — session ตาย
@@ -222,7 +225,9 @@ tripwire` จะขึ้น **2 ครั้ง** เพราะทั้ง i
 | องก์ 3 ได้ exit `0` ไม่ใช่ `99` | tripwire ไม่ทำงาน — **หยุด อย่าอัด** | ดูค่า `enforced=` ใน banner แล้วรัน `./scripts/verify-isolation.sh` |
 | องก์ 3 ได้ exit `78` | posture check ปฏิเสธ container | อ่านบรรทัดที่ปฏิเสธ — container ถูก launch ด้วย flag ผิด |
 | `"suspects": []` ใน report | reader อายุสั้น + attribution ของ sentinel ไม่ครบ | ปกติสำหรับ `cat` เปล่า ๆ — คำสั่งใน demo ถือ fd ค้างไว้แล้ว |
-| องก์ 4 ถูกข้าม | ไม่ได้ export `ANTHROPIC_API_KEY` | export แล้วรัน `./scripts/demo.sh --agent claude` ใหม่ |
+| องก์ 4 `FAIL --agent codex needs OPENAI_API_KEY` | ไม่มี key ใน `.env` | ใส่ `OPENAI_API_KEY=...` ใน `.env` แล้วรัน `./scripts/demo.sh --agent codex` ใหม่ |
+| องก์ 4 `FAIL codex did not answer through the sandbox` | key หมดอายุ/ไม่มี credit, `api.openai.com` ไม่ผ่าน proxy หรือ codex ถูก build ใหม่เป็นรุ่นอื่น | ดู `./scripts/warden-cli.sh logs proxy`, เช็ค credit, เช็คข้อ 2 ของ pre-flight |
+| codex ตอบว่าคำสั่ง "failed due to sandbox permissions" | codex ถูกเปิดโดยไม่ผ่าน `warden-cli.sh run ... codex` (sandbox ของ codex ยังเปิดอยู่) | เปิดผ่าน `warden-cli.sh` เท่านั้น — ดู THREAT_MODEL §3.6 |
 | report ของ run ก่อนค้างบนจอ | ไฟล์เก่าตกค้าง | องก์ 0 ลบให้แล้ว หรือ `rm -f workspaces/demo/WARDEN_SECURITY_INCIDENT*.json` |
 
 ---

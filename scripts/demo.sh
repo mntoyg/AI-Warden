@@ -25,7 +25,8 @@
 #  Usage:
 #    ./scripts/demo.sh                 # on camera: pauses between acts
 #    ./scripts/demo.sh --auto          # rehearsal: no pauses, no TTY needed
-#    ./scripts/demo.sh --agent claude  # act 4 hands over to claude (needs a key)
+#    ./scripts/demo.sh --agent codex   # act 4: prove codex answers, then hand over
+#                                      # (OPENAI_API_KEY in .env; claude needs ANTHROPIC_API_KEY)
 #    ./scripts/demo.sh --keep          # keep the demo workspace afterwards
 #
 #  Exit: 0 = the whole story played out and every claim was verified.
@@ -56,7 +57,7 @@ while [ "$#" -gt 0 ]; do
         --keep)    KEEP=1 ;;
         --agent)   shift; HANDOVER_AGENT="${1:-}" ;;
         --agent=*) HANDOVER_AGENT="${1#--agent=}" ;;
-        -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *)         printf 'unknown option: %s\n' "$1" >&2; exit 64 ;;
     esac
     shift
@@ -88,6 +89,13 @@ good() { printf '  %sPASS%s %s\n' "$C_GREEN" "$C_RESET" "$*" >&2; }
 bad()  { printf '  %sFAIL%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; FAILURES=$((FAILURES + 1)); }
 note() { printf '  %s%s%s\n' "$C_YELLOW" "$*" "$C_RESET" >&2; }
 
+# True if a key is exported OR set (non-empty) in .env. Only ever tests for
+# presence; the value is never read into this script or printed.
+key_available() {
+    if [ -n "${!1:-}" ]; then return 0; fi
+    [ -f "${PROJECT_ROOT}/.env" ] && grep -qE "^${1}=.+" "${PROJECT_ROOT}/.env"
+}
+
 pause() {
     if [ "$AUTO" = "1" ]; then
         return 0
@@ -117,11 +125,16 @@ preflight() {
     fi
     good "agent image ${AGENT_IMAGE} present"
 
-    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-        good "ANTHROPIC_API_KEY is exported (act 4 can run a real agent)"
-    else
-        note "no ANTHROPIC_API_KEY exported - acts 1-3 are unaffected;"
-        note "act 4 will print the command instead of launching a real agent."
+    local k any_key=0
+    for k in OPENAI_API_KEY ANTHROPIC_API_KEY; do
+        if key_available "$k"; then
+            good "${k} is available (exported or in .env) - act 4 can run a real agent"
+            any_key=1
+        fi
+    done
+    if [ "$any_key" = "0" ]; then
+        note "no OPENAI_API_KEY / ANTHROPIC_API_KEY exported or in .env - acts 1-3 are"
+        note "unaffected; act 4 will print the command instead of launching a real agent."
     fi
 
     # A believable workspace: the demo should look like somebody's project, not
@@ -430,16 +443,48 @@ act_handover() {
 
     if [ -z "$HANDOVER_AGENT" ]; then
         say "Run the real thing with:"
-        cmd "./scripts/warden-cli.sh run ./workspaces/demo claude"
+        cmd "./scripts/warden-cli.sh run ./workspaces/demo codex"
         note "in that session, ask the agent to do real work, then ask it to"
         note "read /workspace/.secrets/credentials - it dies the same way."
         return
     fi
-    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ "$HANDOVER_AGENT" = "claude" ]; then
-        note "no ANTHROPIC_API_KEY exported - skipping the live hand-over."
-        note "export it and re-run: ./scripts/demo.sh --agent claude"
+
+    # The key check used to look at the exported environment only, while the
+    # documented place for keys is .env (warden-cli passes it with --env-file):
+    # with the key in .env the hand-over was skipped as "no key". And there was
+    # no check at all for codex. A hand-over that cannot authenticate would die
+    # on camera, so an agent that was asked for must prove it can answer.
+    local key_var=""
+    case "$HANDOVER_AGENT" in
+        claude)      key_var="ANTHROPIC_API_KEY" ;;
+        codex|aider) key_var="OPENAI_API_KEY" ;;
+    esac
+    if [ -n "$key_var" ] && ! key_available "$key_var"; then
+        bad "--agent ${HANDOVER_AGENT} needs ${key_var}: put it in .env (never in chat or argv)"
         return
     fi
+
+    local probe_out=""
+    case "$HANDOVER_AGENT" in
+        codex)
+            probe_out="$("$CLI" run "$DEMO_WS" codex -- exec --skip-git-repo-check \
+                "Reply with exactly the word READY and nothing else." 2>/dev/null)" ;;
+        claude)
+            probe_out="$("$CLI" run "$DEMO_WS" claude -- -p \
+                "Reply with exactly the word READY and nothing else." 2>/dev/null)" ;;
+    esac
+    case "$HANDOVER_AGENT" in
+        codex|claude)
+            if printf '%s\n' "$probe_out" | grep -qE '^[[:space:]]*READY[[:space:]]*$'; then
+                good "${HANDOVER_AGENT} authenticated through the sandbox and answered (READY)"
+            else
+                bad "${HANDOVER_AGENT} did not answer through the sandbox - the live hand-over would fail on camera"
+                return
+            fi ;;
+        *)
+            note "no live answer check for '${HANDOVER_AGENT}' - rehearse it by hand" ;;
+    esac
+
     if [ "$AUTO" = "1" ]; then
         note "--auto: skipping the interactive hand-over to ${HANDOVER_AGENT}."
         return
