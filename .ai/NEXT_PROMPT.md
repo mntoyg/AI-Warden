@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v8 · 2026-09-16
+# AI Warden — next-session prompt · v9 · 2026-09-16
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -15,26 +15,27 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
    tag + CI with time to spare — a documented limitation beats a fresh regression.
 
 1) START — before any work
-   a. Read .ai/HANDOFF.md fully. It is a claim to verify — including the DIAGNOSIS in
-      a Next-steps item: re-run its repro before building on it (v7: session 6's
-      "repro A = sentinel defect" was wrong; the inline monitor was equally blind).
+   a. Read .ai/HANDOFF.md fully — a claim to verify, including any Next-steps DIAGNOSIS:
+      re-run its repro before building on it (v7: session 6's repro A blamed the wrong monitor).
    b. Reality check: git status, git fetch + commits on origin not in HEAD, latest
       tag vs commits after it, `gh run list --limit 3`, `docker info` (if DOWN:
       PowerShell Start-Process Docker Desktop, poll `docker info`, ~1 min).
    c. Where HANDOFF disagrees with reality, fix HANDOFF first and commit.
-   d. Your shell has NO ANTHROPIC_API_KEY. If a rehearsal is on the plan, ask me in
-      the 3-5 line report to put it in `.env` (gitignored) — never paste it in chat.
+   d. Keys live only in `.env` (OPENAI_API_KEY is there). Test presence, never print
+      a value; redact `sk-[A-Za-z0-9_*-]+` in logged output (v9: `codex login status`
+      leaked 5 key chars). Never ask me to paste a key in chat.
    e. Report in 3-5 lines: state, first task, anything surprising. Then start.
 
 2) WORK
-   - Default task: HANDOFF Next steps #1 = the Monday rehearsal (`./scripts/demo.sh
-     --auto` must end "DEMO COMPLETE" exit 0, then one `--agent claude` run). If I
-     run it in my own terminal, read my terminal output instead of re-running.
-     Without a key: do the next item that needs no behaviour change, or hand off.
-   - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green
-     A-F (E1-E5), exit 0, enforced=4/7 here; claims about incident-report CONTENT
-     must be checked via `warden-cli.sh run` (the sentinel usually writes that file;
-     only phase B is raw docker with no sentinel).
+   - Default task: HANDOFF Next steps #1. Act 4 is CODEX: `./scripts/demo.sh --auto
+     --agent codex` must stay DEMO COMPLETE; my interactive run is mine — read my
+     terminal. No image rebuild before the recording. Fine-tuning (#2) waits for me.
+   - Before a demo, run the exact agent I will use, with my key, through warden-cli
+     (v9: codex looked fine but ignored the env key AND its own sandbox failed every
+     command while exiting 0 — only a real run showed either).
+   - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-G,
+     exit 0, enforced=4/7 here; incident-report CONTENT claims are checked via
+     `warden-cli.sh run` (the sentinel usually writes it; only phase B is raw docker).
    - Any new drill/assertion: write it FIRST, run it on the OLD image and watch it
      FAIL, then fix + `warden-cli.sh build --pull` + run it green. Cheap function-
      level check without a build: `git show <tag>:monitors/canary_monitor.py` in a
@@ -47,8 +48,7 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
    - When output surprises you, STOP reading code, run the smallest experiment.
    - NEVER edit a script while a background run of it is executing (bash reads it
      from disk mid-run; cost a full suite run). Edit, `bash -n`, then run.
-   - Canary paths (`$WARDEN_CANARY_FILES`, incl. ~/.aws/credentials) trip the
-     tripwire if a test opens them; `[ -f ]` never opens a file.
+   - Canary paths (`$WARDEN_CANARY_FILES`, e.g. ~/.aws/credentials) trip if opened; `[ -f ]` doesn't.
    - Recurring bug: a control that reports itself armed while enforcing nothing,
      crying wolf, or reporting nothing/false. Found one? Log it in HANDOFF Next
      steps with a repro — don't weaken the test or silently widen scope.

@@ -6,7 +6,7 @@
 
 - **Last updated:** 2026-09-16 (session 7)
 - **Latest release:** [v1.0.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.4) — forensic honesty fix (attribution verdict + argv-impersonation evasion), marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v8)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v9)
 - **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
   run on THIS Windows Docker Desktop, real agent + live breach, enforced=4/7). Keep
   `main` green and release-ready; reliability/trust fixes before new features.
@@ -24,7 +24,7 @@
 | CI suite (ext4) | all phases A–F · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
 | CVEs | trivy on the v1.0.4 images: 0 HIGH/CRITICAL OS packages (both images) · 0 in `/opt/warden` · **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
 | Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
-| Demo readiness | `./scripts/demo.sh --auto` on v1.0.4: **DEMO COMPLETE, exit 0** (act 3 now also asserts the attribution verdict). `claude --version` inside the v1.0.4 sandbox → `2.1.197 (Claude Code)`, exit 0. **Not done: the `--agent claude` rehearsal — there is no `ANTHROPIC_API_KEY` on this box** (the agent's shell never has it; the user must provide it via `.env` or their own terminal). |
+| Demo readiness | Act 4 agent is now **codex** (user call). `OPENAI_API_KEY` in `.env` (value never read by the agent). `./scripts/demo.sh --auto --agent codex` → `PASS codex authenticated through the sandbox and answered (READY)`, **DEMO COMPLETE, exit 0**. Image unchanged since v1.0.4 build (codex-cli 0.154.0, claude 2.1.197). Not done: one interactive `./scripts/demo.sh --agent codex` rehearsal by the user. |
 
 ---
 
@@ -33,23 +33,33 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Monday rehearsal — blocked on the user's API key, not on code.** Needs
-   `ANTHROPIC_API_KEY` in `.env` (gitignored; `warden-cli.sh` passes it with
-   `--env-file`) or exported in the user's own terminal — never pasted into chat.
-   Then: `./scripts/demo.sh --auto` (must end `DEMO COMPLETE`, exit 0) and one
-   `./scripts/demo.sh --agent claude` rehearsal following `docs/DEMO.md` act 4.
-   The agent's Bash tool does not inherit the user's terminal exports, so if the
-   user runs the rehearsal themselves, read their terminal instead of re-running.
-2. **(AFTER the 2026-09-21 demo — not before) Local self-trained model for aider.**
-   User call 2026-09-16: train with LoRA in Colab, export GGUF, serve it on THIS box
-   in a `warden-model` llama.cpp container with no route out, and point aider at it.
-   The design, threat-model delta (M1–M7) and ordered plan are in
-   [`.ai/design-local-model.md`](design-local-model.md). The notebook side already
-   exists in a separate PRIVATE repo (name/path in the user's memory, deliberately
-   not in this public repo) and its smoke test passed on CPU. Start with the drills
-   (M1–M6) and watch them FAIL; the one that matters most is **M3**: a "local" session
-   must not silently send code to `api.openai.com` (allowlisted, and aider reads
-   `OPENAI_API_KEY`). It is a feature -> v1.1.0.
+1. **Monday demo: the live hand-over is CODEX, key is in `.env`, rehearsal automation
+   is green — what remains is one human rehearsal on camera settings.** User call
+   2026-09-16: use their OpenAI credit, act 4 = `codex`. `OPENAI_API_KEY` is in
+   `.env` (the agent never reads the value). Verified: `./scripts/demo.sh --auto
+   --agent codex` -> `PASS codex authenticated through the sandbox and answered
+   (READY)`, DEMO COMPLETE, exit 0; codex told to `cat` the honeypot was killed, exit
+   99. Left: the user runs `./scripts/demo.sh --agent codex` interactively once
+   (the prompts in `docs/DEMO.md` act 4). **Do not rebuild the image before the
+   recording** — codex's login + sandbox behaviour is verified on codex-cli 0.154.0.
+   After the demo: tag **v1.0.5** for the codex launcher fix (CHANGELOG "Unreleased";
+   host scripts only, so rebuild + drills + CI then).
+2. **Fine-tuning: DECISION PENDING from the user.** They want to train via the OpenAI
+   fine-tuning API with their credit (instead of the Colab LoRA plan). Found and
+   quoted from the official guide
+   (developers.openai.com/api/docs/guides/supervised-fine-tuning): "OpenAI is winding
+   down the fine-tuning platform. The platform is no longer accessible to new users",
+   existing users can still create jobs "for the coming months"; SFT models are
+   gpt-4.1 / -mini / -nano (2025-04-14), minimum 10 examples. With their key:
+   `GET /v1/fine_tuning/jobs` -> 200 with **0 jobs** (never used it, so probably a
+   "new user"; listing does not prove creation is allowed). Options put to the user:
+   (a) a near-zero-cost probe - create a job from a <10-example file, which fails
+   validation before training, to see whether creation is permitted (needs their
+   explicit OK: it is a job on their account); (b) fall back to the Colab LoRA ->
+   local model plan (built, smoke-tested; design in
+   [`.ai/design-local-model.md`](design-local-model.md), post-demo, drills M1-M7);
+   (c) no fine-tuning - use OpenAI models as they are with project instructions.
+   Do nothing on fine-tuning until they pick.
 3. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
    plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
    sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
@@ -86,6 +96,12 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    not worth it in the last days before a recording.
 
 ### Decided this session (do not re-raise without new evidence)
+
+- **Demo act 4 = codex with the user's OpenAI key** (user call, 2026-09-16), not claude.
+- **codex runs with its own sandbox OFF inside AI Warden** (session 7, evidence-based):
+  its bubblewrap sandbox cannot work under cap-drop=ALL and made every command fail
+  while exiting 0. AI Warden is the boundary; documented in THREAT_MODEL §3.6 and
+  guarded by phase G. Do not "fix" this by installing bubblewrap or adding caps.
 
 - **Self-trained model → local container + aider, code after the demo** (user call,
   2026-09-16). Option B (GGUF served on this box, no egress) over option A (Colab
@@ -177,6 +193,9 @@ would I know if this silently did nothing?" — then run that.
 | bash 5.2 execs the last command of a `-c` list | `bash -c 'cat canary; sleep 25'` leaves the PID as `sleep 25` with no canary in argv, so a "short-lived reader" leaves no trace for either monitor. Session 6's repro A blamed the sentinel for this; re-running it showed the inline monitor was equally blind. Re-run a logged repro before trusting its diagnosis. |
 | A drill payload that changes identity mid-flight is timing-dependent | E5's first payload opened fd 3 in bash, then `exec -a`'d into sleep; when the monitor scanned before the exec it saw plain bash, so the drill FAILED on a fixed build. One manual run of the payload found it. The adversary must be ONE process that holds its identity for the whole window (E5 now uses `exec -a ... python3 -c "f = open(...)"`). |
 | Proving a new assertion has teeth | Write it first and run it on the OLD image (must FAIL) before rebuilding. For a monitor function, `git show v1.0.3:monitors/canary_monitor.py` + a `python:3.11-slim` container with `setpriv --reuid=1001` (inline-like) or root with `setpriv --bounding-set=-all,+kill` (sentinel-like) compares old vs new in seconds, no image build. |
+| codex-cli 0.154.0 ignores `OPENAI_API_KEY` and its sandbox is dead in the container | Env-only: "Not logged in" + 401 loops. Default sandbox: commands fail "due to sandbox permissions" but `codex exec` exits 0. Launch codex ONLY via `warden-cli.sh run <dir> codex` (logs in from env, `-c sandbox_mode="danger-full-access"`). `codex login --with-api-key` works offline (a fake key "logs in"), which is what makes phase G possible without a secret. |
+| `codex login status` prints part of the key (`sk-proj-***XXXXX`) | A redaction regex for `sk-[A-Za-z0-9_-]+` does not match `sk-proj-***` - include `*` in the class, or better, never run `login status` with a real key in a logged session. |
+| A "secret present" check that only looks at exported env | Keys belong in `.env` (passed with `--env-file`), so an export-only check lies. Test presence in env OR `.env`, never read the value (`demo.sh` `key_available`). |
 | NodeSource's setup script exits 0 when it fails | CI (run 35077858862, image CVE job): `curl: (35) Connection reset` on the signing key -> `Error: Failed to download and import the NodeSource signing key (Exit Code: 0)` -> `apt-get install nodejs` silently took Debian's node 18 (no npm), caught only by `npm --version`. `core/Dockerfile` §2 now retries until `apt-cache policy nodejs` shows `Candidate: 20.`, refuses the fallback and checks `node --version`. A red image job that says `npm: not found` is this; `gh run rerun <id> --failed`. |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
 
@@ -246,6 +265,20 @@ would I know if this silently did nothing?" — then run that.
   `read_file`/`grep_search` - recorded as flags the design must pin (M4).
   NEXT_PROMPT unchanged: nothing here changed how a session should work; the
   decision lives in this file's Next steps #2, where the prompt already points.
+- **Cont. 3 (user: "use my OpenAI key, I have credit"):** asked what for -> both the
+  demo (act 4 = codex) and fine-tuning via the OpenAI API. Verified the key through
+  the real CLI with output redacted (200, 130 models; fine-tuning list 200, 0 jobs).
+  Ran codex the way Monday will: env-only login fails (401 loops); with
+  `codex login --with-api-key` it answers, but its own sandbox made every shell command
+  fail while exiting 0; with `sandbox_mode=danger-full-access` commands work and a
+  codex told to read the honeypot died with exit 99. Wrote phase G first (FAILED on
+  the old CLI), fixed the launcher, fixed `demo.sh`'s export-only key check (it would
+  have skipped act 4 with the key in `.env`), added a live READY proof to act 4,
+  switched the runbook to codex and "no rebuild on demo day". Suite A-G green,
+  `demo.sh --auto --agent codex` DEMO COMPLETE. Official docs say OpenAI's fine-tuning
+  platform is closed to new users -> pending user decision (Next steps #2).
+  Slip: ran `codex login status` with the real key and it printed 5 key characters
+  into my own log (not committed, not in docs) - gotcha recorded.
 
 ### 2026-09-16 — session 6 · demo deliverables for the Monday first test
 - **Did:** shipped the three Monday deliverables and ran them. `scripts/demo.sh`
@@ -409,6 +442,14 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v9 · 2026-09-16** — session 7 (cont. 3). (a) **run the exact agent the user will use,
+  with their key, through warden-cli before a demo** — codex looked fine but ignored the
+  env key and its own sandbox failed every command while exiting 0; only real runs showed
+  it. (b) **keys: presence checks only, redact `sk-[A-Za-z0-9_*-]+`** — `codex login
+  status` printed 5 key characters into the session log. (c) default task rewritten: act 4
+  is codex, key in `.env`, no rebuild before the recording, fine-tuning waits for the user
+  (the v8 "no ANTHROPIC key, ask for it" lines were stale). Compressed three lines to stay
+  at 69.
 - **v8 · 2026-09-16** — session 7 (cont.). END now **waits for CI on the last push to be
   green** before handing off: the v7 handoff commit went red (NodeSource key download
   reset, setup script exited 0, build fell back to Debian node 18) after the session had
