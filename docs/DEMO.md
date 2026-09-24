@@ -34,13 +34,14 @@ panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่�
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
-| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.154.0` (เวอร์ชันที่ทดสอบ login + sandbox แล้ว) |
+| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.156.1` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.0.5) |
 | 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–G ผ่าน, **exit 0** |
 | 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` |
 | 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` |
 
-ข้อ 2: `build --pull` ดึง codex/claude รุ่นใหม่ล่าสุด แต่วิธี login และการปิด sandbox ของ codex
-ทดสอบกับ 0.154.0 เท่านั้น — build ใหม่ = ต้องซ้อมข้อ 3–5 ใหม่ทั้งหมด ถ้าไม่มี key องก์ 1–3 ยังทำงานปกติ
+ข้อ 2: `build --pull` ดึง codex/claude รุ่นใหม่ล่าสุด และ codex เปลี่ยนเวอร์ชันบ่อย (0.154.0 → 0.156.1
+ในหนึ่งสัปดาห์) วิธี login และการปิด sandbox ถูกทดสอบกับเวอร์ชันในตารางนี้เท่านั้น — build ใหม่ =
+ต้องรัน `warden-cli.sh run <ws> codex -- exec ...` กับ key จริงและซ้อมข้อ 3–5 ใหม่ทั้งหมด ถ้าไม่มี key องก์ 1–3 ยังทำงานปกติ
 แต่องก์ 4 จะ launch agent จริงไม่ได้
 
 เทอร์มินัลสำหรับอัด: ฟอนต์ใหญ่, กว้างอย่างน้อย 100 คอลัมน์, เปิดสี
@@ -120,12 +121,12 @@ agent ที่ถูกยึดอ่านมัน
 ```
 [canary ...] *** [SECURITY BREACH] Canary file accessed by Agent Process!
 [canary ...] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
-[canary ...] *** [SECURITY BREACH] suspect pid=103 uid=1001 evidence=open file descriptor exe=/usr/bin/bash cmd='...'
+[canary ...] *** [SECURITY BREACH] suspect pid=102 uid=1001 evidence=open file descriptor exe=/usr/bin/bash cmd='...'
 # AI-WARDEN-CANARY - synthetic honeypot. Reading this file is a breach.
 [default]
 aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
 ...
-[canary ...] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [103]
+[canary ...] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [102]
 [canary ...] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
 
   SECURITY BREACH: the canary tripwire terminated this sandbox.
@@ -139,20 +140,20 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
 {
   "action": "kill",
   "attribution": "restricted",
-  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 108], so open-descriptor evidence and exe paths are missing ...",
+  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 102], so open-descriptor evidence and exe paths are missing ...",
   "canary_path": "/workspace/.secrets/credentials",
   "inotify_event": "OPEN",
   "mode": "sentinel",
   "schema": "ai-warden/breach/1",
   "suspects": [
-    { "pid": 108, "uid": 1001, "cmdline": "bash -l -c exec 3< ...",
+    { "pid": 102, "uid": 1001, "cmdline": "bash -l -c exec 3< ...",
       "evidence": "canary named in argv", "exe": "", "open_canaries": [] }
   ],
-  "warden_version": "1.0.4"
+  "warden_version": "1.0.5"
 }
 ```
 
-และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.4)
+และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.5)
 
 ```
   PASS exactly one report - no duplicate fallback from the monitor/sentinel race

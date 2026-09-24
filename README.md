@@ -38,22 +38,23 @@ AI Warden ปิดทั้ง 5 ทางนี้ที่ระดับ **O
 ใน workspace มี honeypot credential ที่ไม่มีใครบอก agent ว่ามีอยู่
 สมมติว่า agent ถูกยึดแล้วไปอ่านมัน
 
-output ข้างล่างนี้คัดลอกมาจาก run จริงครั้งเดียว (act 3 ของ `./scripts/demo.sh --auto`, v1.0.4)
+output ข้างล่างนี้คัดลอกมาจาก run จริงครั้งเดียว (act 3 ของ `./scripts/demo.sh --auto`, v1.0.5)
 บน Docker Desktop (Windows) ไม่ได้เขียนขึ้นใหม่ — ตัดบางบรรทัดออก (`...`) แต่ไม่ได้แก้ข้อความ
 
 ```console
-$ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c     'exec 3< /workspace/.secrets/credentials; cat <&3; echo; echo "[agent] got the keys, now exfiltrating..."; sleep 25'
+$ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c \
+    'exec 3< /workspace/.secrets/credentials; cat <&3; echo; echo "[agent] got the keys, now exfiltrating..."; sleep 25'
 
 [warden] isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)
-[canary 2026-09-16T08:49:28Z] v1.0.4 mode=inline action=kill enforced=4/7 watching=...
-[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
-[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
-[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] suspect pid=108 uid=1001 evidence=open file descriptor exe=/usr/bin/bash cmd=...
+[canary 2026-09-24T01:02:26Z] v1.0.5 mode=inline action=kill enforced=4/7 watching=...
+[canary 2026-09-24T01:02:29Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-24T01:02:29Z] *** [SECURITY BREACH] file=/workspace/.secrets/credentials event=OPEN mode=inline
+[canary 2026-09-24T01:02:29Z] *** [SECURITY BREACH] suspect pid=102 uid=1001 evidence=open file descriptor exe=/usr/bin/bash cmd=...
 # AI-WARDEN-CANARY - synthetic honeypot. Reading this file is a breach.
 ...
 [agent] got the keys, now exfiltrating...
-[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [108]
-[canary 2026-09-16T08:49:32Z] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
+[canary 2026-09-24T01:02:29Z] *** [SECURITY BREACH] SIGKILL delivered to 1 process(es): [102]
+[canary 2026-09-24T01:02:29Z] *** [SECURITY BREACH] SIGUSR1 sent to PID 1 - container will exit 99
 
   SECURITY BREACH: the canary tripwire terminated this sandbox.
   Incident report: .../workspaces/demo/WARDEN_SECURITY_INCIDENT.json
@@ -68,7 +69,7 @@ $ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c     'exec 3< /workspa
 {
   "action": "kill",
   "attribution": "restricted",
-  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 108], so open-descriptor evidence and exe paths are missing ...",
+  "attribution_note": "this monitor was not permitted to read /proc/<pid>/fd or /proc/<pid>/exe for 2 process(es) [59, 102], so open-descriptor evidence and exe paths are missing ...",
   "canary_path": "/workspace/.secrets/credentials",
   "inotify_event": "OPEN",
   "mode": "sentinel",
@@ -79,12 +80,12 @@ $ ./scripts/warden-cli.sh run ./workspaces/demo bash -- -c     'exec 3< /workspa
       "evidence": "canary named in argv",
       "exe": "",
       "open_canaries": [],
-      "pid": 108,
+      "pid": 102,
       "uid": 1001
     }
   ],
-  "timestamp_utc": "2026-09-16T08:49:32Z",
-  "warden_version": "1.0.4"
+  "timestamp_utc": "2026-09-24T01:02:29Z",
+  "warden_version": "1.0.5"
 }
 ```
 

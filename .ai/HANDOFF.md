@@ -4,12 +4,14 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-16 (session 7)
+- **Last updated:** 2026-09-24 (session 8)
 - **Latest release:** [v1.0.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.4) — forensic honesty fix (attribution verdict + argv-impersonation evasion), marked Latest
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v9)
-- **🚩 MILESTONE — first live test: Monday 2026-09-21** (video, pushed to GitHub;
-  run on THIS Windows Docker Desktop, real agent + live breach, enforced=4/7). Keep
-  `main` green and release-ready; reliability/trust fixes before new features.
+- **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
+  2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
+  Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
+  The freeze that came with that date is OVER: rebuilding and releasing is allowed
+  again, and a new date means re-running the rehearsal on whatever image exists then.
 
 ---
 

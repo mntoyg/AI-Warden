@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.0.4"
+readonly WARDEN_VERSION="1.0.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -357,7 +357,8 @@ cmd_down() {
 #  Sub-command: run
 # =============================================================================
 # codex needs two things done for it inside the sandbox, or it launches looking
-# fine and can do nothing (both found by running it, codex-cli 0.154.0):
+# fine and can do nothing (both found by running it on codex-cli 0.154.0, and
+# re-verified on 0.156.1 when v1.0.5 was built):
 #   1. It ignores OPENAI_API_KEY in the environment ("Not logged in", then 401
 #      retry loops). The key is piped from the environment into
 #      `codex login --with-api-key` - never placed on argv, where the canary

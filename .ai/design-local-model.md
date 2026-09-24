@@ -27,7 +27,7 @@ wildcard เหล่านี้ใน `whitelist_domains.txt` ก่อน
 
 - GPU: `NVIDIA GeForce RTX 3050 Laptop GPU, 4096 MiB`, driver 610.88; Docker runtimes มี `nvidia`
 - Docker VM: 12 CPU, RAM ~15.5 GiB
-- ใน agent image: `aider 0.86.2`, `codex-cli 0.154.0`; `NO_PROXY=localhost,127.0.0.1,::1,warden-egress-proxy`
+- ใน agent image: `aider 0.86.2`, `codex-cli 0.156.1` (v1.0.5 build); `NO_PROXY=localhost,127.0.0.1,::1,warden-egress-proxy`
 - pipeline ฝั่ง lab (**verified ด้วย smoke บน CPU**): notebook ทั้งไฟล์รันผ่าน (smoke รอบล่าสุด: LoRA 3 step,
   loss 2.2305) → merge → GGUF `q8_0` 144.8 MB → `ghcr.io/ggml-org/llama.cpp:server`
   (`sha256:79903855d3de…`) โหลดไฟล์ได้ภายใต้ `--read-only --cap-drop=ALL

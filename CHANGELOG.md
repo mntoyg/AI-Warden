@@ -4,10 +4,13 @@
 
 ---
 
-## [Unreleased]
+## [1.0.5] — 2026-09-24
 
-ยังไม่ออก tag โดยตั้งใจ: tag ต้อง rebuild image ซึ่งจะดึง codex/claude รุ่นใหม่ก่อนถ่ายเดโม
-2026-09-21 — จะออกเป็น 1.0.5 หลังเดโม (การเปลี่ยนแปลงทั้งหมดอยู่ในสคริปต์ฝั่งโฮสต์ image ไม่เปลี่ยน)
+**Usability/trust fix ของ launcher — ผู้ใช้ที่รัน `codex` ด้วย API key ควรอัปเกรด**
+
+การเปลี่ยนแปลงทั้งหมดอยู่ในสคริปต์ฝั่งโฮสต์ (ไม่มีการแก้ entrypoint หรือ monitor) เลื่อนออก tag
+มาจนถึงวันนี้เพราะการ tag ต้อง rebuild image ซึ่งจะดึง agent CLI รุ่นใหม่ ตอนนั้นใกล้วันถ่ายเดโม
+(เดโม 2026-09-21 ถูกเลื่อน จึง rebuild + ปล่อยได้แล้ว)
 
 ### Fixed
 
@@ -25,10 +28,15 @@
 
 - phase **G** ใหม่: ด้วย key ปลอม launcher ต้อง login codex ได้ (`Logged in using an API key`) และเปิด
   codex ด้วย `sandbox_mode="danger-full-access"` — fail กับโค้ดก่อนแก้ (`Not logged in`)
+- rebuild ของ release นี้ดึง **codex-cli 0.156.1** (จาก 0.154.0) จึงรันเส้นทางจริงซ้ำด้วย key จริง:
+  login ผ่าน, `sandbox: danger-full-access`, คำสั่ง shell ทำงาน, และ codex ที่อ่าน honeypot ถูกฆ่า
+  **exit 99** พร้อม report ของ sentinel (`attribution: restricted`, `warden_version: 1.0.5`)
 
 ### Docs
 
-- runbook เดโมเปลี่ยนเป็น codex + `OPENAI_API_KEY` ใน `.env` และ **ห้าม build ใหม่วันถ่าย**
+- runbook เดโมเปลี่ยนเป็น codex + `OPENAI_API_KEY` ใน `.env`, **ห้าม build ใหม่วันถ่าย**, และต้องรัน
+  จาก Git Bash เท่านั้น (`bash` ใน PowerShell บนเครื่องทดสอบคือ WSL ไม่ใช่ Git Bash)
+- `docs/THREAT_MODEL.md` §3.6 อธิบายว่าทำไม sandbox ของ codex ถูกปิดใน AI Warden
 
 ---
 
