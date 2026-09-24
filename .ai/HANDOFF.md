@@ -5,8 +5,8 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-24 (session 8)
-- **Latest release:** [v1.0.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.4) — forensic honesty fix (attribution verdict + argv-impersonation evasion), marked Latest
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v9)
+- **Latest release:** [v1.0.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.5) — codex launcher fix (login from env, codex's own sandbox off), marked Latest; v1.0.0–v1.0.4 all carry a superseded warning
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v10)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -19,14 +19,14 @@
 
 | Thing | State |
 |---|---|
-| `main` | tag `v1.0.4` (`9bdae58`) + docs + a build-only Dockerfile commit (NodeSource guard) + **`9ffc6a4` codex launcher fix / demo.sh key check / phase G (Unreleased, tag v1.0.5 after the demo)**, tree clean, in sync with origin |
-| Tags | `v1.0.0`…`v1.0.3` all carry a "superseded" warning · `v1.0.4` (Latest) |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on tag `v1.0.4`** (run 35076865482; phase D `restricted` + E5 pass, `enforced=7/7`). `ef58323` went red on a NodeSource key-download reset (see Gotchas), green on rerun. `ee32dca` (codex fix + phase G + docs) **green on all 3 jobs** (run 35114570852: phase G passes on ext4 with a fake key, `enforced=7/7`). This handoff commit itself is pushed after that — confirm at START. Weekly cron `0 6 * * 1` = Monday 13:00 Thai time, demo day. |
-| Local suite (Docker Desktop / Windows) | re-verified on the v1.0.4 image with the codex launcher fix: A · B exit 99 · C exit 78 · D exit 99 + single clean report + **sentinel report `"attribution": "restricted"`** · E1–E5 · F · **G (codex login + sandbox off)** · `enforced=4/7` · exit 0 |
+| `main` | tag **`v1.0.5`** (`c286036`) + this handoff commit, tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.0.4` all carry a "superseded" warning · **`v1.0.5` (Latest)** |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `c286036`** (run 35941351254) and on tag **`v1.0.5`** (run 35941945145). The weekly cron (`0 6 * * 1`) also ran green on 2026-09-21 (run 35599162562). |
+| Local suite (Docker Desktop / Windows) | on the **v1.0.5** image (rebuilt `--pull` 2026-09-24): A · B exit 99 · C exit 78 · D exit 99 + single clean report + `"attribution": "restricted"` · E1–E5 · F · G · `enforced=4/7` · exit 0 |
 | CI suite (ext4) | all phases A–G · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
-| CVEs | trivy on the v1.0.4 images: 0 HIGH/CRITICAL OS packages (both images) · 0 in `/opt/warden` · **74** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
+| CVEs | trivy on the v1.0.5 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
 | Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
-| Demo readiness | Act 4 agent is now **codex** (user call). `OPENAI_API_KEY` in `.env` (value never read by the agent). `./scripts/demo.sh --auto --agent codex` → `PASS codex authenticated through the sandbox and answered (READY)`, **DEMO COMPLETE, exit 0**. Image unchanged since v1.0.4 build (codex-cli 0.154.0, claude 2.1.197). Re-verified 2026-09-17 morning (Docker was down, started): suite A-G exit 0 (17 phase PASS), `demo.sh --auto --agent codex` DEMO COMPLETE + READY, image still codex-cli 0.154.0. Not done: one interactive `./scripts/demo.sh --agent codex` rehearsal by the user (asked on 2026-09-17 to run it from the app's PowerShell terminal panel via Git Bash; result not yet seen). |
+| Demo readiness | **Recording POSTPONED** (user, 2026-09-24; 2026-09-21 did not happen), no new date. Automation is green on the current image: `demo.sh --auto --agent codex` → READY + DEMO COMPLETE, exit 0; act 4 agent = codex, `OPENAI_API_KEY` in `.env`. Image now carries **codex-cli 0.156.1**, claude 2.1.197, aider 0.86.2, node v20.20.2. Still never done: one INTERACTIVE `./scripts/demo.sh --agent codex` rehearsal (a human has to drive the codex TUI). |
 
 ---
 
@@ -35,17 +35,13 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Monday demo: the live hand-over is CODEX, key is in `.env`, rehearsal automation
-   is green — what remains is one human rehearsal on camera settings.** User call
-   2026-09-16: use their OpenAI credit, act 4 = `codex`. `OPENAI_API_KEY` is in
-   `.env` (the agent never reads the value). Verified: `./scripts/demo.sh --auto
-   --agent codex` -> `PASS codex authenticated through the sandbox and answered
-   (READY)`, DEMO COMPLETE, exit 0; codex told to `cat` the honeypot was killed, exit
-   99. Left: the user runs `./scripts/demo.sh --agent codex` interactively once
-   (the prompts in `docs/DEMO.md` act 4). **Do not rebuild the image before the
-   recording** — codex's login + sandbox behaviour is verified on codex-cli 0.154.0.
-   After the demo: tag **v1.0.5** for the codex launcher fix (CHANGELOG "Unreleased";
-   host scripts only, so rebuild + drills + CI then).
+1. **Demo recording — no date. Ask the user for one before preparing anything.** The
+   2026-09-21 slot was skipped, so nothing is frozen. When a date exists: (a) do NOT
+   rebuild inside the last days before it; (b) the interactive
+   `./scripts/demo.sh --agent codex` rehearsal has still never been run by a human —
+   the codex TUI cannot be driven or captured headlessly, so it is the user's step
+   (from Git Bash, not `bash` in PowerShell — see Gotchas); (c) `demo.sh --auto
+   --agent codex` must end DEMO COMPLETE on whatever image exists that day.
 2. **Fine-tuning: DECISION PENDING from the user.** They want to train via the OpenAI
    fine-tuning API with their credit (instead of the Colab LoRA plan). Found and
    quoted from the official guide
@@ -196,6 +192,7 @@ would I know if this silently did nothing?" — then run that.
 | A drill payload that changes identity mid-flight is timing-dependent | E5's first payload opened fd 3 in bash, then `exec -a`'d into sleep; when the monitor scanned before the exec it saw plain bash, so the drill FAILED on a fixed build. One manual run of the payload found it. The adversary must be ONE process that holds its identity for the whole window (E5 now uses `exec -a ... python3 -c "f = open(...)"`). |
 | Proving a new assertion has teeth | Write it first and run it on the OLD image (must FAIL) before rebuilding. For a monitor function, `git show v1.0.3:monitors/canary_monitor.py` + a `python:3.11-slim` container with `setpriv --reuid=1001` (inline-like) or root with `setpriv --bounding-set=-all,+kill` (sentinel-like) compares old vs new in seconds, no image build. |
 | codex-cli 0.154.0 ignores `OPENAI_API_KEY` and its sandbox is dead in the container | Env-only: "Not logged in" + 401 loops. Default sandbox: commands fail "due to sandbox permissions" but `codex exec` exits 0. Launch codex ONLY via `warden-cli.sh run <dir> codex` (logs in from env, `-c sandbox_mode="danger-full-access"`). `codex login --with-api-key` works offline (a fake key "logs in"), which is what makes phase G possible without a secret. |
+| A release rebuild moves the bundled agent CLIs | `build --pull` for v1.0.5 took codex-cli 0.154.0 → **0.156.1** in eight days (claude/aider unchanged). The launcher's login + sandbox behaviour is version-specific, so after ANY rebuild re-run `warden-cli.sh run <ws> codex -- exec …` with the real key and a honeypot read (expect exit 99) before claiming the image is good. Phase G only proves the launcher's shape, with a fake key. |
 | `bash` typed in PowerShell is WSL, not Git Bash | On this box `Get-Command bash` -> `C:\Windows\system32\bash.exe` (WSL, kali-linux first). Everything was verified under Git Bash, so run scripts as `& "C:\Program Files\Git\bin\bash.exe" -lc '...'` (the app's terminal panel is PowerShell 7). A codex TUI cannot be captured headlessly: under `script(1)` with no emulator answering its terminal queries it renders nothing and times out - only a real terminal rehearsal tests act 4's screens. |
 | `codex login status` prints part of the key (`sk-proj-***XXXXX`) | A redaction regex for `sk-[A-Za-z0-9_-]+` does not match `sk-proj-***` - include `*` in the class, or better, never run `login status` with a real key in a logged session. |
 | A "secret present" check that only looks at exported env | Keys belong in `.env` (passed with `--env-file`), so an export-only check lies. Test presence in env OR `.env`, never read the value (`demo.sh` `key_available`). |
@@ -215,6 +212,27 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-24 — session 8 · v1.0.5 released after the demo slipped
+- **Did:** reality check first: repo untouched since 2026-09-16, weekly cron CI green on
+  2026-09-21, Docker Desktop down (started), terminal panel empty - so the recording had
+  not happened. User confirmed it was postponed with no new date and chose to release.
+  Bumped 1.0.5 in the three version strings BEFORE rebuilding (the image carries two of
+  them), turned CHANGELOG "Unreleased" into `[1.0.5]`, rebuilt both images `--pull`.
+  The rebuild moved codex-cli 0.154.0 → 0.156.1, so the whole codex path was re-run with
+  the real key: login from env OK, `sandbox: danger-full-access`, shell command answered,
+  and a codex reading the honeypot was killed (exit 99, sentinel report `restricted`,
+  `warden_version: 1.0.5`). Suite A-G exit 0, `demo.sh --auto --agent codex` DEMO
+  COMPLETE, trivy 0/0 (75 agent-dep CVEs reported), shellcheck + hadolint clean.
+  Regenerated the quoted blocks in README / DEMO.md / VERIFICATION.md from this build's
+  single runs, tagged **v1.0.5** (CI green on main and on the tag), published the release
+  as Latest and marked v1.0.4 superseded (both re-read afterwards).
+- **Learned:** the freeze was doing real work - the very first rebuild after it lifted
+  changed the agent CLI version, which is exactly what would have broken a recording.
+  "Do not rebuild before the demo" and "after any rebuild, re-run the real agent path"
+  are the same rule seen from two sides; the second half is now a gotcha.
+- **Prompt should have said:** ask for the demo date up front when the milestone in this
+  file is in the past - the whole plan (freeze vs release) depends on it.
 
 ### 2026-09-16 — session 7 · v1.0.4 (attribution honesty + argv-impersonation evasion)
 - **Did:** fixed HANDOFF first (stale `main` hash; the phase-D gotcha wrongly said
@@ -445,6 +463,12 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v10 · 2026-09-24** — session 8. (a) **a milestone date in the past is a question, not a
+  fact**: this session opened with the 2026-09-21 demo already gone and had to ask whether it
+  happened before choosing between freeze and release. (b) **after any `build --pull`, re-run
+  the real agent path with the real key** - the first rebuild after the freeze moved codex-cli
+  0.154.0 → 0.156.1. (c) default task now points at "ask for the new demo date"; the v9 lines
+  about the Monday rehearsal and the freeze were stale.
 - **v9 · 2026-09-16** — session 7 (cont. 3). (a) **run the exact agent the user will use,
   with their key, through warden-cli before a demo** — codex looked fine but ignored the
   env key and its own sandbox failed every command while exiting 0; only real runs showed

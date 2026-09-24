@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v9 · 2026-09-16
+# AI Warden — next-session prompt · v10 · 2026-09-24
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -9,10 +9,10 @@ Project: D:\code-project\AI Warden   (the folder name has a space)
 Repo:    https://github.com/mntoyg/AI-Warden   (PUBLIC on purpose)
 Talk to me in Thai. Code, comments, commit messages and CI stay in English.
 Docs are Thai prose + English commands/output/table headers — don't draft a doc in English.
-🚩 First live test: Monday 2026-09-21 — video, pushed to GitHub, on THIS Windows
-   Docker Desktop box (real agent + live breach, enforced=4/7). Demo deliverables and
-   v1.0.4 are SHIPPED: rehearse, don't rebuild. A behaviour change now needs drill +
-   tag + CI with time to spare — a documented limitation beats a fresh regression.
+🚩 First live test: POSTPONED, no date (the 2026-09-21 slot was skipped). Nothing is
+   frozen: releasing and rebuilding are allowed. ASK me for the new date before planning
+   around it — with a date, stop rebuilding in the days before it and rehearse instead;
+   without one, ship fixes normally (drill + tag + CI, never a bare main).
 
 1) START — before any work
    a. Read .ai/HANDOFF.md fully — a claim to verify, including any Next-steps DIAGNOSIS:
@@ -27,24 +27,24 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
    e. Report in 3-5 lines: state, first task, anything surprising. Then start.
 
 2) WORK
-   - Default task: HANDOFF Next steps #1. Act 4 is CODEX: `./scripts/demo.sh --auto
-     --agent codex` must stay DEMO COMPLETE; my interactive run is mine — read my
-     terminal. No image rebuild before the recording. Fine-tuning (#2) waits for me.
-   - Before a demo, run the exact agent I will use, with my key, through warden-cli
-     (v9: codex looked fine but ignored the env key AND its own sandbox failed every
-     command while exiting 0 — only a real run showed either).
+   - Default task: HANDOFF Next steps #1 (ask me for the demo date; the interactive
+     `demo.sh --agent codex` rehearsal is mine to drive — read my terminal). Act 4 is
+     CODEX and `demo.sh --auto --agent codex` must stay DEMO COMPLETE. Fine-tuning
+     (#2) waits for my decision.
+   - After ANY `build --pull`, re-run the real agent path with my key before trusting
+     the image (v10: the release rebuild moved codex-cli 0.154.0 → 0.156.1 in 8 days;
+     v9: codex looked fine while ignoring the env key and failing every command at
+     exit 0). Bump the version strings BEFORE rebuilding — two of them ship inside.
    - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-G,
      exit 0, enforced=4/7 here; incident-report CONTENT claims are checked via
      `warden-cli.sh run` (the sentinel usually writes it; only phase B is raw docker).
-   - Any new drill/assertion: write it FIRST, run it on the OLD image and watch it
-     FAIL, then fix + `warden-cli.sh build --pull` + run it green. Cheap function-
-     level check without a build: `git show <tag>:monitors/canary_monitor.py` in a
+   - Any new drill/assertion: write it FIRST, watch it FAIL on the OLD image, then fix
+     and run it green. No-build check: `git show <tag>:monitors/canary_monitor.py` in a
      python:3.11-slim container with `setpriv` (see HANDOFF Gotchas).
    - For every guard or report field you add, ask how the AGENT makes it lie (it
      controls argv, fds, timing, files in /workspace and /run/warden). v1.0.4's
      second bug came from that question: `exec -a /opt/warden/...` hid a reader.
-   - A drill that fails on a fixed build: run its payload by hand once before
-     touching the code — E5's failure was the drill's own race, not a regression.
+   - A drill failing on a fixed build: run its payload by hand first (E5's own race).
    - When output surprises you, STOP reading code, run the smallest experiment.
    - NEVER edit a script while a background run of it is executing (bash reads it
      from disk mid-run; cost a full suite run). Edit, `bash -n`, then run.
