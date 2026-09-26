@@ -6,7 +6,7 @@
 
 - **Last updated:** 2026-09-24 (session 8)
 - **Latest release:** [v1.0.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.5) — codex launcher fix (login from env, codex's own sandbox off), marked Latest; v1.0.0–v1.0.4 all carry a superseded warning
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v10)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v11)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -463,6 +463,14 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v11 · 2026-09-26** — at the user's explicit request, the two rules they care most about
+  are now unmissable: (a) END is titled "self-triggered at ~70% CONTEXT" and says a session
+  that stops without handing off has failed its job; (b) step c states the goal in the
+  user's words - the next chat must do MORE per chat and get BETTER results, never a bare
+  version bump - and keeps "if nothing improved, say why". Also: START must ask, in its
+  opening report, the two questions that block work (new demo date, fine-tuning choice),
+  because two sessions in a row opened with them still unanswered. Five WORK items were
+  compressed to stay at 69 lines; no rule was dropped.
 - **v10 · 2026-09-24** — session 8. (a) **a milestone date in the past is a question, not a
   fact**: this session opened with the 2026-09-21 demo already gone and had to ask whether it
   happened before choosing between freeze and release. (b) **after any `build --pull`, re-run
