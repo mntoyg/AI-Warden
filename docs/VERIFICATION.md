@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T08:05:11Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T08:24:16Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -41,6 +41,7 @@
 ================= PHASE D: sentinel drill =======================
   [drill] inline monitor killed; a sentinel monitor survives (root)
   PASS phase D: the sentinel contained a breach after the inline monitor was killed
+  PASS phase D: the CLI confirmed the breach from the sentinel's own log (outside the agent's reach)
   PASS phase D: the breach left a single clean incident report (no false tamper alarm from the race)
   PASS phase D: the sentinel's report says its attribution is restricted (no CAP_SYS_PTRACE) instead of implying it saw everything
 
