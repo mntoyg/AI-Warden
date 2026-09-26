@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.2.0"
+WARDEN_VERSION = "1.2.1"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------
@@ -439,6 +439,25 @@ def write_no_follow(path: Path, content: str, mode: int = 0o444) -> None:
         fh.write(content)
 
 
+# Incident reports are never overwritten: an existing file at the path - left by
+# an earlier breach, or planted by the agent - must not be able to swallow this
+# one's record. O_EXCL also refuses to follow a symlink (EEXIST).
+def write_new_file(path: Path, content: str, mode: int = 0o444) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(str(path), flags, mode)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(content)
+
+
+# For a fallback name: the peer monitor may SIGKILL this one mid-write (the
+# sentinel kills every uid-1001 process), so the content goes to a hidden temp
+# file first and appears under its report name whole or not at all.
+def publish_new_file(path: Path, content: str) -> None:
+    tmp = path.with_name(f".{path.name}.partial")
+    write_new_file(tmp, content)
+    os.rename(str(tmp), str(path))
+
+
 # /proc/<pid>/cmdline is attacker-controlled: a process can name itself
 # anything, including terminal escape sequences or forged '[canary ...]' lines.
 # This is a forensic record a human reads under pressure, so nothing reaching it
@@ -470,34 +489,41 @@ def write_breach_record(run_dir: Path, record: dict) -> None:
     workspace = Path(os.environ.get("WARDEN_WORKSPACE", "/workspace"))
     primary = workspace / "WARDEN_SECURITY_INCIDENT.json"
     try:
-        write_no_follow(primary, body)
+        write_new_file(primary, body)
         return
     except OSError as exc:
-        # ONLY O_NOFOLLOW hitting a symlink (ELOOP) is tampering: the agent planted
-        # a link at the report path to redirect the write. Everything else is not,
-        # and must not raise the tampering alarm - a false "someone redirected the
-        # report" cry discredits every real incident report.
-        #
-        # The common non-ELOOP case: the inline monitor and the out-of-band
-        # sentinel both watch the shared canary vault, so on a breach BOTH fire and
-        # race to write this file. The winner writes it 0444; the loser's O_TRUNC
-        # then fails EACCES. That is not tampering - the report is already there.
-        if exc.errno != errno.ELOOP:
-            if primary.exists() and not primary.is_symlink():
-                log(f"incident report already written by the peer monitor at {primary}")
-            else:
-                log(f"could not write the workspace incident report ({exc.strerror}): {primary}")
+        # O_CREAT|O_EXCL fails EEXIST for anything already at the path, a symlink
+        # included (it is never followed). Other errors (a read-only workspace) are
+        # not evidence of anything and must not raise an alarm.
+        if exc.errno not in (errno.EEXIST, errno.ELOOP):
+            log(f"could not write the workspace incident report ({exc.strerror}): {primary}")
             return
+
+    if primary.is_symlink():
+        # A link at the report path is tampering: the agent tried to redirect the
+        # write. That alarm is raised ONLY for a link - a false "someone redirected
+        # the report" cry discredits every real incident report.
         alert(
             f"[SECURITY BREACH] {primary} is a symlink - refusing to write the report "
             "through it (redirection attempt); the link is preserved as evidence"
         )
-
-    record = dict(record, report_path_tampered=str(primary))
-    fallback = workspace / f"WARDEN_SECURITY_INCIDENT.{os.getpid()}.{int(time.time())}.json"
+        record = dict(record, report_path_tampered=str(primary))
+        fallback = workspace / f"WARDEN_SECURITY_INCIDENT.{os.getpid()}.{int(time.time())}.json"
+    else:
+        # A regular file is already there: the peer monitor's report for this same
+        # breach (inline and sentinel both watch the vault and race), an earlier
+        # session's, or one the agent planted to stand in for the real record.
+        # Nothing here can tell them apart - the workspace is agent-writable - so
+        # this monitor never defers to it (it used to assume "the peer wrote it"
+        # and a stale file then swallowed every later breach's report).
+        record = dict(record, report_path_preexisting=str(primary))
+        fallback = workspace / (
+            f"WARDEN_SECURITY_INCIDENT.{record.get('mode', 'monitor')}."
+            f"{os.getpid()}.{int(time.time())}.json"
+        )
     try:
-        write_no_follow(fallback, json.dumps(record, indent=2, sort_keys=True) + "\n")
-        alert(f"[SECURITY BREACH] incident report written to {fallback} instead")
+        publish_new_file(fallback, json.dumps(record, indent=2, sort_keys=True) + "\n")
+        alert(f"[SECURITY BREACH] incident report written to {fallback}")
     except OSError as exc:
         log(f"could not write the workspace incident report at all: {exc}")
 

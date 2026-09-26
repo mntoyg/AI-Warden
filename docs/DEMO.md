@@ -157,10 +157,10 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
 }
 ```
 
-และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.6)
+และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run ของ v1.2.1 วันที่ 2026-09-26 — JSON ข้างบนยังเป็นของ v1.0.6)
 
 ```
-  PASS exactly one report - no duplicate fallback from the monitor/sentinel race
+  PASS one report - one monitor recorded the breach
   PASS no false tamper alarm - the report says only what happened
   PASS the report names which canary was read, and when
   PASS the report attributes the breach to a process (pid, uid, cmdline)
@@ -173,8 +173,11 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
 
 `PASS` 5 บรรทัดสุดท้ายควรพูดถึงสักประโยค: incident report เองก็เป็น security control
 ตัวหนึ่ง demo จึงตรวจมันด้วยวิธีที่มันเคย "โกหก" มาก่อน — false alarm ว่ามีคน
-redirect report (แก้ใน v1.0.3), report ซ้ำจากการที่ 2 monitor แข่งกันเขียน
-(แก้ใน v1.0.3) และรายงานที่ไม่บอกว่าตัวเองมองเห็นได้แค่บางส่วน (แก้ใน v1.0.4)
+redirect report (แก้ใน v1.0.3), fallback ว่างจากการที่ 2 monitor แข่งกันเขียน
+(แก้ใน v1.0.3) และรายงานที่ไม่บอกว่าตัวเองมองเห็นได้แค่บางส่วน (แก้ใน v1.0.4) ตั้งแต่ v1.2.1
+ถ้า monitor ทั้งสองตัวจับได้ อาจได้ report ไฟล์ที่สอง (`WARDEN_SECURITY_INCIDENT.<mode>....json`)
+เป็น record ของ monitor ตัวที่สองเอง ติดป้าย `report_path_preexisting` — demo จะขึ้น
+`PASS 1 more report(s): the second monitor's own record...` แทน ถือว่าปกติ
 
 **ถ้ามีคนถามว่าทำไม `evidence` ในไฟล์อ่อนกว่าใน log:** รายงานบนดิสก์มักเป็นของ sentinel
 ซึ่งถือแค่ `CAP_KILL` เลยอ่าน `/proc/<pid>/fd` ไม่ได้ — log ของ inline monitor ข้างบนเห็น
@@ -182,10 +185,11 @@ redirect report (แก้ใน v1.0.3), report ซ้ำจากการท�
 เราเลือกไม่ให้ `CAP_SYS_PTRACE` กับ sentinel เพราะจะทำให้ชั้น anti-tamper อ่านได้ทุก process
 (`docs/THREAT_MODEL.md` §3.3)
 
-**ความแปลกที่คาดไว้แล้ว ไม่ใช่บั๊ก:** บรรทัด `SIGUSR1 received from the canary
-tripwire` จะขึ้น **2 ครั้ง** เพราะทั้ง inline monitor และ out-of-band sentinel
-ส่งสัญญาณไปที่ PID 1 แยกกัน ความซ้ำซ้อนนี้คือเจตนาของดีไซน์ และสัญญาณที่สอง
-มาถึงตอนที่ shutdown เริ่มไปแล้ว
+**บรรทัด `SIGUSR1 received ...` ขึ้นครั้งเดียว (ตั้งแต่ v1.2.1):** ทั้ง inline monitor และ sentinel
+ส่งสัญญาณไปที่ PID 1 แยกกัน แต่ handler ทำงานครั้งเดียวต่อ session และจะพูดว่า "from the canary
+tripwire" ก็ต่อเมื่อมี record ของ breach จริง (monitor เขียน record ก่อนส่งสัญญาณเสมอ) ถ้าเห็น
+`SIGUSR1 received, but no breach record found` แปลว่าไม่มี monitor ตัวไหนบันทึก breach — agent ส่ง
+สัญญาณเองได้ เพราะ PID 1 ใช้ uid เดียวกับมัน (`docs/THREAT_MODEL.md` §3.3, drill E7)
 
 ### Act 4 — a real agent, live
 

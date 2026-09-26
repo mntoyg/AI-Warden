@@ -14,7 +14,7 @@
 # =============================================================================
 set -uo pipefail
 
-readonly WARDEN_VERSION="1.2.0"
+readonly WARDEN_VERSION="1.2.1"
 readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
@@ -439,9 +439,31 @@ on_term() {
 }
 trap on_term TERM INT
 
+# Incident reports already in the workspace when this session started. A monitor
+# writes its record (breach.flag and/or a NEW workspace report) BEFORE it sends
+# SIGUSR1, so a signal with neither did not come from a monitor.
+list_incident_reports() {
+    local f
+    for f in "${WARDEN_WORKSPACE:-/workspace}"/WARDEN_SECURITY_INCIDENT*.json; do
+        if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "${f##*/}"; fi
+    done
+}
+REPORTS_AT_START=""
+breach_recorded() {
+    [ -f "$BREACH_FLAG" ] && return 0
+    [ "$(list_incident_reports)" != "$REPORTS_AT_START" ]
+}
+
 on_breach_signal() {
+    trap '' USR1   # one shutdown, however many monitors send the signal
     printf '\n' >&2
-    log "SIGUSR1 received from the canary tripwire - terminating sandbox"
+    if breach_recorded; then
+        log "SIGUSR1 received from the canary tripwire - terminating sandbox"
+    else
+        # PID 1 runs as uid 1001 like the agent, so the agent can send this too.
+        # Still fail closed (exit 99), but do not claim the tripwire fired.
+        warn "SIGUSR1 received, but no breach record found (no breach.flag, no new incident report) - sender unknown: the agent shares PID 1's uid and can send it - terminating sandbox"
+    fi
     stop_monitor
     cleanup_canaries
     exit "$BREACH_EXIT_CODE"
@@ -456,6 +478,7 @@ rm -f "$BREACH_FLAG" "${RUN_DIR}/armed" 2>/dev/null || true
 # Compose reuses one named vault across runs, so a marker from a previous
 # session would let the sentinel arm mid-seed. Clear both before anything else.
 rm -f "$SEEDED_MARKER" "$SENTINEL_MARKER" 2>/dev/null || true
+REPORTS_AT_START="$(list_incident_reports)"
 
 banner
 posture_check

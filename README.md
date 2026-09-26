@@ -482,7 +482,7 @@ agent container is GONE - killed by the sentinel
 | **B** | breach drill จริง — container อ่าน canary โดยตั้งใจ | container ตายด้วย **exit 99** |
 | **C** | fail-closed drill — สั่งรันโดย **ไม่มี** `--cap-drop=ALL` | entrypoint ปฏิเสธ **exit 78** |
 | **D** | sentinel drill — agent ฆ่า inline monitor แล้วอ่าน canary | sentinel นอกกรงยังฆ่าให้ **exit 99** |
-| **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) + E5 หลบการระบุตัวด้วย argv ปลอมเป็น warden (แก้ใน v1.0.4) | refuse/ป้องกันทุกกรณี |
+| **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) + E5 หลบการระบุตัวด้วย argv ปลอมเป็น warden (แก้ใน v1.0.4) + E6 report เก่า/ที่ agent วางไว้ต้องไม่กลืน report ของ breach ใหม่, E7 `SIGUSR1` ที่ agent ส่งเองต้องไม่ถูกรายงานว่าเป็น tripwire (แก้ใน v1.2.1) | refuse/ป้องกันทุกกรณี |
 | **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
 | **G** | agent launch — `codex` ต้อง login จาก `OPENAI_API_KEY` ได้ (ทดสอบด้วย key ปลอม) และเปิดโดยปิด sandbox ของ codex ที่ใช้ไม่ได้ใน container | `Logged in using an API key` + `sandbox_mode="danger-full-access"` |
 | **H** | egress audit trail — ทำไฟล์ log ของ proxy เสียด้วย NUL (แบบที่เกิดจาก Docker ปิดไม่สะอาด) จน `docker logs` เงียบ | มี sandbox ใช้อยู่ → `up` **ปฏิเสธ**, ไม่มี → `up` สร้าง proxy ใหม่และ trail กลับมามีชีวิต |

@@ -4,7 +4,22 @@
 
 ---
 
-## [Unreleased]
+## [1.2.1] — 2026-09-26
+
+**security: incident records ที่เชื่อได้ — อัปเกรดจาก v1.2.0 และก่อนหน้า**
+
+### Security
+
+- **report ของ breach ครั้งใหม่ถูกกลืนโดยไฟล์ที่มีอยู่แล้ว** — monitor เขียน `WARDEN_SECURITY_INCIDENT.json`
+  ด้วย `O_TRUNC` ไฟล์ 0444 ที่มีอยู่ (จาก breach ครั้งก่อน หรือ agent วางไว้เอง) ทำให้เขียนไม่ได้ แล้ว
+  monitor ก็เดาว่า "peer monitor เขียนไปแล้ว" — breach ครั้งที่สองใน workspace เดิมจึง **ไม่มี record เลย**
+  และ CLI ชี้ไปที่ report เก่า (ทดลองจริง: breach 2 ครั้งติด report ยังเป็นของครั้งแรก) ตอนนี้เขียนด้วย
+  `O_EXCL` และถ้ามีไฟล์อยู่แล้ว monitor เขียน record ของตัวเองแยก (`report_path_preexisting`)
+  CLI แสดงเฉพาะ report ที่เกิดใน session นี้ (drill E6 — FAIL กับ v1.2.0)
+- **agent ปลอมสัญญาณ tripwire ได้** — PID 1 ใช้ uid เดียวกับ agent `kill -USR1 1` จึงได้ log ว่า "from the
+  canary tripwire" และ CLI ชี้ไปที่ report ที่ไม่มีอยู่จริง ยัง exit 99 (fail closed) แต่ entrypoint บอก
+  `no breach record found` และ CLI บอก `NO incident report ... possibly forged` (drill E7 — FAIL กับ v1.2.0)
+  handler ของ `SIGUSR1` ทำงานครั้งเดียวต่อ session แล้ว
 
 ### Fixed
 

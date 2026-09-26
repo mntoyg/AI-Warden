@@ -14,7 +14,7 @@
 #    D. Sentinel drill        - the agent kills the inline monitor, then reads a
 #                               canary. The out-of-band sentinel must still
 #                               contain it (exit code 99).
-#    E. Audit regression drills - the exploits fixed in v1.0.1 (E1-E4) and v1.0.4 (E5), each turned
+#    E. Audit regression drills - the exploits fixed in v1.0.1 (E1-E4), v1.0.4 (E5) and v1.2.1 (E6, E7), each turned
 #                               into a permanent drill so a fix proven once by
 #                               hand cannot silently regress:
 #                                 E1 incident-report symlink redirection
@@ -22,6 +22,8 @@
 #                                 E3 the mount guard (assert_safe_mount)
 #                                 E4 seeding through a dangling canary symlink
 #                                 E5 hiding from attribution behind a warden argv
+#                                 E6 an existing report file swallowing a new breach's report
+#                                 E7 a SIGUSR1 the agent sends itself, reported as a breach
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
@@ -565,6 +567,68 @@ if [ "$RUN_BREACH" = "1" ]; then
     else
         good "phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=${e5_attr:-no report file on this host})"
     fi
+fi
+
+# --- E6: an existing report file must not swallow a new breach's report -------
+# The monitor used to open WARDEN_SECURITY_INCIDENT.json with O_TRUNC; the file is
+# written 0444, so a report left by an EARLIER breach made the write fail EACCES,
+# which the monitor took for "the peer monitor already wrote it". The new breach
+# left no record at all and the CLI pointed at the old report. An agent can plant
+# that file on purpose (a regular file, so no symlink alarm) to suppress the real
+# report and show its own. Run through the CLI, the path users run.
+if [ "$RUN_BREACH" = "1" ]; then
+    printf '\n'
+    info "E6: a report file already in the workspace must not swallow the new breach's report"
+    E6_WS="${PROJECT_ROOT}/workspaces/.verify-e6-$$"
+    mkdir -p "$E6_WS"; chmod 0777 "$E6_WS" 2>/dev/null || true
+    # Planted the way an agent (or a previous monitor) leaves it: uid 1001, mode 0444.
+    docker run --rm --network none --user 1001:1001 --entrypoint bash \
+        -v "$(host_path "$E6_WS"):/workspace" "$AGENT_IMAGE" -c \
+        'printf "{\"planted\": \"by the agent or an earlier session\"}\n" > /workspace/WARDEN_SECURITY_INCIDENT.json && chmod 0444 /workspace/WARDEN_SECURITY_INCIDENT.json' \
+        >/dev/null 2>&1
+    e6_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$E6_WS" bash -- -c 'cat ~/.aws/credentials >/dev/null; sleep 20' 2>&1)"
+    e6_rc=$?
+    e6_planted="$(cat "${E6_WS}/WARDEN_SECURITY_INCIDENT.json" 2>/dev/null)"
+    e6_new="$(grep -l '"canary_path"' "${E6_WS}"/WARDEN_SECURITY_INCIDENT.*.json 2>/dev/null | head -1)"
+    e6_pre=0; e6_tamper=0; e6_cli=0
+    if [ -n "$e6_new" ] && grep -q '"report_path_preexisting"' "$e6_new"; then e6_pre=1; fi
+    if grep -qs 'report_path_tampered' "${E6_WS}"/WARDEN_SECURITY_INCIDENT*.json; then e6_tamper=1; fi
+    if [ -n "$e6_new" ] && printf '%s' "$e6_out" | grep -qF "$(basename "$e6_new")" \
+       && ! printf '%s' "$e6_out" | grep -q 'already written by the peer monitor'; then e6_cli=1; fi
+    chmod -R u+w "$E6_WS" 2>/dev/null || true
+    rmdir "${E6_WS}/.secrets" 2>/dev/null || true
+    rm -rf "$E6_WS" 2>/dev/null || true
+    if [ "$e6_rc" -eq 99 ] && [ "$e6_planted" = '{"planted": "by the agent or an earlier session"}' ] \
+       && [ "$e6_pre" = "1" ] && [ "$e6_tamper" = "0" ] && [ "$e6_cli" = "1" ]; then
+        good "phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and the CLI named the new one"
+    else
+        bad  "phase E6: rc=${e6_rc} new-report=${e6_new:-none} preexisting-noted=${e6_pre} tamper=${e6_tamper} cli-named-it=${e6_cli}"
+        note "         $(printf '%s' "$e6_out" | grep -E 'Incident report|already written|could not write' | tr '\n' ' ' | cut -c1-240)"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
+fi
+
+# --- E7: a SIGUSR1 the agent sends itself is not a tripwire breach -------------
+# PID 1 runs as uid 1001, like the agent, so the agent can send it the tripwire's
+# signal. Exit 99 stays (fail closed), but nothing may claim the canary tripwire
+# fired or point at an incident report that no monitor wrote.
+printf '\n'
+info "E7: a SIGUSR1 from the agent itself must not be reported as a tripwire breach"
+E7_WS="${PROJECT_ROOT}/workspaces/.verify-e7-$$"
+mkdir -p "$E7_WS"; chmod 0777 "$E7_WS" 2>/dev/null || true
+e7_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$E7_WS" bash -- -c 'kill -USR1 1; sleep 3' 2>&1)"
+e7_rc=$?
+e7_reports="$(find "$E7_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
+rmdir "${E7_WS}/.secrets" 2>/dev/null || true
+rm -rf "$E7_WS" 2>/dev/null || true
+if [ "$e7_rc" -eq 99 ] && [ "$e7_reports" = "0" ] \
+   && printf '%s' "$e7_out" | grep -q 'no breach record found' \
+   && printf '%s' "$e7_out" | grep -q 'NO incident report' \
+   && ! printf '%s' "$e7_out" | grep -qE 'SIGUSR1 received from the canary tripwire|the canary tripwire terminated this sandbox'; then
+    good "phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach"
+else
+    bad  "phase E7: rc=${e7_rc} reports=${e7_reports} - $(printf '%s' "$e7_out" | grep -E 'SIGUSR1|tripwire|incident report' | tr '\n' ' ' | cut -c1-240)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
 
 # =============================================================================

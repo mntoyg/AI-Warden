@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.0"
+readonly WARDEN_VERSION="1.2.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -572,6 +572,11 @@ stop_sentinel() {
     docker rm -f "${1}-sentinel" >/dev/null 2>&1 || true
 }
 
+# Incident reports in a workspace, one path per line, sorted (for comm).
+incident_reports() {
+    find "$1" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | LC_ALL=C sort
+}
+
 # Canaries in the bind-mounted workspace are removed from the HOST, after both
 # the container and its sentinel are gone. Doing it inside the container would
 # mean reading and unlinking watched files while the sentinel is still armed,
@@ -876,6 +881,11 @@ cmd_run() {
     fi
     trap 'stop_sentinel "$name"; stop_model "$name"; remove_vault "$vault"' EXIT INT TERM
 
+    # Reports already here belong to earlier sessions (or were planted): only the
+    # names that appear during this run are this session's.
+    local reports_before
+    reports_before="$(incident_reports "$abs")"
+
     local rc=0
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
     # Order matters: the sentinel must be gone before anything touches a
@@ -888,10 +898,27 @@ cmd_run() {
 
     printf '\n'
     if [ "$rc" -eq 99 ]; then
-        printf '%s%s  SECURITY BREACH: the canary tripwire terminated this sandbox.%s\n' \
-            "$C_BOLD" "$C_RED" "$C_RESET" >&2
-        printf '%s  Incident report: %s/WARDEN_SECURITY_INCIDENT.json%s\n' \
-            "$C_RED" "$abs" "$C_RESET" >&2
+        local new_reports report
+        new_reports="$(LC_ALL=C comm -13 <(printf '%s\n' "$reports_before") <(incident_reports "$abs") | sed '/^$/d')"
+        if [ -n "$new_reports" ]; then
+            printf '%s%s  SECURITY BREACH: the canary tripwire terminated this sandbox.%s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" >&2
+            while IFS= read -r report; do
+                printf '%s  Incident report: %s%s\n' "$C_RED" "$report" "$C_RESET" >&2
+            done <<< "$new_reports"
+        elif [ "$WARDEN_WORKSPACE_MODE" = "ro" ]; then
+            printf '%s%s  Exit 99 with NO incident report: the workspace is read-only, so no monitor could write one.%s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" >&2
+            printf '%s  The [canary] SECURITY BREACH lines above are the only record; without them, no monitor sent the signal.%s\n' \
+                "$C_RED" "$C_RESET" >&2
+        else
+            # Monitors write their record BEFORE they signal PID 1, and PID 1 shares
+            # the agent's uid - so the agent can send the tripwire's signal itself.
+            printf '%s%s  Exit 99, but NO incident report was written this session: no monitor recorded a canary access.%s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" >&2
+            printf '%s  PID 1 shares the agent'"'"'s uid, so the agent can send the tripwire'"'"'s signal itself -\n  treat this as an unexplained, possibly forged termination, not a contained breach.%s\n' \
+                "$C_RED" "$C_RESET" >&2
+        fi
         printf '%s  Treat the agent session as hostile: rotate any key it was given.%s\n\n' \
             "$C_RED" "$C_RESET" >&2
     elif [ "$rc" -eq 78 ]; then

@@ -387,14 +387,25 @@ act_breach() {
     printf '\n' >&2
 
     # --- the report itself is a control, so check it for the failure modes
-    #     that made it lie before (v1.0.3): a false tamper alarm, and a
-    #     duplicate fallback report from the monitor/sentinel write race.
-    local extra
+    #     that made it lie before: v1.0.3's false tamper alarm / empty fallback
+    #     from the monitor/sentinel write race. Since v1.2.1 the monitor that
+    #     loses the race writes its OWN record beside the first (it cannot tell a
+    #     peer's report from a planted one), so a second report is expected when
+    #     both fire - it must be complete and say why it is not the primary.
+    local extra malformed=0 f
     extra="$(find "$DEMO_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT.*.json' 2>/dev/null | wc -l | tr -d ' ')"
+    for f in "$DEMO_WS"/WARDEN_SECURITY_INCIDENT.*.json; do
+        [ -f "$f" ] || continue
+        if [ ! -s "$f" ] || grep -q 'report_path_tampered' "$f" || ! grep -q '"report_path_preexisting"' "$f"; then
+            malformed=$((malformed + 1))
+        fi
+    done
     if [ "$extra" = "0" ]; then
-        good "exactly one report - no duplicate fallback from the monitor/sentinel race"
+        good "one report - one monitor recorded the breach"
+    elif [ "$malformed" = "0" ]; then
+        good "${extra} more report(s): the second monitor's own record, labelled as such - not empty, no tamper alarm"
     else
-        bad "${extra} extra fallback report(s) - the v1.0.3 write race is back"
+        bad "${malformed} extra report(s) empty or tamper-tagged - the v1.0.3 write race is back"
     fi
     if grep -q 'report_path_tampered' "$REPORT" 2>/dev/null; then
         bad "the report cries tampering on a benign run - false alarm (v1.0.3 regression)"

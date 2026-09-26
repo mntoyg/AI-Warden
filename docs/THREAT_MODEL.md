@@ -149,6 +149,22 @@ canary อยู่" และไม่รู้ path ของ exe เห็น
 จึงทำงานเหมือนเดิมไม่ว่าจะระบุตัวได้หรือไม่ (กรณี PID 1 ออกแล้ว sentinel ตายตาม ตรวจด้วยการรันจริง:
 container ที่ `--pid container:<A>` หายไปทันทีเมื่อ PID 1 ของ A ตาย)
 
+**รายงานกับสัญญาณอยู่ในที่ที่ agent เขียนได้ — จึงต้องไม่ปักใจเชื่อสิ่งที่พิสูจน์ไม่ได้ (v1.2.1):**
+- report อยู่ใน workspace ซึ่ง agent เขียนได้ ก่อน v1.2.1 monitor เปิดไฟล์ด้วย `O_TRUNC`
+  ไฟล์ที่มีอยู่แล้ว (0444) จึงทำให้เขียนไม่ได้ แล้ว monitor **เดาว่า** "peer monitor เขียนไปแล้ว":
+  report ของ breach ครั้งก่อน **กลืน report ของ breach ครั้งใหม่ทุกครั้ง** และ agent ที่วางไฟล์ปกติไว้ก่อน
+  ก็ใช้ report ปลอมของตัวเองมาแทนที่ของจริงได้ (ไม่ใช่ symlink จึงไม่มี alarm) ตอนนี้ report เขียนด้วย
+  `O_EXCL` ไม่เขียนทับอะไรเลย ถ้ามีไฟล์อยู่แล้ว monitor จะเขียน record **ของตัวเอง** แยกไว้
+  (`WARDEN_SECURITY_INCIDENT.<mode>.<pid>.<ts>.json` พร้อม `report_path_preexisting`) เพราะแยก
+  report ของ peer ออกจากของที่ถูกวางไม่ได้ ผลข้างเคียงคือถ้า monitor ทั้งสองตัวจับได้พร้อมกันจะได้ 2 ไฟล์
+  (มุมมอง inline กับ sentinel) และ CLI จะแสดงเฉพาะ report ที่ **เกิดขึ้นใน session นี้** (drill E6)
+- PID 1 รันด้วย uid 1001 เหมือน agent จึงรับ `SIGUSR1` จาก agent ได้ ก่อน v1.2.1 agent ที่ `kill -USR1 1`
+  จะได้ log ว่า "from the canary tripwire" และ CLI ชี้ไปที่ incident report ที่ไม่มีอยู่จริง ตอนนี้ยังจบ
+  ด้วย exit 99 (fail closed) แต่ entrypoint บอกว่า `no breach record found` และ CLI บอกว่า `NO incident
+  report ... possibly forged` เพราะ monitor เขียน record **ก่อน** ส่งสัญญาณเสมอ (drill E7)
+- ที่ยังเหลือ: **เนื้อหา** ของ report ใด ๆ ใน workspace ปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report
+  ได้) หลักฐานที่ agent แตะไม่ได้มีแค่ log ของ container sentinel ซึ่งตอนนี้ถูกลบไปพร้อม sentinel
+
 ### 3.4 canary payload ที่ scanner ไม่จับ
 
 ค่าปลอมทุกตัวใส่ prefix จริงไว้ (`AKIA`, `sk_live_`, `ghp_`, `sk-ant-`)

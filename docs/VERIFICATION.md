@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T05:38:49Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T08:05:11Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -50,6 +50,8 @@
   PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
   PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
   PASS phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=complete)
+  PASS phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and the CLI named the new one
+  PASS phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach
 
 =========== PHASE F: runtime fail-closed (gVisor plumbing) ==========
   PASS phase F: assert_runtime refuses an unknown runtime and accepts a valid one
@@ -74,14 +76,17 @@
   PASS phase I: the agent reached the model over the private network (chat completion 200)
   PASS phase I (M5): a clean session (exit 0) left no model container or network behind
   PASS phase I (M5): a breach in a local-model session exits 99 and leaves nothing behind
+  PASS phase I (M5): 'status' shows a model server orphaned by a hard-killed CLI (not 'none running')
   PASS phase I (M2): a model file that does not match its manifest sha256 was refused (78), nothing started
   PASS phase I (M2): a model manifest inside the workspace (agent-writable) was refused (78)
   PASS phase I: aider-local launches aider against http://warden-model:8080/v1, and refuses without a manifest
+  PASS phase I: aider-local knows the local model (max_input_tokens 8192) and starts without a GitHub fetch
 
 ============== PHASE J: GPU model server (opt-in) ================
   PASS phase J: the offload verdict accepts a full GPU offload and rejects CPU fallback, partial and zero offload
   PASS phase J: WARDEN_MODEL_GPU without a local model, or not 0/1, is refused before anything starts
   PASS phase J: the model server runs the pinned CUDA image with a GPU and proved a full offload (offloaded 6/6)
+  PASS phase J: 'status' lists the running model server as GPU, tied to its sandbox
   PASS phase J (M7): the GPU is handed to the model server only - the agent container has no device request
   PASS phase J (M6): the GPU model server keeps 65534, read-only, no capabilities, no-new-privileges
   PASS phase J (M1): a GPU session is still offline for agent and model, and the agent got an answer (200)
@@ -96,7 +101,7 @@
 
 ```bash
 ./scripts/verify-isolation.sh --keep         # เก็บ workspace ที่ใช้ทดสอบไว้ดู
-./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2, E5, breach ใน I)
+./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2, E5, E6, breach ใน I)
 ./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D (E1/E2 ยังรัน)
 ```
 
@@ -336,6 +341,8 @@ grep -n 'http_access deny all' core/network/squid.conf
 | mount guard ปฏิเสธ path อันตราย (E3) | source `assert_safe_mount` แล้วป้อน `/ /etc /home /mnt/c ...` | refuse ทุกอัน; project dir ปกติ accept |
 | seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
 | ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |
+| report ที่มีอยู่แล้วไม่กลืน report ใหม่ (E6) | วาง `WARDEN_SECURITY_INCIDENT.json` (0444, uid 1001) แล้ว trip canary ผ่าน `warden-cli.sh run` | exit `99` + ไฟล์เดิมไม่ถูกแตะ + report ใหม่มี `report_path_preexisting` และ CLI แสดงชื่อไฟล์ใหม่ |
+| สัญญาณที่ agent ส่งเองไม่ใช่ breach (E7) | `kill -USR1 1` จากใน sandbox | exit `99` แต่ `no breach record found` + `NO incident report` ไม่มีคำว่า tripwire terminated |
 | รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
 | codex ใช้ได้จริงใน sandbox (G) | `OPENAI_API_KEY=<fake> warden-cli.sh run <dir> codex -- login status` | `Logged in using an API key` + บรรทัด launching มี `sandbox_mode="danger-full-access"` |
 | โหมด GPU ไม่ตกไป CPU เงียบ ๆ (J) | `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<m> warden-cli.sh run <dir> aider-local` | มี GPU: `local model ready: ... on GPU (offloaded N/N layers)`; ไม่มี GPU หรือ offload ไม่ครบ: ปฏิเสธ ไม่มีอะไรค้าง |
