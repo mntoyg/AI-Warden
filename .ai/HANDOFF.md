@@ -5,8 +5,8 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-26 (session 10)
-- **Latest release:** [v1.2.1](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.1) — security: incident records cannot be swallowed by an existing file or faked by a self-sent signal, and are confirmed from the sentinel's own log; v1.0.0–v1.2.0 carry a superseded warning
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v13)
+- **Latest release:** [v1.2.3](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.3) — `status` lists every incident report; on top of v1.2.2 (no forged monitor log lines, doctor never passes what it did not measure) and v1.2.1 (records cannot be swallowed or faked by a signal; `Confirmed by the sentinel`). v1.0.0–v1.2.1 carry a superseded/hardening note
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v14)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -19,6 +19,18 @@
 
 | Thing | State |
 |---|---|
+| `main` | tag **`v1.2.3`** (`18b46ce`) + this handoff commit, tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.2.1` carry a superseded warning (v1.2.1's is a hardening note) · `v1.2.2` · **`v1.2.3` (Latest)** |
+| CI | green on every push of session 10 and on tags `v1.2.0`, `v1.2.1` (36230692729), `v1.2.2` (36233114463), `v1.2.3` (36235022377; main 36234325721); releases published and re-read |
+| Local suite (Docker Desktop / Windows) | on the **v1.2.3** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, 46 PASS lines + phase A, `enforced=4/7`; phase J's GPU side 7/7 (no-GPU side = SKIP here) |
+| CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal · E2b/E6/E7/E8 pass there too |
+| CVEs | trivy on the v1.2.3 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · 75 in bundled-agent deps (reported, not gated) |
+| Incident records | never overwritten or deferred to; own labelled file when one exists; CLI lists this session's reports, labels an unrecorded exit 99 as possibly forged, prints `Confirmed by the sentinel (outside the agent's reach)` from the sentinel container's log; `status` lists every report; monitor log lines cannot be forged with newlines |
+| Local model | `aider-local` offline on CPU and GPU (`WARDEN_MODEL_GPU=1`) with local aider metadata; measured with the untuned Qwen2.5-Coder-1.5B q8_0 in the lab's `outputs/qwen-base/`: CPU gen 11–14 tok/s, RAM 2.29 GB; GPU gen 54–71 tok/s, VRAM 1.95/4 GB; load ~31 s either way. `status` lists model servers, flags orphans. **No trained model yet** |
+| OpenAI key | **OUT OF CREDIT** since 2026-09-26 ~09:15 UTC: codex logs in, reaches api.openai.com, gets `Quota exceeded`. The real-codex check and demo act 4 cannot pass until the user tops up |
+| Demo readiness | Recording POSTPONED, no date. `demo.sh --auto --agent codex`: acts 1–3 PASS on v1.2.2; act 4 FAILS on the quota (not the sandbox). Last full DEMO COMPLETE: v1.2.1. The interactive rehearsal has never been run |
+
+---|---|
 | `main` | tag **`v1.2.1`** (`072004a`) + this handoff commit, tree clean, in sync with origin |
 | Tags | `v1.0.0`…`v1.2.0` carry a "superseded" warning (v1.0.6, v1.1.0, v1.2.0 flagged for v1.2.1) · **`v1.2.1` (Latest, security)** |
 | CI | green on `8520d88` (run 36229286012), `a83b555` (36229655831), `072004a` (36230093461) and tag **`v1.2.1`** (36230692729); E6/E7 and phase D's sentinel confirmation pass on native ext4 too; release published and re-read |
@@ -217,6 +229,8 @@ would I know if this silently did nothing?" — then run that.
 | A scratch harness is a COPY of the suite | It is sed-extracted at one moment; edit the drill afterwards and the harness still runs the old text. Session 10 watched E7 "fail" on a fixed build because the harness still grepped a message the drill no longer used. Regenerate the harness after every edit of `verify-isolation.sh`. |
 | `git commit -F /tmp/...` fails with `MSYS_NO_PATHCONV=1` exported | git.exe is a native program; the Git Bash path `/tmp/claude/...` reaches it unconverted (`could not read log file`). Do not export `MSYS_NO_PATHCONV` in the same command as `git commit -F`, or pass a `cygpath -w` path. |
 | Everything an incident record lives in is agent-writable | PID 1 runs as uid 1001 (the agent can SIGUSR1 it), `/run/warden` is a uid-1001 tmpfs, the workspace and the vault are writable by the agent. So never let a monitor or the CLI *defer to* an existing record it cannot authenticate (the pre-v1.2.1 O_TRUNC report bug) - write your own, and label what cannot be proven. The only record the agent cannot touch is the sentinel container's own log. |
+| `ERROR: Quota exceeded. Check your plan and billing details.` from codex | The user's OpenAI key is out of credit (hit 2026-09-26 after ~10 codex runs that session). Not a sandbox fault: login, sandbox mode and egress to api.openai.com all worked. codex 0.156.1 exits **1** on this (unlike its exit 0 on sandbox failures). Demo act 4 and the real-codex check cannot pass until the user tops up - ask, do not debug. |
+| `cmd | grep -q x` is false under `pipefail` even when x is there | grep -q exits at the first match, `cmd` then dies of SIGPIPE, and pipefail reports the pipeline as failed. Session 10's first E6 status check failed on the FIXED code this way. Capture first (`out="$(cmd)"; printf '%s' "$out" | grep -q x`) - the suite already does this everywhere else. |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. The static job's pre-pull step now retries 5x (checked session 10), so this should be rare; pinning by digest is optional. |
 
 ---
@@ -255,6 +269,34 @@ would I know if this silently did nothing?" — then run that.
 - **Prompt should have said:** check `get_usage` (context % AND the 5-hour plan limit) at start
   and between steps, and hand off on whichever runs out first; look for a public stand-in before
   declaring a task blocked on the user. Both are in v13.
+
+- **Cont. (user: "no prompt yet - work until 70% context"):** I had handed off at 30% context
+  because the Pro 5-hour limit was at 83%; it reset a minute later. Kept going:
+  `status` now lists model servers and flags ORPHANED ones (a `kill -9`'d CLI left a 2.2 GB model
+  running while status said "none running"); aider-local gets local model metadata (no GitHub
+  fetch, knows ctx; "Loaded model metadata from" was rejected as proof - the old code printed it
+  too); `--no-breach` skips phase I's breach. Then the "how does the agent make it lie" question
+  found three real record bugs: (1) an existing `WARDEN_SECURITY_INCIDENT.json` (earlier breach,
+  or planted) swallowed every later breach's report - O_TRUNC + EACCES read as "the peer wrote it";
+  (2) the agent can `kill -USR1 1` (PID 1 shares its uid) and got "from the canary tripwire" plus a
+  report path that did not exist; (3) the sentinel's log - the one record the agent cannot write -
+  was thrown away by `--rm`. Shipped **v1.2.1** (O_EXCL + own labelled record, CLI lists only this
+  session's reports, honest unrecorded-signal wording, `Confirmed by the sentinel`; drills E6/E7 +
+  D, all failing first). Then (4) `sanitize()` let newlines through: an exe path with a newline
+  printed a whole forged `mode=sentinel` line in the inline log (not reachable in the sentinel's
+  log, but fixed; E2b) and (5) `doctor` died silently under `set -euo pipefail` when df failed
+  (E8) - **v1.2.2**. Measured and dropped the model-store idea (load is 31 s from a volume or the
+  9p mount alike). The user's OpenAI key hit "Quota exceeded" - demo act 4 blocked until top-up.
+  Last: `status` missed the new-style reports v1.2.1 itself introduced (E6 extended) - **v1.2.3**.
+- **Learned (cont.):** (1) every record the agent can write is forgeable, so a monitor must never
+  *defer* to one - the pre-v1.2.1 "peer already wrote it" guess was the whole bug; (2) a scratch
+  harness is a stale copy - E7 "failed" on a fixed build because I had edited the drill after
+  extracting it; (3) heredoc-fed Python ate my backslashes three more times even when doubled;
+  (4) a drill written for one symptom (E8: "passes without measuring") exposed a worse one (the
+  doctor dies silently) - write the drill first even for "cosmetic" fixes.
+- **Prompt should have said:** END is triggered by CONTEXT only - a plan limit that is about to
+  reset is a reason for a HANDOFF checkpoint, not for stopping; and codex "Quota exceeded" means ask
+  the user about credit, not debug. Both in v14.
 
 ### 2026-09-26 — session 9 · v1.0.6 (audit trail) + v1.1.0 (offline local model)
 - **Did:** reality check (Docker down → started; HANDOFF Status stale → fixed first). Asked
@@ -529,6 +571,16 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v14 · 2026-09-26** — session 10 (cont.). (a) **CONTEXT is the only END trigger** (user call):
+  v13 made the plan's 5-hour limit an END trigger; I handed off at 30% context, the user said
+  "work until 70%", and the limit reset a minute later - a plan limit now only earns a HANDOFF
+  checkpoint; (b) **every record the agent can write is forgeable** - never defer to one: the
+  swallowed-report, self-sent-SIGUSR1 and newline-in-exe bugs (v1.2.1/v1.2.2) all came from the
+  "how does it lie" question; (c) **regenerate the scratch harness after every suite edit** - a
+  stale copy failed E7 on a fixed build; (d) **no backslashes in heredoc-fed Python/sed, not even
+  doubled; scan for control chars** - three corrupted files; (e) START asks about **OpenAI credit**
+  and "Quota exceeded" means ask, not debug - the key ran dry mid-session. Cut: the standalone
+  "recurring bug shape" line (folded into (b)) and the shim example text, to stay at 69.
 - **v13 · 2026-09-26** — session 10. (a) **budget = context AND the plan's 5-hour limit**: START reads
   both with the `get_usage` tool and END triggers on whichever runs out first - this session opened
   at 66% of the 5-hour limit and hit 80% while context was at 27%, so a pure "70% context" rule
