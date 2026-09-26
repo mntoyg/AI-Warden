@@ -274,8 +274,10 @@ session นั้น ไม่มี proxy ไม่มี route ออก โ�
   (ค่าเริ่มต้น `4g`) ใส่ `WARDEN_MODEL_GPU=1` เพื่อรันโมเดลบน GPU (NVIDIA + Docker ที่ส่ง `--gpus` ได้):
   GPU ถูกส่งให้ model server เท่านั้น ไม่ให้ agent และ CLI จะเช็คจาก log ของ server ว่า offload
   **ครบทุก layer** — ไม่มี GPU หรือ offload ไม่ครบ = ปฏิเสธ ไม่ตกไป CPU เงียบ ๆ (THREAT_MODEL §3.7 M7)
-- pip / npm / git ใน session นี้ออกเน็ตไม่ได้ (ตั้งใจ) และ aider จะพิมพ์ error ว่าโหลด
-  `model_prices_and_context_window.json` จาก GitHub ไม่ได้ตอนเริ่ม — ไม่มีผลกับการทำงาน
+- pip / npm / git ใน session นี้ออกเน็ตไม่ได้ (ตั้งใจ) CLI ส่ง metadata ของโมเดล (context =
+  `WARDEN_MODEL_CTX`, ค่าใช้จ่าย 0) ให้ aider เอง aider จึงไม่ต้องไปดึงรายการโมเดลจาก GitHub ตอนเริ่ม
+- `warden-cli.sh status` แสดง model server ทุกตัว (cpu / GPU) และบอก `ORPHANED` ถ้า sandbox ของมันหายไป
+  แล้ว (เช่น CLI ถูก kill แรง ๆ จน trap ไม่ได้ทำงาน) — เก็บกวาดด้วย `warden-cli.sh stop`
 - `WARDEN_MODEL_MANIFEST` ไม่อ่านจาก `.env` โดยตั้งใจ: มันเปลี่ยนว่า session เป็นแบบไหน
   จึงต้องสั่งเองทุกครั้ง (`WARDEN_MODEL_GPU` ก็เช่นกัน) ตรวจทั้งหมดนี้โดย phase I และ J ด้วยโมเดล
   สาธารณะขนาด 1.2 MB

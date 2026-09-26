@@ -436,11 +436,19 @@ cmd_down() {
 # Phase G of verify-isolation.sh checks both with a fake key.
 CODEX_WRAPPER='if [ -n "${OPENAI_API_KEY:-}" ]; then printenv OPENAI_API_KEY | codex login --with-api-key >/dev/null 2>&1 || { echo "[warden] codex could not log in with OPENAI_API_KEY" >&2; exit 1; }; else echo "[warden] OPENAI_API_KEY is not set - codex will ask for a sign-in" >&2; fi; exec codex -c sandbox_mode="danger-full-access" "$@"'
 
+# aider-local: with no metadata for a model, aider downloads litellm's price and
+# context list from GitHub on every start - offline that is a ProxyError, and aider
+# then knows neither the context size nor that the model is free. The wrapper
+# writes metadata for the local alias (context = WARDEN_MODEL_CTX, cost 0) and
+# passes it in, so aider skips the fetch. Phase I checks it with --exit --verbose.
+AIDER_LOCAL_WRAPPER='c="${WARDEN_MODEL_CTX:-8192}"; m="${HOME}/.warden-local.model-metadata.json"; printf "{\"openai/%s\": {\"max_tokens\": %s, \"max_input_tokens\": %s, \"max_output_tokens\": %s, \"input_cost_per_token\": 0, \"output_cost_per_token\": 0, \"litellm_provider\": \"openai\", \"mode\": \"chat\"}}\n" "${WARDEN_MODEL_ALIAS:-warden-local}" "$c" "$c" "$((c / 4))" > "$m" || { echo "[warden] could not write aider model metadata to $m" >&2; exit 1; }; exec aider --model-metadata-file "$m" "$@"'
+
 resolve_agent_cmd() {
     case "${1:-bash}" in
         claude)          printf '%s\n' claude ;;
         aider)           printf '%s\n' aider ;;
-        aider-local)     printf '%s\n' aider --model "openai/${MODEL_ALIAS}" --openai-api-base "$MODEL_URL" \
+        aider-local)     printf '%s\n' bash -c "$AIDER_LOCAL_WRAPPER" aider --model "openai/${MODEL_ALIAS}" \
+                             --openai-api-base "$MODEL_URL" \
                              --no-check-update --analytics-disable --no-show-model-warnings ;;
         codex)           printf '%s\n' bash -c "$CODEX_WRAPPER" codex ;;
         hermes)          printf '%s\n' hermes ;;
@@ -811,6 +819,8 @@ cmd_run() {
         # entrypoint re-checks the "offline" claim itself (WARDEN_EGRESS=none).
         args+=(
             -e WARDEN_EGRESS=none
+            -e "WARDEN_MODEL_CTX=${WARDEN_MODEL_CTX}"
+            -e "WARDEN_MODEL_ALIAS=${MODEL_ALIAS}"
             -e "OPENAI_API_KEY=${MODEL_PLACEHOLDER_KEY}"
             -e "NO_PROXY=localhost,127.0.0.1,::1,warden-model"
             -e "no_proxy=localhost,127.0.0.1,::1,warden-model"

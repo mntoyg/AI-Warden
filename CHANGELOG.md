@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- `warden-cli.sh status` ไม่เคยแสดง model server: CLI ที่ถูก kill แรง ๆ (ไม่มี trap) ทิ้ง model server
+  ไว้กิน RAM 2.2 GB (และ GPU ในโหมด GPU) ขณะที่ status บอก `none running` — ตอนนี้มีส่วน
+  "Local model servers" บอก cpu/GPU และ `ORPHANED` พร้อมคำสั่งเก็บกวาด (ทดลองกับ `kill -9` จริง)
+- `aider-local` ไม่พิมพ์ ProxyError ตอนเริ่มอีก: CLI ส่ง metadata ของ `openai/warden-local`
+  (context = `WARDEN_MODEL_CTX`, cost 0) ให้ aider จึงไม่ไปดึงรายการโมเดลจาก GitHub และรู้ขนาด
+  context จริง (เดิม aider เห็น metadata เป็น `{}`)
+
+### Tests
+
+- phase I: model server ที่ถูกทิ้งต้องขึ้นใน `status` ว่า `ORPHANED` (ต้องพิสูจน์ว่ามันมีอยู่จริงด้วย),
+  aider-local ต้องเห็น `max_input_tokens` ของ session และไม่มี GitHub fetch; phase J: status ของ session
+  GPU ที่กำลังรันต้องบอก GPU และผูกกับ sandbox — ทั้งสามข้อ FAIL กับ v1.2.0 ก่อนแก้
+- `--no-breach` ข้าม breach check ของ phase I ด้วย (เดิมยังรัน exit 99)
+
 ## [1.2.0] — 2026-09-26
 
 **ฟีเจอร์: รันโมเดลในเครื่องบน GPU แบบพิสูจน์ได้ — offload ครบ หรือปฏิเสธ**

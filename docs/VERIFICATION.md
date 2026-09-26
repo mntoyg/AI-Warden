@@ -96,7 +96,7 @@
 
 ```bash
 ./scripts/verify-isolation.sh --keep         # เก็บ workspace ที่ใช้ทดสอบไว้ดู
-./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2, E5)
+./scripts/verify-isolation.sh --no-breach    # ข้ามทุกเฟสที่ต้องทำให้ container ตาย (B, D, E1, E2, E5, breach ใน I)
 ./scripts/verify-isolation.sh --no-sentinel  # ข้ามเฉพาะเฟส D (E1/E2 ยังรัน)
 ```
 

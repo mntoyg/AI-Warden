@@ -919,16 +919,20 @@ else
     fi
 
     # M5 on the breach path: the tripwire still works offline, and cleanup still runs.
-    i2_out="$(WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
-        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c 'cat /workspace/.secrets/credentials >/dev/null; sleep 20' 2>&1)"
-    i2_rc=$?
-    i2_left="$(i_leftovers)"
-    rm -f "${I_WS}"/WARDEN_SECURITY_INCIDENT*.json 2>/dev/null || true
-    # "Nothing left" only counts if the model really started (else it is vacuous).
-    if [ "$i2_rc" -eq 99 ] && [ -z "$i2_left" ] && printf '%s' "$i2_out" | grep -q 'local model ready'; then
-        good "phase I (M5): a breach in a local-model session exits 99 and leaves nothing behind"
+    if [ "$RUN_BREACH" = "1" ]; then
+        i2_out="$(WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+            "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c 'cat /workspace/.secrets/credentials >/dev/null; sleep 20' 2>&1)"
+        i2_rc=$?
+        i2_left="$(i_leftovers)"
+        rm -f "${I_WS}"/WARDEN_SECURITY_INCIDENT*.json 2>/dev/null || true
+        # "Nothing left" only counts if the model really started (else it is vacuous).
+        if [ "$i2_rc" -eq 99 ] && [ -z "$i2_left" ] && printf '%s' "$i2_out" | grep -q 'local model ready'; then
+            good "phase I (M5): a breach in a local-model session exits 99 and leaves nothing behind"
+        else
+            i_fail "(M5) breach path: rc=${i2_rc}, leftovers: $(printf '%s' "$i2_left" | tr '\n' ' ')"
+        fi
     else
-        i_fail "(M5) breach path: rc=${i2_rc}, leftovers: $(printf '%s' "$i2_left" | tr '\n' ' ')"
+        note "  SKIP phase I (M5): the breach path (--no-breach)"
     fi
 
     # M5 (visibility): a model server left behind by a hard-killed CLI (no trap ran)
@@ -991,6 +995,23 @@ else
     else
         i_fail "aider-local wiring: with manifest rc=${i4_rc}, without rc=${i5_rc}"
         note "         $(printf '%s' "$i4_out" | grep -E 'launching agent|fail' | tr '\n' ' ' | cut -c1-240)"
+    fi
+
+    # aider-local offline start: without metadata for the local alias, aider fetches
+    # litellm's price list from GitHub on every start (a ProxyError offline). The
+    # CLI hands it metadata instead. `--exit` builds the model and stops; the Model
+    # line proves aider got that far. "Loaded model metadata from" is NOT proof - it
+    # also lists aider's bundled file - so check the metadata aider holds for the
+    # model: {} before the fix, the session's context size after it.
+    i8_out="$(WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" aider-local -- --no-git --exit --verbose 2>&1)"
+    i8_rc=$?
+    if [ "$i8_rc" -eq 0 ] && printf '%s' "$i8_out" | grep -q '^Model: openai/warden-local' \
+       && printf '%s' "$i8_out" | grep -q '"max_input_tokens": 8192' \
+       && ! printf '%s' "$i8_out" | grep -q 'raw.githubusercontent.com'; then
+        good "phase I: aider-local knows the local model (max_input_tokens 8192) and starts without a GitHub fetch"
+    else
+        i_fail "aider-local offline start: rc=${i8_rc} $(printf '%s' "$i8_out" | grep -E '^Model:|max_input_tokens|githubusercontent' | tr '\n' ' ' | cut -c1-240)"
     fi
     rm -f "${I_CACHE}/tampered.gguf" "${I_CACHE}/tampered.json" "${I_CACHE}"/run1.* 2>/dev/null || true
 fi
