@@ -25,44 +25,11 @@
 | Local suite (Docker Desktop / Windows) | on the **v1.2.3** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, 46 PASS lines + phase A, `enforced=4/7`; phase J's GPU side 7/7 (no-GPU side = SKIP here) |
 | CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal · E2b/E6/E7/E8 pass there too |
 | CVEs | trivy on the v1.2.3 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · 75 in bundled-agent deps (reported, not gated) |
+| Egress audit trail | DEAD again at session 11 start (2026-09-27: 173 NUL bytes in the proxy's json log after an unclean Docker Desktop stop); `up` recreated the proxy and `status` → `live` - the v1.0.6 heal worked in the field |
 | Incident records | never overwritten or deferred to; own labelled file when one exists; CLI lists this session's reports, labels an unrecorded exit 99 as possibly forged, prints `Confirmed by the sentinel (outside the agent's reach)` from the sentinel container's log; `status` lists every report; monitor log lines cannot be forged with newlines |
 | Local model | `aider-local` offline on CPU and GPU (`WARDEN_MODEL_GPU=1`) with local aider metadata; measured with the untuned Qwen2.5-Coder-1.5B q8_0 in the lab's `outputs/qwen-base/`: CPU gen 11–14 tok/s, RAM 2.29 GB; GPU gen 54–71 tok/s, VRAM 1.95/4 GB; load ~31 s either way. `status` lists model servers, flags orphans. **No trained model yet** |
 | OpenAI key | **OUT OF CREDIT** since 2026-09-26 ~09:15 UTC: codex logs in, reaches api.openai.com, gets `Quota exceeded`. The real-codex check and demo act 4 cannot pass until the user tops up |
 | Demo readiness | Recording POSTPONED, no date. `demo.sh --auto --agent codex`: acts 1–3 PASS on v1.2.2; act 4 FAILS on the quota (not the sandbox). Last full DEMO COMPLETE: v1.2.1. The interactive rehearsal has never been run |
-
----|---|
-| `main` | tag **`v1.2.1`** (`072004a`) + this handoff commit, tree clean, in sync with origin |
-| Tags | `v1.0.0`…`v1.2.0` carry a "superseded" warning (v1.0.6, v1.1.0, v1.2.0 flagged for v1.2.1) · **`v1.2.1` (Latest, security)** |
-| CI | green on `8520d88` (run 36229286012), `a83b555` (36229655831), `072004a` (36230093461) and tag **`v1.2.1`** (36230692729); E6/E7 and phase D's sentinel confirmation pass on native ext4 too; release published and re-read |
-| Local suite (Docker Desktop / Windows) | on the **v1.2.1** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, `enforced=4/7` (E6/E7 new; D confirms from the sentinel's log; I and J check `status`) |
-| CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal (GPU side SKIP) |
-| CVEs | trivy on the v1.2.1 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated) |
-| Egress audit trail | `warden-cli.sh status` → `audit trail live` |
-| Incident records | a monitor never overwrites or defers to an existing report (own labelled file instead); the CLI lists only this session's reports, labels an exit 99 with no record as possibly forged, and prints `Confirmed by the sentinel (outside the agent's reach)` from the sentinel container's log - the one record the agent cannot write |
-| Local model | `aider-local` offline on CPU and GPU (`WARDEN_MODEL_GPU=1`), aider gets local metadata (no GitHub fetch, knows ctx). Measured with the untuned Qwen2.5-Coder-1.5B q8_0 (lab `outputs/qwen-base/`): CPU gen 11–14 tok/s, RAM 2.29 GB; GPU gen 54–71 tok/s, VRAM 1.95/4 GB; load ~31 s either way. `status` lists model servers and flags orphans. **No trained model yet** |
-| Demo readiness | Recording POSTPONED, no date. `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.2.1 (fails=0); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
-
----|---|
-| `main` | tag **`v1.2.0`** (`53b3998`) + this handoff commit, tree clean, in sync with origin |
-| Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · `v1.1.0` (feature) · **`v1.2.0` (Latest, feature)** |
-| CI | green on `65015df` (run 36221267142: phase J's no-GPU side refused on native Linux, `enforced=7/7`), on `53b3998` (run 36221917725) and on tag **`v1.2.0`** (run 36222416915); release published as Latest and re-read |
-| Local suite (Docker Desktop / Windows) | on the **v1.2.0** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, `enforced=4/7`; phase J 7/7 on the RTX 3050 (its no-GPU side prints SKIP here) |
-| CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal (GPU side SKIP) |
-| CVEs | trivy on the v1.2.0 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated) |
-| Egress audit trail | `warden-cli.sh status` → `audit trail live` at session start |
-| Local model | `aider-local` works offline on CPU **and** GPU (`WARDEN_MODEL_GPU=1`) with the official untuned Qwen2.5-Coder-1.5B-Instruct `q8_0` (1.89 GB, kept outside any workspace in the private lab's `outputs/qwen-base/` with a manifest). Measured at ctx 8192: CPU gen 11–14 tok/s, RAM peak 2.29 GB (`4g` holds); GPU gen 54–71 tok/s, prompt 3060 tok/s, VRAM 1.95/4 GB. aider fixed a bug in both modes. **No trained model yet** |
-| Demo readiness | Recording POSTPONED, no date (asked 2026-09-26, session 10). `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.2.0 (fails=0); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
-
----|---|
-| `main` | tag **`v1.1.0`** (`4477b7a`) + this handoff commit, tree clean, in sync with origin |
-| Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · **`v1.1.0` (Latest, feature)** |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — green on `main` `4477b7a` (run 36217381743, phase I 12/12 on Linux) and on tag `v1.0.6` (run 36215663544); tag **`v1.1.0`** (run 36217920986) |
-| Local suite (Docker Desktop / Windows) | on the **v1.1.0** image (rebuilt `--pull` 2026-09-26): A–I all PASS, exit 0, `enforced=4/7` (H = dead audit trail healed/refused, I = 12 local-model checks) |
-| CI suite (ext4) | all phases A–I · `enforced=7/7` · compose handshake OK |
-| CVEs | trivy on the v1.1.0 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
-| Egress audit trail | `warden-cli.sh status` → `audit trail live`. It had been DEAD on this box 2026-09-16 → 2026-09-26 (NUL-damaged json log); `up` now heals it (v1.0.6) |
-| Local model | `WARDEN_MODEL_MANIFEST=<manifest> warden-cli.sh run <ws> aider-local` works offline on this box with the lab's smoke GGUF (SmolLM2-135M): sha256 verified, `egress: none`, aider answered, nothing left. CPU only. No real (trained) model exists yet |
-| Demo readiness | Recording POSTPONED, no date (asked 2026-09-26). `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.1.0 (28 PASS, 0 FAIL); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
 
 ---
 
