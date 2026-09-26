@@ -19,6 +19,9 @@
 ### Fixed
 
 - `status`: แถวของ sentinel ไม่มีย่อหน้า (docker `--format` ตัดช่องว่างนำหน้าทิ้ง)
+- `doctor` (`setup-host.sh`): ถ้า `df` ไม่ให้ตัวเลข สคริปต์ (`set -euo pipefail`) **ตายเงียบ ๆ ตรงนั้น** — ไม่ตรวจ
+  host posture / repository integrity และไม่มี summary แค่ rc=1 และถ้ารอดมาได้ก็จะ pass disk check ทั้งที่ไม่ได้วัด
+  ตอนนี้ pass เฉพาะเมื่อวัดได้ (บอกจำนวน GB) ไม่งั้น warn ว่าวัดไม่ได้ แล้วตรวจต่อจนจบ (drill E8 — FAIL กับโค้ดเดิม)
 
 ## [1.2.1] — 2026-09-26
 

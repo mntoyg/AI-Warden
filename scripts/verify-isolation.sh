@@ -679,6 +679,35 @@ else
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
 
+# --- E8: doctor must not pass a check it could not measure ---------------------
+# setup-host.sh printed "sufficient free disk space" whenever df gave no number.
+# A df that fails is put first on PATH (and proven to be the one that runs).
+printf '\n'
+info "E8: doctor must not report a disk check it could not measure as passed"
+E8_BIN="$(mktemp -d)"
+printf '#!/bin/sh\necho "df: simulated failure" >&2\nexit 1\n' > "${E8_BIN}/df"
+chmod +x "${E8_BIN}/df"
+e8_live="$(PATH="${E8_BIN}:$PATH" command -v df)"
+e8_out="$(PATH="${E8_BIN}:$PATH" NO_COLOR=1 "${SCRIPT_DIR}/setup-host.sh" 2>&1)"
+rm -rf "$E8_BIN" 2>/dev/null || true
+if [ "$e8_live" != "${E8_BIN}/df" ]; then
+    bad  "phase E8: the failing df shim was not the df on PATH (${e8_live}) - drill proves nothing"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+elif ! printf '%s' "$e8_out" | grep -q '^Summary'; then
+    # Found by this drill: under set -euo pipefail the failing df killed the
+    # whole doctor right there - no posture checks, no summary, just rc=1.
+    bad  "phase E8: doctor died at the disk check (no Summary) - every later check silently skipped"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+elif printf '%s' "$e8_out" | grep -q 'sufficient free disk space'; then
+    bad  "phase E8: doctor passed the disk check although df returned nothing"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+elif printf '%s' "$e8_out" | grep -q 'could not measure free disk space'; then
+    good "phase E8: with df failing, doctor says it could not measure disk space instead of passing it"
+else
+    bad  "phase E8: doctor said nothing about disk space: $(printf '%s' "$e8_out" | grep -i disk | tr '\n' ' ' | cut -c1-160)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
 # =============================================================================
 printf '\n%s=========== PHASE F: runtime fail-closed (gVisor plumbing) ==========%s\n' "$C_BOLD" "$C_RESET"
 # =============================================================================

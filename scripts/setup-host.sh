@@ -80,15 +80,23 @@ else
     warn "git not found on the host (only needed for your own workflow)"
 fi
 
-# Disk space: the agent image is large (Node + Python + toolchain).
+# Disk space: the agent image is large (Node + Python + toolchain). Only a
+# number that was actually measured may pass; under set -euo pipefail a failing
+# df used to end the whole doctor here, silently (drill E8).
+avail_kb=""
 if command -v df >/dev/null 2>&1; then
-    avail_kb="$(df -Pk "$PROJECT_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')"
-    if [ -n "${avail_kb:-}" ] && [ "$avail_kb" -lt 6000000 ]; then
-        warn "less than ~6 GB free on this volume; the agent image needs roughly 3-4 GB"
-    else
-        pass "sufficient free disk space"
-    fi
+    avail_kb="$(df -Pk "$PROJECT_ROOT" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
 fi
+case "$avail_kb" in
+    ''|*[!0-9]*)
+        warn "could not measure free disk space on this volume (df gave no number); the agent image needs roughly 3-4 GB" ;;
+    *)
+        if [ "$avail_kb" -lt 6000000 ]; then
+            warn "less than ~6 GB free on this volume; the agent image needs roughly 3-4 GB"
+        else
+            pass "sufficient free disk space ($((avail_kb / 1048576)) GB free on this volume)"
+        fi ;;
+esac
 
 # =============================================================================
 # 2. Host posture
