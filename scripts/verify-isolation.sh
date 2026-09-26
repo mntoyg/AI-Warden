@@ -641,14 +641,20 @@ if [ "$RUN_BREACH" = "1" ]; then
     if grep -qs 'report_path_tampered' "${E6_WS}"/WARDEN_SECURITY_INCIDENT*.json; then e6_tamper=1; fi
     if [ -n "$e6_new" ] && printf '%s' "$e6_out" | grep -qF "$(basename "$e6_new")" \
        && ! printf '%s' "$e6_out" | grep -q 'already written by the peer monitor'; then e6_cli=1; fi
+    # `status` lists recent incidents too; it must show the new report, not only
+    # the file that happens to own the primary name.
+    # Captured first: `status | grep -q` under pipefail fails on status's SIGPIPE.
+    e6_status=0
+    e6_st_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" status 2>&1)"
+    if [ -n "$e6_new" ] && printf '%s' "$e6_st_out" | grep -qF "$(basename "$e6_new")"; then e6_status=1; fi
     chmod -R u+w "$E6_WS" 2>/dev/null || true
     rmdir "${E6_WS}/.secrets" 2>/dev/null || true
     rm -rf "$E6_WS" 2>/dev/null || true
     if [ "$e6_rc" -eq 99 ] && [ "$e6_planted" = '{"planted": "by the agent or an earlier session"}' ] \
-       && [ "$e6_pre" = "1" ] && [ "$e6_tamper" = "0" ] && [ "$e6_cli" = "1" ]; then
-        good "phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and the CLI named the new one"
+       && [ "$e6_pre" = "1" ] && [ "$e6_tamper" = "0" ] && [ "$e6_cli" = "1" ] && [ "$e6_status" = "1" ]; then
+        good "phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and both the CLI and 'status' named the new one"
     else
-        bad  "phase E6: rc=${e6_rc} new-report=${e6_new:-none} preexisting-noted=${e6_pre} tamper=${e6_tamper} cli-named-it=${e6_cli}"
+        bad  "phase E6: rc=${e6_rc} new-report=${e6_new:-none} preexisting-noted=${e6_pre} tamper=${e6_tamper} cli-named-it=${e6_cli} status-lists-it=${e6_status}"
         note "         $(printf '%s' "$e6_out" | grep -E 'Incident report|already written|could not write' | tr '\n' ' ' | cut -c1-240)"
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     fi

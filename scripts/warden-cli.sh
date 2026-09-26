@@ -1070,7 +1070,9 @@ cmd_status() {
         [ -n "$report" ] || continue
         found=1
         printf '  %s%s%s\n' "$C_RED" "$report" "$C_RESET"
-    done < <(find "${PROJECT_ROOT}/workspaces" -maxdepth 3 -name 'WARDEN_SECURITY_INCIDENT.json' 2>/dev/null || true)
+    # Every report, not only the primary name: since v1.2.1 a breach in a workspace
+    # that already holds a report writes its own WARDEN_SECURITY_INCIDENT.<mode>...json.
+    done < <(find "${PROJECT_ROOT}/workspaces" -maxdepth 3 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | LC_ALL=C sort || true)
     if [ "$found" -eq 0 ]; then
         printf '  %snone recorded under ./workspaces%s\n' "$C_DIM" "$C_RESET"
     fi
