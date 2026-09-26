@@ -66,6 +66,10 @@ readonly MODEL_URL="http://warden-model:8080/v1"
 # only "key" a local-model session ever sees.
 readonly MODEL_PLACEHOLDER_KEY="warden-local-no-key"
 
+# What the out-of-band sentinel watches: the vault and the workspace canaries.
+# The agent's home (~/.aws, ~/.ssh) is visible to the in-sandbox monitor only.
+readonly SENTINEL_CANARIES="/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault"
+
 # --- Secrets that are forwarded by NAME only (never by value) ----------------
 readonly FORWARDED_SECRETS=(
     ANTHROPIC_API_KEY
@@ -534,7 +538,10 @@ start_sentinel() {
     local -a rt=()
     if [ -n "$RESOLVED_RUNTIME" ]; then rt=(--runtime "$RESOLVED_RUNTIME"); fi
 
-    if docker run -d --rm \
+    # No --rm: the sentinel's log is the one breach record the agent cannot
+    # write, so it has to outlive the sentinel (which dies with the agent's
+    # PID 1) until cmd_run has read it. stop_sentinel removes it afterwards.
+    if docker run -d \
         "${rt[@]}" \
         --name "$sentinel" \
         --network none \
@@ -559,7 +566,7 @@ start_sentinel() {
             --run-dir=/tmp/warden --wait-for-canaries=45 \
             --wait-for-marker=/workspace/.secrets/.warden-seeded \
             --armed-marker=/workspace/.secrets/.warden-sentinel-armed \
-            --canaries=/workspace/.secrets/credentials:/workspace/.secrets/id_rsa:/workspace/.secrets.canary:/workspace/secrets.json:/workspace/.env.vault \
+            --canaries="$SENTINEL_CANARIES" \
         >/dev/null 2>&1
     then
         ok "canary sentinel attached (CAP_KILL only, no network, read-only rootfs)"
@@ -570,6 +577,21 @@ start_sentinel() {
 
 stop_sentinel() {
     docker rm -f "${1}-sentinel" >/dev/null 2>&1 || true
+}
+
+# Canary paths the sentinel breached, read from the sentinel container's own log.
+# The agent has no Docker socket and does not share that log (it can print fake
+# "[canary]" lines only into its own stdout), so this is the one breach record it
+# cannot forge. Accept only whole lines the sentinel prints as a sentinel, for a
+# path it actually watches; the agent's argv reaches this log only repr()-quoted.
+sentinel_breach_paths() {
+    local path
+    docker logs "${1}-sentinel" 2>&1 \
+        | sed -n 's/^\[canary [0-9TZ:.-]*\] \*\*\* \[SECURITY BREACH\] file=\([^ ]*\) event=[A-Z_|]* mode=sentinel$/\1/p' \
+        | LC_ALL=C sort -u \
+        | while IFS= read -r path; do
+              case ":${SENTINEL_CANARIES}:" in *":${path}:"*) printf '%s\n' "$path" ;; esac
+          done
 }
 
 # Incident reports in a workspace, one path per line, sorted (for comm).
@@ -888,6 +910,13 @@ cmd_run() {
 
     local rc=0
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
+    # Read the sentinel's own log before it is removed: the one breach record
+    # the agent cannot forge (see sentinel_breach_paths).
+    local sentinel_ran=0 sentinel_seen="" seen
+    if [ "$WARDEN_SENTINEL" = "1" ] && docker container inspect "${name}-sentinel" >/dev/null 2>&1; then
+        sentinel_ran=1
+        sentinel_seen="$(sentinel_breach_paths "$name")"
+    fi
     # Order matters: the sentinel must be gone before anything touches a
     # watched path, or shutdown housekeeping reads as tampering.
     stop_sentinel "$name"
@@ -919,8 +948,21 @@ cmd_run() {
             printf '%s  PID 1 shares the agent'"'"'s uid, so the agent can send the tripwire'"'"'s signal itself -\n  treat this as an unexplained, possibly forged termination, not a contained breach.%s\n' \
                 "$C_RED" "$C_RESET" >&2
         fi
+        if [ -n "$sentinel_seen" ]; then
+            while IFS= read -r seen; do
+                printf '%s  Confirmed by the sentinel (outside the agent'"'"'s reach): %s was opened.%s\n' \
+                    "$C_RED" "$seen" "$C_RESET" >&2
+            done <<< "$sentinel_seen"
+        elif [ "$sentinel_ran" = "1" ]; then
+            printf '%s  The sentinel (outside the agent'"'"'s reach) recorded no breach. It watches the vault and\n  workspace canaries, not the agent'"'"'s home (~/.aws, ~/.ssh), which only the in-sandbox monitor sees.%s\n' \
+                "$C_RED" "$C_RESET" >&2
+        fi
         printf '%s  Treat the agent session as hostile: rotate any key it was given.%s\n\n' \
             "$C_RED" "$C_RESET" >&2
+    elif [ -n "$sentinel_seen" ]; then
+        # The sentinel always signals PID 1 after a breach, so this should not
+        # happen - but if it does, its record outranks the exit code.
+        warn "the sentinel recorded a canary access ($(printf '%s' "$sentinel_seen" | tr '\n' ' ')) but the session ended with exit ${rc}. Treat it as a breach."
     elif [ "$rc" -eq 78 ]; then
         warn "the sandbox refused to start because a posture check failed (see the log above)"
     elif [ "$rc" -ne 0 ]; then

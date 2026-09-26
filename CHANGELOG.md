@@ -20,6 +20,10 @@
   canary tripwire" และ CLI ชี้ไปที่ report ที่ไม่มีอยู่จริง ยัง exit 99 (fail closed) แต่ entrypoint บอก
   `no breach record found` และ CLI บอก `NO incident report ... possibly forged` (drill E7 — FAIL กับ v1.2.0)
   handler ของ `SIGUSR1` ทำงานครั้งเดียวต่อ session แล้ว
+- **พยานที่ agent ปลอมไม่ได้** — log ของ container sentinel เป็น record เดียวที่ agent เขียนไม่ได้ แต่เดิม sentinel
+  รันแบบ `--rm` log จึงหายไปพร้อมมัน ตอนนี้ CLI อ่านก่อนลบ แล้วพิมพ์ `Confirmed by the sentinel (outside the
+  agent's reach): <canary> was opened.` หรือ `recorded no breach` (พร้อมบอกว่ามันเฝ้าอะไร) รับเฉพาะบรรทัดที่
+  sentinel พิมพ์เองแบบเป๊ะและ path ที่มันเฝ้าจริง (drill D ต้องเห็นการยืนยัน, E7 ต้องไม่เห็น — FAIL กับ v1.2.0)
 
 ### Fixed
 

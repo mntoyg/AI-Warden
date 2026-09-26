@@ -162,8 +162,14 @@ container ที่ `--pid container:<A>` หายไปทันทีเม�
   จะได้ log ว่า "from the canary tripwire" และ CLI ชี้ไปที่ incident report ที่ไม่มีอยู่จริง ตอนนี้ยังจบ
   ด้วย exit 99 (fail closed) แต่ entrypoint บอกว่า `no breach record found` และ CLI บอกว่า `NO incident
   report ... possibly forged` เพราะ monitor เขียน record **ก่อน** ส่งสัญญาณเสมอ (drill E7)
-- ที่ยังเหลือ: **เนื้อหา** ของ report ใด ๆ ใน workspace ปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report
-  ได้) หลักฐานที่ agent แตะไม่ได้มีแค่ log ของ container sentinel ซึ่งตอนนี้ถูกลบไปพร้อม sentinel
+- **เนื้อหา** ของ report ใด ๆ ใน workspace ยังปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report ได้)
+  record เดียวที่ agent แตะไม่ได้คือ **log ของ container sentinel** (agent ไม่มี Docker socket และไม่ได้แชร์
+  stdout กับมัน) ตั้งแต่ v1.2.1 sentinel ไม่ใช้ `--rm` แล้ว CLI อ่าน log นั้นก่อนลบ และพิมพ์
+  `Confirmed by the sentinel (outside the agent's reach): <canary> was opened.` เฉพาะบรรทัดที่ sentinel
+  พิมพ์เองในรูปแบบเป๊ะ (`mode=sentinel` ทั้งบรรทัด) และเป็น path ที่มันเฝ้าจริง — argv ของ agent เข้ามาใน log
+  นี้ได้แค่แบบ `repr()` จึงสร้างบรรทัดใหม่ไม่ได้ ถ้า sentinel ไม่เห็นอะไร CLI จะบอกว่า `recorded no breach`
+  พร้อมเหตุผล: sentinel เฝ้า vault กับ canary ใน workspace เท่านั้น canary ใน home ของ agent (`~/.aws`,
+  `~/.ssh`) มีแค่ monitor ใน sandbox ที่เห็น (drill D และ E7)
 
 ### 3.4 canary payload ที่ scanner ไม่จับ
 

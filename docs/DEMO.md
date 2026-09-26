@@ -134,6 +134,10 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
   Treat the agent session as hostile: rotate any key it was given.
 ```
 
+ตั้งแต่ v1.2.1 จะมีบรรทัด `Confirmed by the sentinel (outside the agent's reach): /workspace/.secrets/credentials
+was opened.` ก่อนบรรทัดสุดท้ายด้วย (ข้อความข้างบนยกมาจาก run ของ v1.0.6) — **พูดว่า:** report ใน workspace
+agent เขียนเองได้ แต่ log ของ sentinel มันแตะไม่ได้ บรรทัดนี้คือการยืนยันจากนอกกรง
+
 บางรอบ sentinel ฆ่า container ก่อน inline monitor จะพิมพ์ได้ครบ บรรทัด `SIGKILL delivered` และ
 `SIGUSR1 sent` ของ inline monitor จะ**ไม่ขึ้น** แล้วข้ามไปที่ `SECURITY BREACH` เลย — ปกติ ไม่ใช่ความผิดพลาด
 (เจอใน run ของ v1.1.0 วันที่ 2026-09-26; exit 99 และ incident report ยังครบ) ถ้าต้องการช็อตที่มีทุกบรรทัด ถ่ายซ้ำได้

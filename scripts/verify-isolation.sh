@@ -237,6 +237,7 @@ if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
     mkdir -p "$SENTINEL_WS"
     chmod 0777 "$SENTINEL_WS" 2>/dev/null || true
     set +e
+    D_OUT="$(mktemp)"
     NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$SENTINEL_WS" bash -- -lc '
         pkill -9 -f "canary_mon[i]tor" 2>/dev/null
         sleep 1
@@ -248,7 +249,7 @@ if [ -x "${SCRIPT_DIR}/warden-cli.sh" ]; then
         cat /workspace/.secrets/credentials > /dev/null 2>&1
         sleep 20
         echo "[drill] STILL ALIVE - THE SENTINEL FAILED"' 2>&1 \
-        | grep -E '^\[drill\]|SECURITY BREACH|mode=sentinel' | sed 's/^/  /'
+        | tee "$D_OUT" | grep -E '^\[drill\]|SECURITY BREACH|mode=sentinel' | sed 's/^/  /'
     phase_d=${PIPESTATUS[0]}
     # Restore the script's baseline (set -uo pipefail, NO -e). The old `set -e`
     # here wrongly assumed errexit was the default; it was harmless only because
@@ -281,6 +282,14 @@ fi
 printf '\n'
 if [ "$phase_d" -eq 99 ]; then
     good "phase D: the sentinel contained a breach after the inline monitor was killed"
+    # The sentinel's own container log is the one record the agent cannot write.
+    # The CLI must read it and say the breach is confirmed from there.
+    if grep -q "Confirmed by the sentinel (outside the agent's reach): /workspace/.secrets/credentials" "${D_OUT:-/dev/null}"; then
+        good "phase D: the CLI confirmed the breach from the sentinel's own log (outside the agent's reach)"
+    else
+        bad "phase D: the CLI did not confirm the breach from the sentinel's log"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
     if [ -n "${d_tamper:-}" ] || [ -n "${d_empty:-}" ]; then
         bad "phase D: a benign breach raised a FALSE tamper alarm / empty fallback"
         bad "         (inline+sentinel race) - tamper=${d_tamper:-none} empty=${d_empty:-none}"
@@ -305,6 +314,7 @@ else
     bad "         monitor is not contained by the out-of-band sentinel"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
+rm -f "${D_OUT:-}" 2>/dev/null || true
 fi
 
 # =============================================================================
@@ -624,6 +634,8 @@ rm -rf "$E7_WS" 2>/dev/null || true
 if [ "$e7_rc" -eq 99 ] && [ "$e7_reports" = "0" ] \
    && printf '%s' "$e7_out" | grep -q 'no breach record found' \
    && printf '%s' "$e7_out" | grep -q 'NO incident report' \
+   && printf '%s' "$e7_out" | grep -q "The sentinel (outside the agent's reach) recorded no breach" \
+   && ! printf '%s' "$e7_out" | grep -q 'Confirmed by the sentinel' \
    && ! printf '%s' "$e7_out" | grep -qE 'SIGUSR1 received from the canary tripwire|the canary tripwire terminated this sandbox'; then
     good "phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach"
 else
