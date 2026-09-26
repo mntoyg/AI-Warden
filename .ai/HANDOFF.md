@@ -4,9 +4,9 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-26 (session 9)
-- **Latest release:** [v1.1.0](https://github.com/mntoyg/AI-Warden/releases/tag/v1.1.0) — offline local-model sessions (`aider-local`), on top of [v1.0.6](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.6) (egress audit trail proven alive); v1.0.0–v1.0.5 carry a superseded warning
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v12)
+- **Last updated:** 2026-09-26 (session 10)
+- **Latest release:** [v1.2.0](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.0) — opt-in GPU model server, proven by offload or refused; on top of v1.1.0 (offline `aider-local`) and v1.0.6 (audit trail proven alive); v1.0.0–v1.0.5 carry a superseded warning
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v13)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -15,10 +15,21 @@
 
 ---
 
-## 1. Status (verified 2026-09-26, session 9)
+## 1. Status (verified 2026-09-26, session 10)
 
 | Thing | State |
 |---|---|
+| `main` | tag **`v1.2.0`** (`53b3998`) + this handoff commit, tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · `v1.1.0` (feature) · **`v1.2.0` (Latest, feature)** |
+| CI | green on `65015df` (run 36221267142: phase J's no-GPU side refused on native Linux, `enforced=7/7`), on `53b3998` (run 36221917725) and on tag **`v1.2.0`** (run 36222416915); release published as Latest and re-read |
+| Local suite (Docker Desktop / Windows) | on the **v1.2.0** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, `enforced=4/7`; phase J 7/7 on the RTX 3050 (its no-GPU side prints SKIP here) |
+| CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal (GPU side SKIP) |
+| CVEs | trivy on the v1.2.0 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated) |
+| Egress audit trail | `warden-cli.sh status` → `audit trail live` at session start |
+| Local model | `aider-local` works offline on CPU **and** GPU (`WARDEN_MODEL_GPU=1`) with the official untuned Qwen2.5-Coder-1.5B-Instruct `q8_0` (1.89 GB, kept outside any workspace in the private lab's `outputs/qwen-base/` with a manifest). Measured at ctx 8192: CPU gen 11–14 tok/s, RAM peak 2.29 GB (`4g` holds); GPU gen 54–71 tok/s, prompt 3060 tok/s, VRAM 1.95/4 GB. aider fixed a bug in both modes. **No trained model yet** |
+| Demo readiness | Recording POSTPONED, no date (asked 2026-09-26, session 10). `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.2.0 (fails=0); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
+
+---|---|
 | `main` | tag **`v1.1.0`** (`4477b7a`) + this handoff commit, tree clean, in sync with origin |
 | Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · **`v1.1.0` (Latest, feature)** |
 | CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — green on `main` `4477b7a` (run 36217381743, phase I 12/12 on Linux) and on tag `v1.0.6` (run 36215663544); tag **`v1.1.0`** (run 36217920986) |
@@ -36,16 +47,17 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Local model: the user trains a real one; then measure it here.** The AI Warden side
-   is DONE (v1.1.0, phase I). Left: (a) the user runs the lab notebook on Colab T4 with
-   their own data (default Qwen2.5-Coder-1.5B-Instruct, q8_0 ≈ 1.6 GB) and puts the GGUF +
-   manifest OUTSIDE any workspace; (b) then run `aider-local` on it here and MEASURE: load
-   time, tokens/s on CPU, RAM at `WARDEN_MODEL_CTX=8192` (`WARDEN_MODEL_MEMORY=4g` may be too
-   small for 1.5B + 8k ctx - measure, don't guess); (c) GPU (design M7) is NOT enabled: to add
-   it, pin `:server-cuda` by digest, run with `--gpus all` on the RTX 3050 4 GB, prove VRAM
-   fits and that phase I still passes, only then ship (v1.2.0). (d) (low) aider prints a
-   scary `model_prices_and_context_window.json` ProxyError at startup offline; harmless,
-   documented - could be silenced by pre-seeding aider's cache in the image.
+1. **Local model: the user trains a real one on Colab; then run it here.** The AI Warden side
+   is DONE: offline `aider-local` (v1.1.0) + GPU (v1.2.0), and the resource envelope of the
+   default base model is MEASURED (Status row). Left: (a) the user runs the lab notebook on Colab T4
+   with their own data and puts the GGUF + manifest OUTSIDE any workspace; (b) then
+   `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` with a real
+   task, and compare its answers with the untuned base (`outputs/qwen-base/` in the lab) - quality is
+   the only unknown left. (c) (low) aider prints a scary `model_prices_and_context_window.json`
+   ProxyError at startup offline; measured harmless (aider's whole turn is 6 s on GPU), could be
+   silenced by pre-seeding aider's cache in the image. (d) (low) most of a local session's ~60 s
+   start is the model load from the 9p D: drive + sha256 of 1.9 GB each run - a cached-hash or
+   named-volume model store could cut it; measure before building.
 2. **Demo recording — no date (asked 2026-09-26: still none). Ask again each session**
    (with the AskUserQuestion tool). With a date: no rebuild in the days before it; the
    interactive `./scripts/demo.sh --agent codex` rehearsal is the user's step (Git Bash, not
@@ -70,6 +82,10 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 
 ### Decided this session (do not re-raise without new evidence)
 
+- **GPU is opt-in, per run, and proven or refused** (session 10, on evidence): llama.cpp's CUDA
+  image with no usable GPU turns healthy on the CPU, so `WARDEN_MODEL_GPU=1` requires
+  `offloaded N/N layers to GPU` in the server log; never read from `.env` (it exposes the host
+  NVIDIA driver to the model server, M7); the agent never gets a device. CPU stays the default.
 - **Local-model sessions are OFFLINE** (user call, 2026-09-26, on evidence): the agent sits
   on a private internal network with its model container ONLY - no proxy, no route out -
   so code cannot leave the box structurally, not just because no cloud key was forwarded.
@@ -204,6 +220,29 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-26 — session 10 · v1.2.0 (GPU model server, measured)
+- **Did:** reality check matched HANDOFF (nothing to fix). Asked 3 blocking questions with the tool:
+  no demo date; download the official Qwen2.5-Coder-1.5B-Instruct `q8_0` (1.89 GB, sha256 = HF's)
+  to measure instead of waiting for the Colab model; CPU first, then GPU. Measured CPU through the
+  real `start_model` (RAM peak 2.29 GB → `4g` holds; a 5.9k-token prompt takes 90 s), then GPU with
+  the same hardening (VRAM 1.95/4 GB, 2 s for that prompt). Reproduced the CUDA image's silent CPU
+  fallback (healthy, `no usable GPU found`), wrote phase J first (FAILED 3 on v1.1.0), built
+  `WARDEN_MODEL_GPU=1` (pinned `server-cuda-b10991`, `--gpus` on the model only, offload proven from
+  `-lv 4` log or refused, no-GPU refused before the pull). Ran J 7/7 here, the no-GPU side under a
+  docker shim, and the silent-fallback path on the real CLI under a second shim (refused). Real
+  `aider-local` fixed a bug on GPU and CPU. Bumped 1.2.0, rebuilt `--pull` (agents unchanged),
+  real codex path (answered, honeypot → 99), suite A–J exit 0, demo COMPLETE, trivy 0, CI proved
+  the no-GPU side on Linux, tagged **v1.2.0**.
+- **Learned:** (1) a blocked task often has a public stand-in with the same shape - the base model
+  answered every resource question the trained one would have; (2) "GPU enabled" was the house bug
+  shape again (healthy while on CPU) and only running the image without a GPU showed it; (3) my
+  first shim run "passed" while the shim was not even on PATH (`C:/...` split at the colon) -
+  silence-is-not-evidence applies to test scaffolding too; (4) the Pro plan's 5-hour limit, not
+  context, was the binding budget: 66% at start, 80% after ~45 min while context was at 27%.
+- **Prompt should have said:** check `get_usage` (context % AND the 5-hour plan limit) at start
+  and between steps, and hand off on whichever runs out first; look for a public stand-in before
+  declaring a task blocked on the user. Both are in v13.
 
 ### 2026-09-26 — session 9 · v1.0.6 (audit trail) + v1.1.0 (offline local model)
 - **Did:** reality check (Docker down → started; HANDOFF Status stale → fixed first). Asked
@@ -478,6 +517,17 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v13 · 2026-09-26** — session 10. (a) **budget = context AND the plan's 5-hour limit**: START reads
+  both with the `get_usage` tool and END triggers on whichever runs out first - this session opened
+  at 66% of the 5-hour limit and hit 80% while context was at 27%, so a pure "70% context" rule
+  would have died mid-work with no handoff; (b) **blocked on the user? find a public stand-in with
+  the same shape** - the untuned base model answered every resource question the Colab model
+  would have (4g holds, VRAM fits); (c) **a drill side this host cannot run: simulate it with a
+  PATH shim, and prove the shim is live first** - the first shim run passed while inactive;
+  (d) the "how does it lie" question now covers the TOOL too (CUDA image healthy on CPU);
+  (e) quoted-output check is a script that strips ANSI; (f) default task/decisions updated (GPU
+  shipped + decided, suite A-J). Merged, not dropped: HANDOFF-fix into START b, `set -e` into the
+  edit-while-running line, the two "passes while proving nothing" items into one - 69 lines.
 - **v12 · 2026-09-26** — session 9. (a) **silence is not evidence**: the egress audit trail
   had been dead for 10 days and a control CONNECT exposed it - START now checks `status`'s
   audit-trail row and WORK requires a positive control before trusting "no X in the log";
