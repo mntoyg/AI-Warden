@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T04:08:14Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T05:38:49Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -77,6 +77,16 @@
   PASS phase I (M2): a model file that does not match its manifest sha256 was refused (78), nothing started
   PASS phase I (M2): a model manifest inside the workspace (agent-writable) was refused (78)
   PASS phase I: aider-local launches aider against http://warden-model:8080/v1, and refuses without a manifest
+
+============== PHASE J: GPU model server (opt-in) ================
+  PASS phase J: the offload verdict accepts a full GPU offload and rejects CPU fallback, partial and zero offload
+  PASS phase J: WARDEN_MODEL_GPU without a local model, or not 0/1, is refused before anything starts
+  PASS phase J: the model server runs the pinned CUDA image with a GPU and proved a full offload (offloaded 6/6)
+  PASS phase J (M7): the GPU is handed to the model server only - the agent container has no device request
+  PASS phase J (M6): the GPU model server keeps 65534, read-only, no capabilities, no-new-privileges
+  PASS phase J (M1): a GPU session is still offline for agent and model, and the agent got an answer (200)
+  PASS phase J (M5): the GPU session (exit 0) left no model container or network behind
+    SKIP phase J: the no-GPU refusal (this host has a GPU; CI runs that side)
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
@@ -328,6 +338,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |
 | รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
 | codex ใช้ได้จริงใน sandbox (G) | `OPENAI_API_KEY=<fake> warden-cli.sh run <dir> codex -- login status` | `Logged in using an API key` + บรรทัด launching มี `sandbox_mode="danger-full-access"` |
+| โหมด GPU ไม่ตกไป CPU เงียบ ๆ (J) | `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<m> warden-cli.sh run <dir> aider-local` | มี GPU: `local model ready: ... on GPU (offloaded N/N layers)`; ไม่มี GPU หรือ offload ไม่ครบ: ปฏิเสธ ไม่มีอะไรค้าง |
 
 ---
 

@@ -1,5 +1,13 @@
 # Design — local self-trained model for aider (implemented v1.1.0, 2026-09-26)
 
+> **สถานะ 2026-09-26 (session 10): GPU (M7) เปิดแล้วใน v1.2.0** — `WARDEN_MODEL_GPU=1` ใช้
+> `server-cuda-b10991` (`sha256:d4bdfe78…`) + `--gpus all` เฉพาะ model container; ต้องเห็น
+> `offloaded N/N layers to GPU` ใน log (`-lv 4`) ไม่งั้นปฏิเสธ เพราะ image CUDA ที่ไม่เห็น GPU ขึ้น healthy
+> แล้วรัน CPU เงียบ ๆ (phase J) วัดด้วย Qwen2.5-Coder-1.5B-Instruct `q8_0` ทางการ (untuned, 1.89 GB) ที่ ctx
+> 8192: CPU gen 11–14 tok/s, prompt 41–83 tok/s, RAM สูงสุด 2.29 GB → **`WARDEN_MODEL_MEMORY=4g` พอ**
+> (ตอบคำถามใน HANDOFF ที่ให้วัด); GPU gen 54–71 tok/s, prompt 3060 tok/s, VRAM 1.95/4 GB → 1.5B q8_0 +
+> 8k ctx **พอดี RTX 3050 4 GB** (ประมาณการใน §3 ถูก) ยังเหลือ: โมเดลที่เทรนจริงจาก Colab
+
 > **สถานะ 2026-09-26 (session 9): ฝั่ง AI Warden สร้างแล้ว** — `WARDEN_MODEL_MANIFEST=... warden-cli.sh
 > run <ws> aider-local`, entrypoint `WARDEN_EGRESS=none`, drills = phase I (12 ข้อ, โมเดลสาธารณะ
 > `stories260K.gguf`) ต่างจากแบบข้างล่าง: (1) **offline ล้วน** — agent ไม่อยู่บน `warden_internal`;
@@ -94,7 +102,7 @@ wildcard เหล่านี้ใน `whitelist_domains.txt` ก่อน
 | M4 | agent ใช้ endpoint ของ server อ่านไฟล์/เปลี่ยนค่า/สลับโมเดล | flag ใน §3 + model mount `:ro` | จาก agent: `POST /props`, `GET /slots`, `GET /` (Web UI) ต้องถูกปฏิเสธหรือ 404 |
 | M5 | model container ค้างหลังจบ session (โดยเฉพาะหลัง breach 99) | ลบใน trap เหมือน sentinel | หลัง exit 0 และ 99 ต้องไม่เหลือ container `warden-model` |
 | M6 | llama-server ได้สิทธิ์เกินจำเป็น | flag hardening + non-root | `CapEff=0`, `NoNewPrivs=1`, rootfs read-only, uid ≠ 0 |
-| M7 | GPU passthrough เพิ่มพื้นที่โจมตีถึง driver ของโฮสต์ | ยอมรับและเขียนไว้; มีโหมด CPU | — (บันทึกใน THREAT_MODEL) |
+| M7 | GPU passthrough เพิ่มพื้นที่โจมตีถึง driver ของโฮสต์ | ยอมรับและเขียนไว้; opt-in ต่อครั้ง, GPU เฉพาะ model; CPU เป็นค่าเริ่มต้น | phase J (v1.2.0): offload ครบหรือปฏิเสธ, agent ไม่มี device |
 
 ข้อสังเกต: traffic ระหว่าง agent กับ model **ไม่ผ่าน squid** จึงไม่อยู่ใน access log —
 log ของ llama-server คือบันทึกเดียวของเส้นทางนี้ และ canary ยังทำงานเหมือนเดิม

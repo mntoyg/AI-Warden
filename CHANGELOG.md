@@ -4,6 +4,35 @@
 
 ---
 
+## [1.2.0] — 2026-09-26
+
+**ฟีเจอร์: รันโมเดลในเครื่องบน GPU แบบพิสูจน์ได้ — offload ครบ หรือปฏิเสธ**
+
+### Added
+
+- `WARDEN_MODEL_GPU=1` (สั่งต่อครั้งเท่านั้น ไม่อ่านจาก `.env`) — model server ของ session
+  `aider-local` ใช้ `llama.cpp:server-cuda` build เดียวกับตัว CPU (b10991, pin digest) และได้
+  `--gpus all` **เฉพาะ model container** agent ไม่ได้ device ใด ๆ
+- หลัง health check CLI อ่าน log การโหลดของ server เองและต้องเห็น `offloaded N/N layers to GPU`
+  ไม่งั้นหยุด model แล้วปฏิเสธ: image CUDA ที่มองไม่เห็น GPU จะพิมพ์ `no usable GPU found,
+  --gpu-layers option will be ignored` แล้วขึ้น healthy และรันบน CPU เงียบ ๆ (ทดลองแล้ว) —
+  เป็น "โหมด GPU" ที่ไม่ใช่ GPU แบบที่โปรเจกต์นี้ตามล่ามาตลอด
+- เครื่องที่ Docker ส่ง `--gpus` ไม่ได้ → ปฏิเสธ **ก่อน** pull image CUDA หลาย GB;
+  `WARDEN_MODEL_GPU` ที่ไม่ใช่ 0/1 หรือใช้โดยไม่มี `WARDEN_MODEL_MANIFEST` → ปฏิเสธ
+
+### Tests
+
+- phase **J** ใหม่: ตัวตัดสินกับบรรทัด log จริงของ b10991 (offload ครบ / CPU fallback / บางส่วน /
+  ศูนย์), config guard, และแยกตามเครื่อง — มี GPU: session จริงผ่าน CLI (image CUDA pin, offload ครบ,
+  agent ไม่มี device request, offline, hardening เดิม, ไม่เหลืออะไรค้าง); ไม่มี GPU (CI): ต้องปฏิเสธ
+  โดยไม่สร้างอะไร อีกฝั่งพิมพ์ SKIP ไม่ใช่ PASS — **FAIL 3 ข้อกับโค้ด v1.1.0** (CLI เก่าเมิน
+  `WARDEN_MODEL_GPU` แล้วรัน CPU พร้อมบอกว่า `local model ready`)
+- ฝั่งไม่มี GPU ถูกรันบนเครื่องพัฒนาด้วย docker shim ที่ทำให้ `--gpus` ล้ม และ shim ที่ตัด `--gpus`
+  ทิ้งเงียบ ๆ ก็พิสูจน์ guard บน CLI จริง: ปฏิเสธ rc=1 ไม่มีอะไรค้าง
+- วัดจริงด้วย Qwen2.5-Coder-1.5B-Instruct `q8_0` ที่ ctx 8192 (ตารางใน README): CPU gen 11–14 tok/s,
+  RAM สูงสุด 2.29 GB (เพดาน `4g` พอ); GPU (RTX 3050 4 GB) gen 54–71 tok/s, prompt 3060 tok/s,
+  VRAM 1.95 GB; aider แก้บั๊กได้ทั้งสองโหมด
+
 ## [1.1.0] — 2026-09-26
 
 **ฟีเจอร์: ใช้โมเดลของตัวเองในเครื่อง แบบ offline ล้วน**

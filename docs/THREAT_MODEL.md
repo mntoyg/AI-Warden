@@ -203,7 +203,13 @@ key ไม่เคยอยู่บน argv (ที่ `ps` และ monitor 
 | M4 | ใช้ endpoint ของ server อ่าน/เปลี่ยนค่า | `--no-webui --no-slots` ไม่มี `--tools` / `--props` / MCP; flag ถูก pin ใน CLI | `GET /` 404, `/slots` 501, `POST /props` 501 |
 | M5 | model container ค้าง | ลบใน trap ทุกทางออก | หลัง exit 0 และ 99 |
 | M6 | server มีสิทธิ์เกิน | uid 65534, read-only, cap-drop ALL, no-new-privileges, image pin digest | `docker inspect` + `/proc/1/status` |
-| M7 | GPU passthrough | ยังไม่รองรับ (CPU เท่านั้น) — ต้องพิสูจน์ก่อนเปิด | — |
+| M7 | GPU passthrough: driver ของโฮสต์ถูกเปิดให้ model server และ "โหมด GPU" ที่จริงรันบน CPU | opt-in ต่อครั้ง (`WARDEN_MODEL_GPU=1` ไม่อ่านจาก `.env`) ให้ GPU เฉพาะ model server ไม่ให้ agent; image CUDA build เดียวกัน pin digest; ไม่มี GPU = ปฏิเสธก่อน pull; หลังโหลดต้องเห็น `offloaded N/N layers to GPU` ใน log ของ server ไม่งั้นหยุดและปฏิเสธ | phase **J**: verdict กับ log จริง, agent ไม่มี device request, M1/M5/M6 ซ้ำในโหมด GPU, host ไม่มี GPU ถูกปฏิเสธ (CI) |
+
+**ทำไม M7 ต้องพิสูจน์ด้วย log:** image CUDA ของ llama.cpp ที่มองไม่เห็น GPU จะพิมพ์ `no usable GPU found,
+--gpu-layers option will be ignored` แล้วขึ้น healthy และรันบน CPU ต่อเงียบ ๆ (ลองแล้วบน build b10991)
+ถ้าเชื่อแค่ health check จะได้ session ที่บอกว่าใช้ GPU แต่ไม่ได้ใช้ ส่วนความเสี่ยงที่ **ยอมรับ**: โหมด GPU
+เปิด device และ driver ของ NVIDIA ให้ model server — ถ้า agent เจาะ llama-server ได้ (ผ่าน HTTP เท่านั้น)
+แล้วต่อด้วยช่องโหว่ของ driver ก็อาจถึง kernel ของโฮสต์ จึงเป็น opt-in และใช้ CPU เป็นค่าเริ่มต้น
 
 traffic ระหว่าง agent กับ model ไม่ผ่าน squid จึงไม่อยู่ใน audit trail ของ egress — log ของ
 llama-server คือบันทึกเดียวของเส้นทางนี้ และ canary / sentinel ยังทำงานเหมือนเดิม

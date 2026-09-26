@@ -270,12 +270,27 @@ session นั้น ไม่มี proxy ไม่มี route ออก โ�
   (ถ้าอยู่ข้างใน agent แก้ได้ทั้งโมเดลและ hash) ไม่ผ่านข้อไหน = exit 78 ไม่มีอะไรถูกสร้าง
 - model server รันเป็น uid 65534, rootfs read-only, ไม่มี capability, ปิด web UI และ `/slots`,
   image ถูก pin ด้วย digest; จบ session (0 / 78 / 99) แล้วถูกลบพร้อม network
-- ใช้ CPU (GPU ยังไม่ได้ทดสอบ) ปรับได้ด้วย `WARDEN_MODEL_CTX` (ค่าเริ่มต้น 8192) และ
-  `WARDEN_MODEL_MEMORY` (ค่าเริ่มต้น `4g`)
+- ค่าเริ่มต้นใช้ CPU ปรับได้ด้วย `WARDEN_MODEL_CTX` (ค่าเริ่มต้น 8192) และ `WARDEN_MODEL_MEMORY`
+  (ค่าเริ่มต้น `4g`) ใส่ `WARDEN_MODEL_GPU=1` เพื่อรันโมเดลบน GPU (NVIDIA + Docker ที่ส่ง `--gpus` ได้):
+  GPU ถูกส่งให้ model server เท่านั้น ไม่ให้ agent และ CLI จะเช็คจาก log ของ server ว่า offload
+  **ครบทุก layer** — ไม่มี GPU หรือ offload ไม่ครบ = ปฏิเสธ ไม่ตกไป CPU เงียบ ๆ (THREAT_MODEL §3.7 M7)
 - pip / npm / git ใน session นี้ออกเน็ตไม่ได้ (ตั้งใจ) และ aider จะพิมพ์ error ว่าโหลด
   `model_prices_and_context_window.json` จาก GitHub ไม่ได้ตอนเริ่ม — ไม่มีผลกับการทำงาน
 - `WARDEN_MODEL_MANIFEST` ไม่อ่านจาก `.env` โดยตั้งใจ: มันเปลี่ยนว่า session เป็นแบบไหน
-  จึงต้องสั่งเองทุกครั้ง ตรวจทั้งหมดนี้โดย phase I ด้วยโมเดลสาธารณะขนาด 1.2 MB
+  จึงต้องสั่งเองทุกครั้ง (`WARDEN_MODEL_GPU` ก็เช่นกัน) ตรวจทั้งหมดนี้โดย phase I และ J ด้วยโมเดล
+  สาธารณะขนาด 1.2 MB
+
+วัดจริงบนเครื่องพัฒนา (Docker Desktop, RTX 3050 Laptop 4 GB) ด้วย Qwen2.5-Coder-1.5B-Instruct `q8_0`
+(1.89 GB) ที่ `WARDEN_MODEL_CTX=8192`:
+
+| | CPU (ค่าเริ่มต้น) | GPU (`WARDEN_MODEL_GPU=1`) |
+|---|---|---|
+| โหลดโมเดลจนพร้อมตอบ | 35–65 s | ~33 s |
+| prompt processing | 41–83 tok/s | 3060 tok/s |
+| generation | 11–14 tok/s | 54–71 tok/s |
+| prompt 5.9k tokens | 90 s | 2 s |
+| memory | RAM สูงสุด 2.29 GB (ในเพดาน `4g`) | VRAM 1.95 / 4 GB, RAM 2.26 GB |
+| aider แก้บั๊กในไฟล์เดียว (669 tokens) | 11 s | 6 s |
 
 ---
 
@@ -457,7 +472,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 9 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 10 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -470,6 +485,7 @@ agent container is GONE - killed by the sentinel
 | **G** | agent launch — `codex` ต้อง login จาก `OPENAI_API_KEY` ได้ (ทดสอบด้วย key ปลอม) และเปิดโดยปิด sandbox ของ codex ที่ใช้ไม่ได้ใน container | `Logged in using an API key` + `sandbox_mode="danger-full-access"` |
 | **H** | egress audit trail — ทำไฟล์ log ของ proxy เสียด้วย NUL (แบบที่เกิดจาก Docker ปิดไม่สะอาด) จน `docker logs` เงียบ | มี sandbox ใช้อยู่ → `up` **ปฏิเสธ**, ไม่มี → `up` สร้าง proxy ใหม่และ trail กลับมามีชีวิต |
 | **I** | local-model session (`WARDEN_MODEL_MANIFEST`) กับโมเดลสาธารณะจิ๋ว: offline จริงทั้ง agent และ model, ไม่มี cloud key, endpoint อันตรายปิด, model server ไม่มีสิทธิ์, ไฟล์โมเดลถูกแก้ / manifest อยู่ใน workspace → ปฏิเสธ, ไม่เหลืออะไรค้างทั้งหลัง exit 0 และ 99 | ผ่านทุกข้อ, ปฏิเสธด้วย **exit 78** |
+| **J** | GPU model server (`WARDEN_MODEL_GPU=1`): ตัวตัดสินจาก log ต้องรับ offload ครบและปฏิเสธ CPU fallback / offload บางส่วน, GPU ไปที่ model server เท่านั้นไม่ใช่ agent, ยัง offline และไม่มีสิทธิ์เหมือน phase I — เครื่องที่มี GPU รันฝั่ง session จริง, เครื่องที่ไม่มี (CI) รันฝั่งปฏิเสธ แล้วพิมพ์ SKIP ให้อีกฝั่ง | offload ครบ หรือ **ปฏิเสธ** ไม่ตกไป CPU เงียบ ๆ |
 
 อยากลองด้วยมือก็ได้:
 
@@ -542,7 +558,7 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 9 เฟส (A-I)
+│   ├── verify-isolation.sh      # ชุดทดสอบ 10 เฟส (A-J)
 │   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/
