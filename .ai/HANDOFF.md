@@ -4,7 +4,7 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-24 (session 8)
+- **Last updated:** 2026-09-26 (session 9)
 - **Latest release:** [v1.0.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.5) — codex launcher fix (login from env, codex's own sandbox off), marked Latest; v1.0.0–v1.0.4 all carry a superseded warning
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v11)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
@@ -15,13 +15,13 @@
 
 ---
 
-## 1. Status (verified 2026-09-16, session 7)
+## 1. Status (verified 2026-09-26, session 9)
 
 | Thing | State |
 |---|---|
-| `main` | tag **`v1.0.5`** (`c286036`) + this handoff commit, tree clean, in sync with origin |
+| `main` | tag **`v1.0.5`** (`c286036`) + docs-only commits (handoff, NEXT_PROMPT v11 `286c9e1`, this handoff), tree clean, in sync with origin |
 | Tags | `v1.0.0`…`v1.0.4` all carry a "superseded" warning · **`v1.0.5` (Latest)** |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `c286036`** (run 35941351254) and on tag **`v1.0.5`** (run 35941945145). The weekly cron (`0 6 * * 1`) also ran green on 2026-09-21 (run 35599162562). |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `286c9e1`** (run 36213895961), on `c286036` (run 35941351254) and on tag **`v1.0.5`** (run 35941945145). The weekly cron (`0 6 * * 1`) also ran green on 2026-09-21 (run 35599162562). |
 | Local suite (Docker Desktop / Windows) | on the **v1.0.5** image (rebuilt `--pull` 2026-09-24): A · B exit 99 · C exit 78 · D exit 99 + single clean report + `"attribution": "restricted"` · E1–E5 · F · G · `enforced=4/7` · exit 0 |
 | CI suite (ext4) | all phases A–G · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
 | CVEs | trivy on the v1.0.5 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
@@ -35,29 +35,20 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Demo recording — no date. Ask the user for one before preparing anything.** The
-   2026-09-21 slot was skipped, so nothing is frozen. When a date exists: (a) do NOT
-   rebuild inside the last days before it; (b) the interactive
-   `./scripts/demo.sh --agent codex` rehearsal has still never been run by a human —
-   the codex TUI cannot be driven or captured headlessly, so it is the user's step
-   (from Git Bash, not `bash` in PowerShell — see Gotchas); (c) `demo.sh --auto
-   --agent codex` must end DEMO COMPLETE on whatever image exists that day.
-2. **Fine-tuning: DECISION PENDING from the user.** They want to train via the OpenAI
-   fine-tuning API with their credit (instead of the Colab LoRA plan). Found and
-   quoted from the official guide
-   (developers.openai.com/api/docs/guides/supervised-fine-tuning): "OpenAI is winding
-   down the fine-tuning platform. The platform is no longer accessible to new users",
-   existing users can still create jobs "for the coming months"; SFT models are
-   gpt-4.1 / -mini / -nano (2025-04-14), minimum 10 examples. With their key:
-   `GET /v1/fine_tuning/jobs` -> 200 with **0 jobs** (never used it, so probably a
-   "new user"; listing does not prove creation is allowed). Options put to the user:
-   (a) a near-zero-cost probe - create a job from a <10-example file, which fails
-   validation before training, to see whether creation is permitted (needs their
-   explicit OK: it is a job on their account); (b) fall back to the Colab LoRA ->
-   local model plan (built, smoke-tested; design in
-   [`.ai/design-local-model.md`](design-local-model.md), post-demo, drills M1-M7);
-   (c) no fine-tuning - use OpenAI models as they are with project instructions.
-   Do nothing on fine-tuning until they pick.
+1. **Local self-trained model for aider — DECIDED (b), in progress (session 9).** User
+   call 2026-09-26: Colab LoRA -> GGUF -> `warden-model` container on this box -> aider
+   (not the OpenAI fine-tuning API, not "no fine-tuning"). Design + drills M1-M7 in
+   [`.ai/design-local-model.md`](design-local-model.md) §5. Training itself is the
+   user's step (Colab T4); the AI Warden side is built and drilled against the lab's
+   smoke GGUF (SmolLM2-135M, 145 MB, sha256 in its manifest). Feature -> **v1.1.0**.
+   The existing phases A-G and `demo.sh --auto --agent codex` must stay green throughout.
+2. **Demo recording — no date (asked 2026-09-26: still none). Ask again each session.**
+   Nothing is frozen until a date exists. Then: (a) do NOT rebuild inside the last days
+   before it; (b) the interactive `./scripts/demo.sh --agent codex` rehearsal has still
+   never been run by a human — the codex TUI cannot be driven or captured headlessly,
+   so it is the user's step (from Git Bash, not `bash` in PowerShell — see Gotchas);
+   (c) `demo.sh --auto --agent codex` must end DEMO COMPLETE on whatever image exists
+   that day.
 3. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
    plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
    sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
@@ -95,6 +86,9 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 
 ### Decided this session (do not re-raise without new evidence)
 
+- **Fine-tuning path = (b) Colab LoRA -> local GGUF** (user call, 2026-09-26). Not the
+  OpenAI fine-tuning API (closed to new users per its own docs, account had 0 jobs) and
+  not "no fine-tuning". Do not re-offer the OpenAI probe.
 - **Demo act 4 = codex with the user's OpenAI key** (user call, 2026-09-16), not claude.
 - **codex runs with its own sandbox OFF inside AI Warden** (session 7, evidence-based):
   its bubblewrap sandbox cannot work under cap-drop=ALL and made every command fail

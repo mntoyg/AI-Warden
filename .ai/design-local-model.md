@@ -8,6 +8,10 @@
 > แทน Colab แต่เอกสารทางการของ OpenAI ระบุว่า platform นี้ "no longer accessible to new users"
 > และบัญชีนี้มี 0 fine-tuning job — **รอผู้ใช้ตัดสินใจ** (ดู HANDOFF Next steps #2) แบบใน
 > เอกสารนี้ยังเป็นทางเลือกสำรองที่สร้างและ smoke-test ฝั่ง notebook ไว้แล้ว
+>
+> **ตัดสินใจแล้ว 2026-09-26 (session 9):** ผู้ใช้เลือก **(b) Colab LoRA → GGUF ในเครื่อง** ตามเอกสารนี้
+> เดโมเลื่อนแบบไม่มีวัน จึงไม่มี freeze — เริ่มฝั่ง AI Warden ได้ตาม §5 โดย phase A–G และ
+> `demo.sh --auto --agent codex` ต้องเขียวตลอด (ดู HANDOFF Next steps #1)
 
 ## 1. การตัดสินใจ (user call 2026-09-16)
 
