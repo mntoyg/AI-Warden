@@ -5,8 +5,8 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-26 (session 9)
-- **Latest release:** [v1.0.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.5) — codex launcher fix (login from env, codex's own sandbox off), marked Latest; v1.0.0–v1.0.4 all carry a superseded warning
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v11)
+- **Latest release:** [v1.1.0](https://github.com/mntoyg/AI-Warden/releases/tag/v1.1.0) — offline local-model sessions (`aider-local`), on top of [v1.0.6](https://github.com/mntoyg/AI-Warden/releases/tag/v1.0.6) (egress audit trail proven alive); v1.0.0–v1.0.5 carry a superseded warning
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v12)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -19,14 +19,15 @@
 
 | Thing | State |
 |---|---|
-| `main` | tag **`v1.0.5`** (`c286036`) + docs-only commits (handoff, NEXT_PROMPT v11 `286c9e1`, this handoff), tree clean, in sync with origin |
-| Tags | `v1.0.0`…`v1.0.4` all carry a "superseded" warning · **`v1.0.5` (Latest)** |
-| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — **green on `main` `286c9e1`** (run 36213895961), on `c286036` (run 35941351254) and on tag **`v1.0.5`** (run 35941945145). The weekly cron (`0 6 * * 1`) also ran green on 2026-09-21 (run 35599162562). |
-| Local suite (Docker Desktop / Windows) | on the **v1.0.5** image (rebuilt `--pull` 2026-09-24): A · B exit 99 · C exit 78 · D exit 99 + single clean report + `"attribution": "restricted"` · E1–E5 · F · G · `enforced=4/7` · exit 0 |
-| CI suite (ext4) | all phases A–G · `enforced=7/7` · compose handshake OK · 0 leaked volumes (F passthrough skips on CI: no non-default runtime) |
-| CVEs | trivy on the v1.0.5 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
-| Security review (2026-09-15) | Egress boundary (squid.conf) strong: default-deny, IP-literal/RFC1918/loopback/link-local/cloud-metadata blocked, cache off, body cap, header/query hygiene. proxy-entrypoint fail-closed. **No new critical finding.** Only known bypass = SNI domain fronting (§4.2, accepted). |
-| Demo readiness | **Recording POSTPONED** (user, 2026-09-24; 2026-09-21 did not happen), no new date. Automation is green on the current image: `demo.sh --auto --agent codex` → READY + DEMO COMPLETE, exit 0; act 4 agent = codex, `OPENAI_API_KEY` in `.env`. Image now carries **codex-cli 0.156.1**, claude 2.1.197, aider 0.86.2, node v20.20.2. Still never done: one INTERACTIVE `./scripts/demo.sh --agent codex` rehearsal (a human has to drive the codex TUI). |
+| `main` | tag **`v1.1.0`** (`4477b7a`) + this handoff commit, tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · **`v1.1.0` (Latest, feature)** |
+| CI | 3 jobs — static · image CVE scan · isolation drills on ext4 — green on `main` `4477b7a` (run 36217381743, phase I 12/12 on Linux) and on tag `v1.0.6` (run 36215663544); tag **`v1.1.0`** (run 36217920986) |
+| Local suite (Docker Desktop / Windows) | on the **v1.1.0** image (rebuilt `--pull` 2026-09-26): A–I all PASS, exit 0, `enforced=4/7` (H = dead audit trail healed/refused, I = 12 local-model checks) |
+| CI suite (ext4) | all phases A–I · `enforced=7/7` · compose handshake OK |
+| CVEs | trivy on the v1.1.0 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated — `SECURITY.md`) |
+| Egress audit trail | `warden-cli.sh status` → `audit trail live`. It had been DEAD on this box 2026-09-16 → 2026-09-26 (NUL-damaged json log); `up` now heals it (v1.0.6) |
+| Local model | `WARDEN_MODEL_MANIFEST=<manifest> warden-cli.sh run <ws> aider-local` works offline on this box with the lab's smoke GGUF (SmolLM2-135M): sha256 verified, `egress: none`, aider answered, nothing left. CPU only. No real (trained) model exists yet |
+| Demo readiness | Recording POSTPONED, no date (asked 2026-09-26). `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.1.0 (28 PASS, 0 FAIL); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
 
 ---
 
@@ -35,54 +36,37 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **Local self-trained model for aider — DECIDED (b), in progress (session 9).** User
-   call 2026-09-26: Colab LoRA -> GGUF -> `warden-model` container on this box -> aider
-   (not the OpenAI fine-tuning API, not "no fine-tuning"). Design + drills M1-M7 in
-   [`.ai/design-local-model.md`](design-local-model.md) §5. Training itself is the
-   user's step (Colab T4); the AI Warden side is built and drilled against the lab's
-   smoke GGUF (SmolLM2-135M, 145 MB, sha256 in its manifest). Feature -> **v1.1.0**.
-   The existing phases A-G and `demo.sh --auto --agent codex` must stay green throughout.
-2. **Demo recording — no date (asked 2026-09-26: still none). Ask again each session.**
-   Nothing is frozen until a date exists. Then: (a) do NOT rebuild inside the last days
-   before it; (b) the interactive `./scripts/demo.sh --agent codex` rehearsal has still
-   never been run by a human — the codex TUI cannot be driven or captured headlessly,
-   so it is the user's step (from Git Bash, not `bash` in PowerShell — see Gotchas);
-   (c) `demo.sh --auto --agent codex` must end DEMO COMPLETE on whatever image exists
-   that day.
-3. **gVisor: verify the happy-path on a real gVisor host, then tag v1.1.0.** The
-   plumbing shipped (session 5): `WARDEN_RUNTIME` is passed to the agent and the
-   sentinel by `warden-cli.sh` and compose, `assert_runtime` fails closed on an
-   unavailable runtime (never downgrades to runc), and phase F proves fail-closed +
-   that a valid runtime is actually applied e2e (using `nvidia` as a stand-in on the
-   dev box). What is NOT yet verified: gVisor itself. On a host with `runsc`
-   installed, run `WARDEN_RUNTIME=runsc ./scripts/verify-isolation.sh` — phase F's
-   passthrough check will pick runsc automatically — and specifically confirm the
-   **sentinel** works, because gVisor + a shared PID namespace (`--pid container:`)
-   is a known gVisor limitation and is untested (THREAT_MODEL §4.1). Only once that
-   is green should "gVisor support" be claimed in a release (v1.1.0 - it is a feature,
-   not a fix).
+1. **Local model: the user trains a real one; then measure it here.** The AI Warden side
+   is DONE (v1.1.0, phase I). Left: (a) the user runs the lab notebook on Colab T4 with
+   their own data (default Qwen2.5-Coder-1.5B-Instruct, q8_0 ≈ 1.6 GB) and puts the GGUF +
+   manifest OUTSIDE any workspace; (b) then run `aider-local` on it here and MEASURE: load
+   time, tokens/s on CPU, RAM at `WARDEN_MODEL_CTX=8192` (`WARDEN_MODEL_MEMORY=4g` may be too
+   small for 1.5B + 8k ctx - measure, don't guess); (c) GPU (design M7) is NOT enabled: to add
+   it, pin `:server-cuda` by digest, run with `--gpus all` on the RTX 3050 4 GB, prove VRAM
+   fits and that phase I still passes, only then ship (v1.2.0). (d) (low) aider prints a
+   scary `model_prices_and_context_window.json` ProxyError at startup offline; harmless,
+   documented - could be silenced by pre-seeding aider's cache in the image.
+2. **Demo recording — no date (asked 2026-09-26: still none). Ask again each session**
+   (with the AskUserQuestion tool). With a date: no rebuild in the days before it; the
+   interactive `./scripts/demo.sh --agent codex` rehearsal is the user's step (Git Bash, not
+   `bash` in PowerShell); `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
+   Note for the take: sometimes the sentinel kills first and the inline monitor's
+   `SIGKILL delivered` / `SIGUSR1 sent` lines never print (seen in the v1.1.0 run) - normal.
+3. **gVisor: verify the happy-path on a real gVisor host, then tag (now v1.2.0+).** Plumbing
+   shipped in session 5 (`WARDEN_RUNTIME`, fail-closed, phase F). Local-model sessions apply
+   the same runtime to the model server - also unverified under runsc. On a host with
+   `runsc`: `WARDEN_RUNTIME=runsc ./scripts/verify-isolation.sh`, and specifically confirm
+   the **sentinel** (gVisor + `--pid container:` is a known limitation, THREAT_MODEL §4.1).
 4. **(low, idea) Surface the inline monitor's richer record without new privileges.**
-   v1.0.4 makes the sentinel's report honest (`restricted`), but the full view
-   (open-descriptor proof, exe) still only reaches the terminal log. The entrypoint's
-   USR1 trap could print `/run/warden/breach.flag` the way the normal-exit path
-   already does - BUT that file is written by uid 1001 into a tmpfs the agent owns,
-   so the agent can replace it: anything printed from it must be labelled as
-   agent-forgeable, never as "the record". Decide the labelling before coding; do
-   not merge it into the sentinel's report.
-5. **(low) Cover the udisks two-level drive root `/media/<user>/<label>` in the mount
-   guard.** v1.0.2 refuses one level under `/media`/`/run/media`/`/cygdrive`, but the
-   udisks layout puts the drive root two levels down (`/media/john/USB`), which is
-   structurally indistinguishable from a project nested inside a drive
-   (`/media/usb/app`, which must stay allowed). Needs a heuristic (e.g. is it itself a
-   mountpoint?) not just a path pattern — decide before coding. Low risk: nobody keeps
-   source at `/media/<user>/<label>` by hand, and $HOME/.ssh guards still apply.
-6. **(cosmetic, low) Two glitch-looking lines on video after a breach:**
-   `SIGUSR1 received from the canary tripwire` prints twice (both monitors signal
-   PID 1 on purpose; the entrypoint's USR1 trap runs twice), and bash prints
-   `warden-entrypoint: line 454: <pid> Killed "$@"`. Both are documented/expected
-   (`docs/DEMO.md` act 3). If fixed: make the trap idempotent with a shell variable
-   and keep both signals; it is an entrypoint change, so rebuild + drills + tag -
-   not worth it in the last days before a recording.
+   The entrypoint's USR1 trap could print `/run/warden/breach.flag`, but that file is
+   agent-writable (uid 1001 tmpfs): label it agent-forgeable, never "the record". Decide the
+   labelling before coding; do not merge it into the sentinel's report.
+5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
+   heuristic (is it a mountpoint?), not a path pattern — decide before coding.
+6. **(cosmetic, low) Duplicate `SIGUSR1 received` line and bash's `line 454: Killed`** after a
+   breach. Idempotent trap via a shell variable; entrypoint change = rebuild + drills + tag.
+7. **(low) `--no-breach` does not skip phase I's breach check (M5, exit 99).** Harmless; wire
+   `RUN_BREACH` into it if someone relies on `--no-breach`.
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -134,7 +118,7 @@ behaviour:
 
 ```bash
 ./scripts/warden-cli.sh build          # if an image-affecting file changed (agent build ~5-10 min)
-./scripts/verify-isolation.sh          # phases A-E must all pass
+./scripts/verify-isolation.sh          # phases A-I must all pass (exit 0)
 ```
 
 Before a release, additionally: shellcheck + hadolint + gitleaks + trivy (all run
@@ -196,6 +180,10 @@ would I know if this silently did nothing?" — then run that.
 | `codex login status` prints part of the key (`sk-proj-***XXXXX`) | A redaction regex for `sk-[A-Za-z0-9_-]+` does not match `sk-proj-***` - include `*` in the class, or better, never run `login status` with a real key in a logged session. |
 | A "secret present" check that only looks at exported env | Keys belong in `.env` (passed with `--env-file`), so an export-only check lies. Test presence in env OR `.env`, never read the value (`demo.sh` `key_available`). |
 | NodeSource's setup script exits 0 when it fails | CI (run 35077858862, image CVE job): `curl: (35) Connection reset` on the signing key -> `Error: Failed to download and import the NodeSource signing key (Exit Code: 0)` -> `apt-get install nodejs` silently took Debian's node 18 (no npm), caught only by `npm --version`. `core/Dockerfile` §2 now retries until `apt-cache policy nodejs` shows `Candidate: 20.`, refuses the fallback and checks `node --version`. A red image job that says `npm: not found` is this; `gh run rerun <id> --failed`. |
+| A check that passes because nothing happened | Phase I's "no model container left behind" passed on the OLD code, which never started one. Every absence assertion must also prove the thing existed (model seen during the run, `local model ready` in the output). |
+| Git Bash's `curl` is a native Windows program | With `MSYS_NO_PATHCONV=1` exported it cannot write to `/d/...` (`-o` fails silently with `-f`). Run it as `env -u MSYS_NO_PATHCONV -u MSYS2_ARG_CONV_EXCL curl ...`. MSYS tools (sha256sum, dd, sed) are fine. |
+| aider exits 0 on a model error | A `BadRequestError` / token-limit failure still returns rc 0 (same shape as codex in v9). Assert on `Tokens: N sent, M received`. The tiny CI model (stories260K) rambles to the context limit, so CI checks agent→model with a bounded `curl /v1/chat/completions` instead of aider. |
+| Retaking a quoted transcript from a new run | The v1.1.0 demo run had no inline `SIGKILL`/`SIGUSR1` lines (the sentinel won the race), so the README's act-3 quote stayed on the v1.0.6 run (labelled). Check every quoted line against the new run's log before swapping. |
 | `docker logs warden-egress-proxy` silently dead after an unclean Docker shutdown | NUL bytes land in the json log; `docker logs` stops there while squid keeps writing and health stays `healthy`. Found 2026-09-26 (10 days of egress missing) only because a control CONNECT did not show up. `docker restart` keeps the file; recreate the container. Since v1.0.6 `up` proves liveness with a nonce and heals/refuses (phase H). **Any "the log shows no X" claim needs a positive control first** (make X happen once, see it logged). |
 | CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
 
@@ -212,6 +200,29 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-09-26 — session 9 · v1.0.6 (audit trail) + v1.1.0 (offline local model)
+- **Did:** reality check (Docker down → started; HANDOFF Status stale → fixed first). Asked
+  both blocking questions with the question tool: no demo date; fine-tuning = (b) Colab LoRA
+  → local. Proved the local-model assumptions by experiment (two `--network`s, llama-server
+  as 65534 read-only no caps, endpoint behaviour, aider ↔ server) - and a control CONNECT to
+  api.openai.com never showed in the proxy log: `docker logs` had been dead for 10 days (519
+  NUL bytes from an unclean shutdown; `restart` keeps the file). Reproduced it, wrote phase H
+  (FAILED on v1.0.5), made `up` prove liveness with a nonce and heal/refuse; shipped
+  **v1.0.6** (rebuild, real codex path, A–H, demo COMPLETE, trivy 0, CI on tag, v1.0.5 marked
+  superseded). Asked the user offline-vs-two-networks with the evidence → offline. Wrote phase
+  I first (FAILED 5 on v1.0.6), built `WARDEN_EGRESS=none` + `aider-local`, added the
+  manifest-outside-workspace guard from the "how does the agent make it lie" question, ran A–I
+  green, real `aider-local` with the lab GGUF, real codex, demo COMPLETE, trivy 0, CI 12/12 on
+  Linux, tagged **v1.1.0**.
+- **Learned:** (1) silence is not evidence - the audit trail was the recurring bug shape in
+  its purest form, and only a positive control exposed it; (2) a leftover check can pass
+  vacuously - phase I's M5 did on the old code until it required proof the model existed;
+  (3) running a single phase from a scratch harness made fail-first cheap (4 runs, seconds
+  to minutes each, instead of 6-minute suites); (4) aider, like codex, exits 0 on failure.
+- **Prompt should have said:** ask blocking questions with the tool so the answers arrive
+  before work starts; "the log shows nothing" needs a positive control; absence checks must
+  prove existence. All three are in v12.
 
 ### 2026-09-24 — session 8 · v1.0.5 released after the demo slipped
 - **Did:** reality check first: repo untouched since 2026-09-16, weekly cron CI green on
@@ -463,6 +474,16 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v12 · 2026-09-26** — session 9. (a) **silence is not evidence**: the egress audit trail
+  had been dead for 10 days and a control CONNECT exposed it - START now checks `status`'s
+  audit-trail row and WORK requires a positive control before trusting "no X in the log";
+  (b) **absence checks must prove existence** - phase I's leftover checks passed on code
+  that never started a model; (c) **ask blocking questions with the AskUserQuestion tool** -
+  both answers arrived in the first minute instead of at turn end; (d) **prove a new phase's
+  teeth by running only that phase** from a scratch harness (used 4×); (e) agent CLIs exit 0
+  on failure (aider joined codex); (f) default task/decisions updated: fine-tuning decided
+  and shipped, local sessions are offline, suite is A-I. Cut: the fine-tuning question and
+  two compressible lines, to stay at 69.
 - **v11 · 2026-09-26** — at the user's explicit request, the two rules they care most about
   are now unmissable: (a) END is titled "self-triggered at ~70% CONTEXT" and says a session
   that stops without handing off has failed its job; (b) step c states the goal in the
