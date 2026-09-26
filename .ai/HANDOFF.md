@@ -5,7 +5,7 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-26 (session 10)
-- **Latest release:** [v1.2.0](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.0) — opt-in GPU model server, proven by offload or refused; on top of v1.1.0 (offline `aider-local`) and v1.0.6 (audit trail proven alive); v1.0.0–v1.0.5 carry a superseded warning
+- **Latest release:** [v1.2.1](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.1) — security: incident records cannot be swallowed by an existing file or faked by a self-sent signal, and are confirmed from the sentinel's own log; v1.0.0–v1.2.0 carry a superseded warning
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v13)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (user, 2026-09-24: the
   2026-09-21 recording did not happen). It is still a video recorded on THIS Windows
@@ -19,6 +19,18 @@
 
 | Thing | State |
 |---|---|
+| `main` | tag **`v1.2.1`** (`072004a`) + this handoff commit, tree clean, in sync with origin |
+| Tags | `v1.0.0`…`v1.2.0` carry a "superseded" warning (v1.0.6, v1.1.0, v1.2.0 flagged for v1.2.1) · **`v1.2.1` (Latest, security)** |
+| CI | green on `8520d88` (run 36229286012), `a83b555` (36229655831), `072004a` (36230093461) and tag **`v1.2.1`** (36230692729); E6/E7 and phase D's sentinel confirmation pass on native ext4 too; release published and re-read |
+| Local suite (Docker Desktop / Windows) | on the **v1.2.1** image (rebuilt `--pull` 2026-09-26): A–J all PASS, exit 0, `enforced=4/7` (E6/E7 new; D confirms from the sentinel's log; I and J check `status`) |
+| CI suite (ext4) | all phases A–J · `enforced=7/7` · phase J = no-GPU refusal (GPU side SKIP) |
+| CVEs | trivy on the v1.2.1 images: 0 HIGH/CRITICAL OS packages (both) · 0 under `/opt/warden` · **75** in bundled-agent deps (reported, not gated) |
+| Egress audit trail | `warden-cli.sh status` → `audit trail live` |
+| Incident records | a monitor never overwrites or defers to an existing report (own labelled file instead); the CLI lists only this session's reports, labels an exit 99 with no record as possibly forged, and prints `Confirmed by the sentinel (outside the agent's reach)` from the sentinel container's log - the one record the agent cannot write |
+| Local model | `aider-local` offline on CPU and GPU (`WARDEN_MODEL_GPU=1`), aider gets local metadata (no GitHub fetch, knows ctx). Measured with the untuned Qwen2.5-Coder-1.5B q8_0 (lab `outputs/qwen-base/`): CPU gen 11–14 tok/s, RAM 2.29 GB; GPU gen 54–71 tok/s, VRAM 1.95/4 GB; load ~31 s either way. `status` lists model servers and flags orphans. **No trained model yet** |
+| Demo readiness | Recording POSTPONED, no date. `demo.sh --auto --agent codex` → DEMO COMPLETE on v1.2.1 (fails=0); image carries codex-cli 0.156.1, claude 2.1.197, aider 0.86.2. The interactive rehearsal is still the user's step and has never been run |
+
+---|---|
 | `main` | tag **`v1.2.0`** (`53b3998`) + this handoff commit, tree clean, in sync with origin |
 | Tags | `v1.0.0`…`v1.0.5` carry a "superseded" warning · `v1.0.6` (security fix) · `v1.1.0` (feature) · **`v1.2.0` (Latest, feature)** |
 | CI | green on `65015df` (run 36221267142: phase J's no-GPU side refused on native Linux, `enforced=7/7`), on `53b3998` (run 36221917725) and on tag **`v1.2.0`** (run 36222416915); release published as Latest and re-read |
@@ -48,37 +60,41 @@ Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
 1. **Local model: the user trains a real one on Colab; then run it here.** The AI Warden side
-   is DONE: offline `aider-local` (v1.1.0) + GPU (v1.2.0), and the resource envelope of the
-   default base model is MEASURED (Status row). Left: (a) the user runs the lab notebook on Colab T4
-   with their own data and puts the GGUF + manifest OUTSIDE any workspace; (b) then
-   `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` with a real
-   task, and compare its answers with the untuned base (`outputs/qwen-base/` in the lab) - quality is
-   the only unknown left. (c) (low) aider prints a scary `model_prices_and_context_window.json`
-   ProxyError at startup offline; measured harmless (aider's whole turn is 6 s on GPU), could be
-   silenced by pre-seeding aider's cache in the image. (d) (low) most of a local session's ~60 s
-   start is the model load from the 9p D: drive + sha256 of 1.9 GB each run - a cached-hash or
-   named-volume model store could cut it; measure before building.
+   is DONE: offline `aider-local` (v1.1.0) + GPU (v1.2.0) + aider gets local metadata, no GitHub
+   fetch (v1.2.1), and the resource envelope of the default base model is MEASURED (Status row).
+   Left: (a) the user runs the lab notebook on Colab T4 with their own data and puts the GGUF +
+   manifest OUTSIDE any workspace; (b) then `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it>
+   warden-cli.sh run <ws> aider-local` with a real task, and compare its answers with the untuned
+   base (`outputs/qwen-base/` in the lab) - quality is the only unknown left. Start time is NOT worth
+   optimising (measured session 10: sha256 of 1.9 GB = 8 s; model load = 31 s from a named volume
+   AND from the 9p bind mount - ~12 s I/O + ~19 s llama.cpp CPU work; `--no-mmap` was far worse;
+   the 63-65 s loads were a cold cache). Do not build a model store.
 2. **Demo recording — no date (asked 2026-09-26: still none). Ask again each session**
    (with the AskUserQuestion tool). With a date: no rebuild in the days before it; the
    interactive `./scripts/demo.sh --agent codex` rehearsal is the user's step (Git Bash, not
    `bash` in PowerShell); `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
-   Note for the take: sometimes the sentinel kills first and the inline monitor's
-   `SIGKILL delivered` / `SIGUSR1 sent` lines never print (seen in the v1.1.0 run) - normal.
-3. **gVisor: verify the happy-path on a real gVisor host, then tag (now v1.2.0+).** Plumbing
-   shipped in session 5 (`WARDEN_RUNTIME`, fail-closed, phase F). Local-model sessions apply
-   the same runtime to the model server - also unverified under runsc. On a host with
-   `runsc`: `WARDEN_RUNTIME=runsc ./scripts/verify-isolation.sh`, and specifically confirm
-   the **sentinel** (gVisor + `--pid container:` is a known limitation, THREAT_MODEL §4.1).
-4. **(low, idea) Surface the inline monitor's richer record without new privileges.**
-   The entrypoint's USR1 trap could print `/run/warden/breach.flag`, but that file is
-   agent-writable (uid 1001 tmpfs): label it agent-forgeable, never "the record". Decide the
-   labelling before coding; do not merge it into the sentinel's report.
-5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
+   Since v1.2.1 the take shows `Confirmed by the sentinel (outside the agent's reach)` - say it
+   out loud (DEMO.md act 3). A second, labelled report file is normal when both monitors fire.
+3. **gVisor: verify the happy-path on a real gVisor host, then tag.** Plumbing shipped in
+   session 5 (`WARDEN_RUNTIME`, fail-closed, phase F). Local-model sessions apply the same runtime
+   to the model server - also unverified under runsc. On a host with `runsc`:
+   `WARDEN_RUNTIME=runsc ./scripts/verify-isolation.sh`, and specifically confirm the **sentinel**
+   (gVisor + `--pid container:` is a known limitation, THREAT_MODEL §4.1). Idea, ASK first: this
+   box has a WSL kali distro - dockerd + runsc inside it would be a real gVisor host (installs
+   software into the user's WSL = their call).
+4. **(low) `sanitize()` in canary_monitor.py lets newline and tab through** (its character class
+   skips \x09-\x0a). No exploit today: cmdline is printed `repr()`-quoted and the sentinel
+   cannot read `exe`. But v1.2.1's sentinel witness trusts that no agent string opens a new line
+   in the sentinel's log - make the class `[\x00-\x1f\x7f-\x9f]`, extend drill E2
+   with a newline, ship with the next image rebuild.
+5. **(low, idea) Surface the inline monitor's richer record without new privileges.**
+   Since v1.2.1 the inline monitor's own report survives the race as a labelled second file when
+   it is not killed first, so this may already be enough - check a few real two-monitor breaches
+   before designing anything.
+6. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
    heuristic (is it a mountpoint?), not a path pattern — decide before coding.
-6. **(cosmetic, low) Duplicate `SIGUSR1 received` line and bash's `line 454: Killed`** after a
-   breach. Idempotent trap via a shell variable; entrypoint change = rebuild + drills + tag.
-7. **(low) `--no-breach` does not skip phase I's breach check (M5, exit 99).** Harmless; wire
-   `RUN_BREACH` into it if someone relies on `--no-breach`.
+7. **(cosmetic) `status` prints sentinel rows without the two-space indent** (docker's `--format`
+   drops leading spaces) - pipe through `sed 's/^/  /'`.
 
 ### Decided this session (do not re-raise without new evidence)
 
