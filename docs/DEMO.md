@@ -34,7 +34,7 @@ panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่�
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
-| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.156.1` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.0.5) |
+| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.156.1` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.0.5 และ v1.0.6) |
 | 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–G ผ่าน, **exit 0** |
 | 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` |
 | 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` |
@@ -149,11 +149,11 @@ aws_access_key_id = AKIA_WARDEN.CANARY.NOT.A.KEY.0002
     { "pid": 102, "uid": 1001, "cmdline": "bash -l -c exec 3< ...",
       "evidence": "canary named in argv", "exe": "", "open_canaries": [] }
   ],
-  "warden_version": "1.0.5"
+  "warden_version": "1.0.6"
 }
 ```
 
-และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.5)
+และ 5 ข้อยืนยันที่ตรวจตัว report เอง (จาก run เดียวกัน v1.0.6)
 
 ```
   PASS exactly one report - no duplicate fallback from the monitor/sentinel race

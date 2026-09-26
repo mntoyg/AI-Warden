@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-24T01:00:50Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T03:36:03Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -59,6 +59,10 @@
 
 ================= PHASE G: agent launch (codex) ==================
   PASS phase G: warden-cli logs codex in from OPENAI_API_KEY and launches it with sandbox_mode=danger-full-access
+
+================= PHASE H: egress audit trail ====================
+  PASS phase H: with a sandbox running, 'up' refused a dead audit trail (rc=1) and left the proxy alone
+  PASS phase H: 'up' detected the dead audit trail, recreated the proxy, and the new trail is live
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
