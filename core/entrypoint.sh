@@ -14,7 +14,7 @@
 # =============================================================================
 set -uo pipefail
 
-readonly WARDEN_VERSION="1.0.6"
+readonly WARDEN_VERSION="1.1.0"
 readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
@@ -29,6 +29,7 @@ REQUIRE_PROXY="${WARDEN_REQUIRE_PROXY:-1}"
 PROXY_HOST="${WARDEN_PROXY_HOST:-warden-egress-proxy}"
 PROXY_PORT="${WARDEN_PROXY_PORT:-3128}"
 PROXY_WAIT_SECONDS="${WARDEN_PROXY_WAIT:-20}"
+EGRESS_MODE="${WARDEN_EGRESS:-proxy}" # proxy | none (offline local-model session)
 EXPECT_SENTINEL="${WARDEN_EXPECT_SENTINEL:-0}"
 SENTINEL_WAIT_SECONDS="${WARDEN_SENTINEL_WAIT:-45}"
 
@@ -322,7 +323,37 @@ wait_for_proxy() {
     return 1
 }
 
+# An offline session claims more than "filtered egress": it claims there is no
+# way out at all. warden-cli.sh sets WARDEN_EGRESS=none only for local-model
+# sessions, whose network holds the agent and its model and nothing else. The
+# claim is checked here, not assumed: the proxy and every direct probe must be
+# unreachable, or the sandbox refuses to start - regardless of WARDEN_STRICT,
+# because an "offline" session that is online is exactly the lie to prevent.
+check_offline() {
+    local reachable=0 probe
+    if nc -z -w 2 "$PROXY_HOST" "$PROXY_PORT" 2>/dev/null; then
+        warn "OFFLINE VIOLATION: the egress proxy ${PROXY_HOST}:${PROXY_PORT} is reachable"
+        reachable=$((reachable + 1))
+    fi
+    for probe in "1.1.1.1 443" "8.8.8.8 53" "9.9.9.9 443"; do
+        # shellcheck disable=SC2086
+        if nc -z -w 3 $probe 2>/dev/null; then
+            warn "OFFLINE VIOLATION: reached ${probe// /:} directly"
+            reachable=$((reachable + 1))
+        fi
+    done
+    if [ "$reachable" -gt 0 ]; then
+        fatal "WARDEN_EGRESS=none but this sandbox can reach the network - refusing to run an offline session that is not offline"
+    fi
+    log "egress             : none (offline session) - proxy and direct routes unreachable OK"
+}
+
 check_egress() {
+    case "$EGRESS_MODE" in
+        none)  check_offline; return 0 ;;
+        proxy) ;;
+        *)     fatal "unknown WARDEN_EGRESS=${EGRESS_MODE} (expected proxy or none)" ;;
+    esac
     if wait_for_proxy; then
         # The sandbox network is `internal`, so any direct route out must fail.
         # Probe by raw TCP so the test never depends on DNS or on the proxy.
@@ -383,6 +414,8 @@ wait_for_sentinel() {
 # 5. Banner
 # =============================================================================
 banner() {
+    local EGRESS_BANNER="allowlist only, via ${PROXY_HOST}:${PROXY_PORT}"
+    if [ "$EGRESS_MODE" = "none" ]; then EGRESS_BANNER="NONE - offline session (local model only)"; fi
     cat >&2 <<BANNER
 
   +--------------------------------------------------------------+
@@ -390,7 +423,7 @@ banner() {
   |   Zero-Trust sandbox for autonomous AI coding agents         |
   +--------------------------------------------------------------+
    workspace : ${WARDEN_WORKSPACE:-/workspace}
-   egress    : allowlist only, via ${PROXY_HOST}:${PROXY_PORT}
+   egress    : ${EGRESS_BANNER}
    canary    : reading a seeded honeypot terminates this container
 BANNER
 }

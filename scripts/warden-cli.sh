@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.0.6"
+readonly WARDEN_VERSION="1.1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -47,6 +47,19 @@ WARDEN_PIDS_LIMIT="${WARDEN_PIDS_LIMIT:-512}"
 WARDEN_SENTINEL="${WARDEN_SENTINEL:-1}"
 WARDEN_WORKSPACE_MODE="${WARDEN_WORKSPACE_MODE:-rw}"   # rw | ro
 WARDEN_RUNTIME="${WARDEN_RUNTIME:-}"                   # empty = Docker default (runc); e.g. runsc for gVisor
+# Local-model session: set per run, never read from .env - it changes what a
+# session IS (offline, keyless), so it has to be asked for explicitly.
+WARDEN_MODEL_MANIFEST="${WARDEN_MODEL_MANIFEST:-}"
+WARDEN_MODEL_CTX="${WARDEN_MODEL_CTX:-8192}"
+WARDEN_MODEL_MEMORY="${WARDEN_MODEL_MEMORY:-4g}"
+
+# llama.cpp's OpenAI-compatible server, pinned by digest (never a floating tag).
+readonly MODEL_IMAGE="ghcr.io/ggml-org/llama.cpp@sha256:79903855d3de1689e9856219283591be12ba6f40a8e65fc7223824109446ad88"
+readonly MODEL_ALIAS="warden-local"
+readonly MODEL_URL="http://warden-model:8080/v1"
+# aider's OpenAI client will not start without a key; this inert value is the
+# only "key" a local-model session ever sees.
+readonly MODEL_PLACEHOLDER_KEY="warden-local-no-key"
 
 # --- Secrets that are forwarded by NAME only (never by value) ----------------
 readonly FORWARDED_SECRETS=(
@@ -73,6 +86,8 @@ info()  { printf '%s[warden]%s %s\n'  "$C_BLUE"  "$C_RESET" "$*" >&2; }
 ok()    { printf '%s[  ok  ]%s %s\n'  "$C_GREEN" "$C_RESET" "$*" >&2; }
 warn()  { printf '%s[ warn ]%s %s\n'  "$C_YELLOW" "$C_RESET" "$*" >&2; }
 die()   { printf '%s[ fail ]%s %s\n'  "$C_RED"   "$C_RESET" "$*" >&2; exit 1; }
+# Exit 78 like the entrypoint's posture refusal: a check failed, nothing started.
+refuse() { printf '%s[refuse]%s %s\n' "$C_RED"   "$C_RESET" "$*" >&2; exit 78; }
 
 # =============================================================================
 #  Environment plumbing
@@ -84,7 +99,7 @@ load_env_file() {
     local key value
     while IFS='=' read -r key value; do
         case "$key" in
-            WARDEN_MEMORY|WARDEN_CPUS|WARDEN_PIDS_LIMIT|WARDEN_SENTINEL|WARDEN_WORKSPACE_MODE|WARDEN_RUNTIME)
+            WARDEN_MEMORY|WARDEN_CPUS|WARDEN_PIDS_LIMIT|WARDEN_SENTINEL|WARDEN_WORKSPACE_MODE|WARDEN_RUNTIME|WARDEN_MODEL_CTX|WARDEN_MODEL_MEMORY)
                 value="${value%\"}"; value="${value#\"}"
                 if [ -n "$value" ]; then printf -v "$key" '%s' "$value"; fi
                 ;;
@@ -420,6 +435,8 @@ resolve_agent_cmd() {
     case "${1:-bash}" in
         claude)          printf '%s\n' claude ;;
         aider)           printf '%s\n' aider ;;
+        aider-local)     printf '%s\n' aider --model "openai/${MODEL_ALIAS}" --openai-api-base "$MODEL_URL" \
+                             --no-check-update --analytics-disable --no-show-model-warnings ;;
         codex)           printf '%s\n' bash -c "$CODEX_WRAPPER" codex ;;
         hermes)          printf '%s\n' hermes ;;
         bash|sh|shell)   printf '%s\n%s\n' bash -l ;;
@@ -556,6 +573,101 @@ cleanup_workspace_canaries() {
     done
 }
 
+# =============================================================================
+#  Local-model session (WARDEN_MODEL_MANIFEST)
+# -----------------------------------------------------------------------------
+#  The agent and a llama.cpp server share a private `internal` network and
+#  nothing else: no proxy, no route out, so workspace code cannot leave the box
+#  by construction. No cloud key is forwarded. The model file must match the
+#  sha256 in its manifest (GGUF parsers have had memory-safety bugs), and the
+#  manifest must live OUTSIDE the workspace - an agent that can rewrite both
+#  the model and its manifest makes the hash check meaningless.
+#  Design and threat model: .ai/design-local-model.md (M1-M7), drills: phase I.
+# =============================================================================
+MODEL_FILE=""
+file_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+verify_model_manifest() {
+    local manifest="$1" workspace="$2" dir file sha actual
+    [ -f "$manifest" ] || refuse "model manifest not found: ${manifest}"
+    dir="$(cd "$(dirname "$manifest")" && pwd -P)"
+    case "${dir}/" in
+        "${workspace}/"*) refuse "the model manifest is inside the workspace (${dir}).
+        The agent could rewrite both the model and its hash. Keep models outside it." ;;
+    esac
+    file="$(sed -n 's/.*"gguf_file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1)"
+    sha="$(sed -n 's/.*"gguf_sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -1)"
+    case "$file" in
+        ""|*/*|*..*) refuse "manifest gguf_file must be a plain file name next to the manifest (got '${file}')" ;;
+        *.gguf) ;;
+        *) refuse "manifest gguf_file is not a .gguf file (got '${file}')" ;;
+    esac
+    printf '%s' "$sha" | grep -qxE '[0-9a-f]{64}' || refuse "manifest gguf_sha256 is not a sha256 (got '${sha}')"
+    [ -f "${dir}/${file}" ] || refuse "model file not found: ${dir}/${file}"
+    actual="$(file_sha256 "${dir}/${file}")"
+    if [ "$actual" != "$sha" ]; then
+        refuse "model file ${file} does not match its manifest (sha256 ${actual:0:16}... != ${sha:0:16}...). Refusing to load it."
+    fi
+    MODEL_FILE="${dir}/${file}"
+    ok "model file matches its manifest (sha256 ${sha:0:16}...)"
+}
+
+model_net_for()       { printf '%s-net' "$1"; }
+model_container_for() { printf '%s-model' "$1"; }
+
+stop_model() {
+    local name="$1"
+    docker rm -f "$(model_container_for "$name")" >/dev/null 2>&1 || true
+    docker network rm "$(model_net_for "$name")" >/dev/null 2>&1 || true
+}
+
+start_model() {
+    local name="$1" net model
+    net="$(model_net_for "$name")"; model="$(model_container_for "$name")"
+    stop_model "$name"
+    docker network create --internal \
+        --label ai.warden.role=model-net --label "ai.warden.agent=${name}" "$net" >/dev/null \
+        || die "could not create the private model network ${net}"
+    [ "$(docker network inspect -f '{{.Internal}}' "$net" 2>/dev/null)" = "true" ] \
+        || { stop_model "$name"; die "network ${net} is not internal - refusing"; }
+
+    local -a rt=()
+    if [ -n "$RESOLVED_RUNTIME" ]; then rt=(--runtime "$RESOLVED_RUNTIME"); fi
+    # Hardened like the sentinel. The server flags are pinned here and nothing
+    # else is passed: no web UI, no /slots, and never --tools / --props / MCP.
+    docker run -d --name "$model" \
+        "${rt[@]}" \
+        --network "$net" --network-alias warden-model \
+        --user 65534:65534 --read-only --cap-drop=ALL \
+        --security-opt no-new-privileges:true \
+        --memory "$WARDEN_MODEL_MEMORY" --memory-swap "$WARDEN_MODEL_MEMORY" --pids-limit 128 \
+        --label ai.warden.role=model-server --label "ai.warden.agent=${name}" \
+        --log-opt max-size=10m --log-opt max-file=2 \
+        -v "$(host_path "$MODEL_FILE"):/models/model.gguf:ro" \
+        "$MODEL_IMAGE" \
+        -m /models/model.gguf --host 0.0.0.0 --port 8080 --alias "$MODEL_ALIAS" \
+        --no-webui --no-slots -c "$WARDEN_MODEL_CTX" >/dev/null \
+        || { stop_model "$name"; die "could not start the model server (image ${MODEL_IMAGE})"; }
+
+    local waited=0 health
+    while [ "$waited" -lt 180 ]; do
+        health="$(docker inspect -f '{{if .State.Running}}{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}{{else}}exited{{end}}' "$model" 2>/dev/null || echo gone)"
+        case "$health" in
+            healthy) ok "local model ready: ${MODEL_ALIAS} on offline network ${net} (no proxy, no route out)"; return 0 ;;
+            exited|gone)
+                docker logs --tail 15 "$model" >&2 2>&1 || true
+                stop_model "$name"; die "the model server exited while loading (log above)" ;;
+        esac
+        sleep 1; waited=$((waited + 1))
+    done
+    docker logs --tail 15 "$model" >&2 2>&1 || true
+    stop_model "$name"
+    die "the model server did not become healthy within 180s (log above)"
+}
+
 cmd_run() {
     docker_available
     load_env_file
@@ -570,6 +682,13 @@ cmd_run() {
     fi
     if [ "${1:-}" = "--" ]; then shift; fi
 
+    local local_model=0
+    if [ -n "$WARDEN_MODEL_MANIFEST" ]; then local_model=1; fi
+    if [ "$agent" = "aider-local" ] && [ "$local_model" = "0" ]; then
+        die "aider-local needs a local model: set WARDEN_MODEL_MANIFEST=<path to the model's manifest.json>"
+    fi
+    case "$WARDEN_MODEL_CTX" in ''|*[!0-9]*) die "WARDEN_MODEL_CTX must be a number (got '${WARDEN_MODEL_CTX}')" ;; esac
+
     docker image inspect "$AGENT_IMAGE" >/dev/null 2>&1 \
         || die "image ${AGENT_IMAGE} is missing. Run: $0 build"
 
@@ -583,7 +702,14 @@ cmd_run() {
     # WARDEN_RUNTIME aborts here rather than after the proxy and vault are up.
     assert_runtime "$WARDEN_RUNTIME"
 
-    cmd_up
+    # A local-model session needs no proxy at all; everything else goes through it.
+    local agent_net="$INTERNAL_NET"
+    if [ "$local_model" = "1" ]; then
+        verify_model_manifest "$WARDEN_MODEL_MANIFEST" "$abs"
+        agent_net="$(model_net_for "$name")"
+    else
+        cmd_up
+    fi
     ensure_vault "$vault" || die "the canary vault could not be prepared"
 
     docker rm -f "$name" >/dev/null 2>&1 || true
@@ -593,7 +719,7 @@ cmd_run() {
         run --rm
         --name "$name"
         --hostname warden-sandbox
-        --network "$INTERNAL_NET"
+        --network "$agent_net"
         --user 1001:1001
         --workdir /workspace
         --cap-drop=ALL
@@ -630,21 +756,36 @@ cmd_run() {
     # process's environment and never appears in argv, so it stays out of `ps`,
     # out of shell history and out of any container layer.
     local var forwarded=0
-    for var in "${FORWARDED_SECRETS[@]}"; do
-        if [ -n "${!var:-}" ]; then
-            args+=(-e "$var")
-            forwarded=$((forwarded + 1))
+    if [ "$local_model" = "1" ]; then
+        # Offline and keyless: no .env, no cloud key, only the git identity. The
+        # entrypoint re-checks the "offline" claim itself (WARDEN_EGRESS=none).
+        args+=(
+            -e WARDEN_EGRESS=none
+            -e "OPENAI_API_KEY=${MODEL_PLACEHOLDER_KEY}"
+            -e "NO_PROXY=localhost,127.0.0.1,::1,warden-model"
+            -e "no_proxy=localhost,127.0.0.1,::1,warden-model"
+        )
+        for var in GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL; do
+            if [ -n "${!var:-}" ]; then args+=(-e "$var"); fi
+        done
+        info "secrets: none - local-model sessions get no cloud API key and no .env"
+    else
+        for var in "${FORWARDED_SECRETS[@]}"; do
+            if [ -n "${!var:-}" ]; then
+                args+=(-e "$var")
+                forwarded=$((forwarded + 1))
+            fi
+        done
+        if [ -f "$ENV_FILE" ]; then
+            args+=(--env-file "$(host_path "$ENV_FILE")")
+            info "secrets: --env-file .env (host only, never baked into the image)"
         fi
-    done
-    if [ -f "$ENV_FILE" ]; then
-        args+=(--env-file "$(host_path "$ENV_FILE")")
-        info "secrets: --env-file .env (host only, never baked into the image)"
-    fi
-    if [ "$forwarded" -gt 0 ]; then
-        info "secrets: ${forwarded} key(s) forwarded from your shell by name"
-    fi
-    if [ "$forwarded" -eq 0 ] && [ ! -f "$ENV_FILE" ]; then
-        warn "no API keys found. Export ANTHROPIC_API_KEY or create .env (see .env.example)."
+        if [ "$forwarded" -gt 0 ]; then
+            info "secrets: ${forwarded} key(s) forwarded from your shell by name"
+        fi
+        if [ "$forwarded" -eq 0 ] && [ ! -f "$ENV_FILE" ]; then
+            warn "no API keys found. Export ANTHROPIC_API_KEY or create .env (see .env.example)."
+        fi
     fi
 
     if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
@@ -659,20 +800,28 @@ cmd_run() {
     info "mounted at : /workspace (${WARDEN_WORKSPACE_MODE})"
     info "container  : ${name}"
     info "agent      : ${agent_cmd[*]}"
-    info "isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=${INTERNAL_NET} (internal)"
+    info "isolation  : cap-drop=ALL, no-new-privileges, uid 1001, network=${agent_net} (internal)"
+    if [ "$local_model" = "1" ]; then
+        info "model      : ${MODEL_ALIAS} at ${MODEL_URL} - OFFLINE session, no proxy"
+    fi
     info "runtime    : ${RESOLVED_RUNTIME:-default (runc)}"
     printf '\n'
 
+    if [ "$local_model" = "1" ]; then
+        trap 'stop_model "$name"; remove_vault "$vault"' EXIT INT TERM
+        start_model "$name"
+    fi
     if [ "$WARDEN_SENTINEL" = "1" ]; then
         ( start_sentinel "$name" "$mount_src" "$vault" ) &
     fi
-    trap 'stop_sentinel "$name"; remove_vault "$vault"' EXIT INT TERM
+    trap 'stop_sentinel "$name"; stop_model "$name"; remove_vault "$vault"' EXIT INT TERM
 
     local rc=0
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
     # Order matters: the sentinel must be gone before anything touches a
     # watched path, or shutdown housekeeping reads as tampering.
     stop_sentinel "$name"
+    stop_model "$name"
     remove_vault "$vault"
     trap - EXIT INT TERM
     cleanup_workspace_canaries "$abs"
@@ -792,14 +941,20 @@ cmd_stop() {
     fi
     local ids
     ids="$(docker ps -aq --filter 'label=ai.warden.role=agent-sandbox' 2>/dev/null || true)"
-    local sids
+    local sids mids mnets
     sids="$(docker ps -aq --filter 'label=ai.warden.role=canary-sentinel' 2>/dev/null || true)"
-    if [ -z "$ids$sids" ]; then
+    # A hard-killed local-model session can leave its model server behind even
+    # after the agent container is gone, so these count as something to stop.
+    mids="$(docker ps -aq --filter 'label=ai.warden.role=model-server' 2>/dev/null || true)"
+    if [ -z "$ids$sids$mids" ]; then
         info "no sandboxes to stop"
         return 0
     fi
     # shellcheck disable=SC2086
-    docker rm -f $sids $ids >/dev/null 2>&1 || true
+    docker rm -f $sids $ids $mids >/dev/null 2>&1 || true
+    mnets="$(docker network ls -q --filter 'label=ai.warden.role=model-net' 2>/dev/null || true)"
+    # shellcheck disable=SC2086
+    if [ -n "$mnets" ]; then docker network rm $mnets >/dev/null 2>&1 || true; fi
 
     # Sweep up canary vaults orphaned by a hard kill of a previous session.
     local vols
@@ -876,6 +1031,7 @@ ${C_BOLD}COMMANDS${C_RESET}
   down                          Stop everything (sandboxes + proxy)
   run <folder> [agent] [-- ...] Launch an agent with ONLY <folder> mounted
                                 agent: claude | aider | codex | hermes | bash
+                                       aider-local (needs WARDEN_MODEL_MANIFEST)
   exec <container> [cmd...]     Attach to a running sandbox as ai_user
   status                        Show proxy, networks, sandboxes and incidents
   stop [container]              Stop one sandbox, or all of them
@@ -888,6 +1044,7 @@ ${C_BOLD}EXAMPLES${C_RESET}
   $0 build
   $0 run ./workspaces/default claude
   $0 run ~/src/my-api aider -- --model sonnet
+  WARDEN_MODEL_MANIFEST=~/models/manifest.json $0 run ./proj aider-local   # offline
   $0 logs proxy --since 10m
   $0 verify
 

@@ -1,4 +1,12 @@
-# Design — local self-trained model for aider (ยังไม่ได้ implement)
+# Design — local self-trained model for aider (implemented v1.1.0, 2026-09-26)
+
+> **สถานะ 2026-09-26 (session 9): ฝั่ง AI Warden สร้างแล้ว** — `WARDEN_MODEL_MANIFEST=... warden-cli.sh
+> run <ws> aider-local`, entrypoint `WARDEN_EGRESS=none`, drills = phase I (12 ข้อ, โมเดลสาธารณะ
+> `stories260K.gguf`) ต่างจากแบบข้างล่าง: (1) **offline ล้วน** — agent ไม่อยู่บน `warden_internal`;
+> (2) network เป็น **ของแต่ละ session** (`<container>-net`, internal) ไม่ใช่ `warden_model` ตัวเดียว
+> เพื่อให้ session ไม่เห็นโมเดลของกันและกัน; (3) alias = `warden-local`; (4) **CPU เท่านั้น** (M7/GPU
+> ยังไม่ได้พิสูจน์ จึงยังไม่เปิด); (5) เพิ่ม guard: manifest ต้องอยู่นอก workspace (agent แก้ทั้งโมเดล
+> และ hash ได้ถ้าอยู่ข้างใน) ส่วนที่ยังเป็นของผู้ใช้: เทรนจริงบน Colab T4 แล้ววาง GGUF + manifest ไว้นอก workspace
 
 > **สถานะ:** ออกแบบเท่านั้น (2026-09-16, session 7) — **ห้ามเขียนโค้ดฝั่ง AI Warden ก่อนถ่ายเดโม
 > 2026-09-21** และห้ามแตะ `ai-warden/agent:latest` ของเดโม ทุกข้อด้านล่างที่ไม่ได้ติดป้าย

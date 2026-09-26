@@ -187,6 +187,27 @@ launcher จึง pipe key จาก environment เข้า `codex login --wi
 key ไม่เคยอยู่บน argv (ที่ `ps` และ monitor อ่าน `/proc/<pid>/cmdline` ได้) และไฟล์ auth
 อยู่ใน home ของ container ที่ถูกลบตอนจบ (`--rm`) ทั้งสองข้อตรวจโดย phase G ด้วย key ปลอม
 
+### 3.7 โมเดลในเครื่อง: offline ล้วน ไม่ใช่ "ไม่ส่ง key"
+
+`WARDEN_MODEL_MANIFEST` เปิด session ที่ agent คุยกับ llama.cpp server ในเครื่อง ความเสี่ยงหลัก
+คือ **ตั้งใจใช้โมเดลในเครื่อง แต่โค้ดหลุดไป cloud แบบเงียบ ๆ** (`api.openai.com` อยู่ใน allowlist
+และ aider ใช้ client ของ OpenAI) แบบแรกที่ออกแบบไว้คือให้ agent อยู่ทั้งบน network ของ proxy
+และของโมเดล แล้วกันด้วยการไม่ส่ง key — ซึ่งแค่ทำให้ cloud **ปฏิเสธ** request ที่มีโค้ดอยู่แล้ว
+จึงเปลี่ยนเป็น offline ล้วน (ผู้ใช้เลือก 2026-09-26 หลังวัดว่า aider ตอบได้ใน 5 วินาทีโดยไม่มีเน็ต):
+
+| # | Threat | Control | ตรวจโดย phase I |
+|---|---|---|---|
+| M1 | agent หรือ model ออกเน็ต | network `internal` ของ session มีแค่ agent + model; entrypoint ตรวจว่า proxy และ route ตรงต่อไม่ได้ ไม่งั้น exit 78 | ยิงจากทั้ง agent และ model |
+| M2 | ไฟล์ GGUF ถูกสลับ | sha256 ต้องตรง manifest; manifest ต้องอยู่นอก workspace | แก้ 1 byte → 78; manifest ใน workspace → 78 |
+| M3 | cloud key หลุดเข้า session | ไม่ส่ง `.env` ไม่ส่ง key ใด ๆ มีแค่ค่าหลอก `warden-local-no-key` | export key ปลอม 3 ตัวบนโฮสต์แล้วดูข้างใน |
+| M4 | ใช้ endpoint ของ server อ่าน/เปลี่ยนค่า | `--no-webui --no-slots` ไม่มี `--tools` / `--props` / MCP; flag ถูก pin ใน CLI | `GET /` 404, `/slots` 501, `POST /props` 501 |
+| M5 | model container ค้าง | ลบใน trap ทุกทางออก | หลัง exit 0 และ 99 |
+| M6 | server มีสิทธิ์เกิน | uid 65534, read-only, cap-drop ALL, no-new-privileges, image pin digest | `docker inspect` + `/proc/1/status` |
+| M7 | GPU passthrough | ยังไม่รองรับ (CPU เท่านั้น) — ต้องพิสูจน์ก่อนเปิด | — |
+
+traffic ระหว่าง agent กับ model ไม่ผ่าน squid จึงไม่อยู่ใน audit trail ของ egress — log ของ
+llama-server คือบันทึกเดียวของเส้นทางนี้ และ canary / sentinel ยังทำงานเหมือนเดิม
+
 ---
 
 ## 4. สิ่งที่ AI Warden ป้องกันไม่ได้

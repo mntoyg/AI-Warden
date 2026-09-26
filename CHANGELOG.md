@@ -4,6 +4,33 @@
 
 ---
 
+## [1.1.0] — 2026-09-26
+
+**ฟีเจอร์: ใช้โมเดลของตัวเองในเครื่อง แบบ offline ล้วน**
+
+### Added
+
+- `WARDEN_MODEL_MANIFEST=<manifest.json> warden-cli.sh run <folder> aider-local` — aider คุยกับ
+  llama.cpp server (`ghcr.io/ggml-org/llama.cpp:server` pin ด้วย digest) บน network `internal`
+  ส่วนตัวของ session ที่มีแค่ agent + model: ไม่มี proxy ไม่มี route ออก ไม่มี cloud key ไม่มี
+  `.env` ไฟล์ GGUF ต้องตรงกับ sha256 ใน manifest และ manifest ต้องอยู่นอก workspace ไม่งั้น
+  exit 78 ก่อนสร้างอะไร model server รันเป็น 65534 / read-only / ไม่มี capability / ปิด web UI
+  และ `/slots` และถูกลบพร้อม network ทุกทางออก (THREAT_MODEL §3.7, `.ai/design-local-model.md`)
+- entrypoint: posture `WARDEN_EGRESS=none` — session ที่อ้างว่า offline ต้องพิสูจน์ว่า proxy และ
+  route ตรงต่อไม่ได้ ไม่งั้น exit 78 (ไม่ขึ้นกับ `WARDEN_STRICT`)
+- `warden-cli.sh stop` เก็บ model server และ network ที่ค้างจาก session ที่ถูก kill ด้วย
+
+### Tests
+
+- phase **I** ใหม่ 12 ข้อ ด้วยโมเดลสาธารณะ `stories260K.gguf` (1.2 MB, sha256 pin) ให้ CI รันได้:
+  M0 (posture offline ทั้งสองทาง), M1, M2 (ไฟล์ถูกแก้ + manifest ใน workspace), M3, M4, M5
+  (exit 0 และ 99 — ต้องเห็นว่า model เคยขึ้นจริง ไม่งั้นนับว่าผ่านแบบว่างเปล่า), M6, และ agent
+  เรียกโมเดลได้ — **FAIL 5 ข้อกับโค้ด v1.0.6** แล้วผ่านทั้งหมด
+- เส้นทางจริง: `aider-local` กับ GGUF ที่เทรนจาก notebook (SmolLM2-135M smoke) ได้คำตอบ,
+  `egress: none`, ไม่เหลืออะไรค้าง; codex จริงบน image ใหม่ยังตอบได้และโดนฆ่า 99 เมื่ออ่าน honeypot
+
+---
+
 ## [1.0.6] — 2026-09-26
 
 **Integrity fix ของ audit trail ฝั่ง egress — ทุกคนควรอัปเกรด**

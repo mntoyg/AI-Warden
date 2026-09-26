@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T03:36:03Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T04:08:14Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -63,6 +63,20 @@
 ================= PHASE H: egress audit trail ====================
   PASS phase H: with a sandbox running, 'up' refused a dead audit trail (rc=1) and left the proxy alone
   PASS phase H: 'up' detected the dead audit trail, recreated the proxy, and the new trail is live
+
+============== PHASE I: local-model session (offline) ============
+  PASS phase I (M0): WARDEN_EGRESS=none on a network that reaches the proxy refused to start (78)
+  PASS phase I (M0): a truly offline session starts and says so (egress: none)
+  PASS phase I (M1): agent and model are offline - neither reaches the proxy nor the internet
+  PASS phase I (M3): no cloud API key reached the agent (host had three exported)
+  PASS phase I (M4): the model server's web UI, /slots and POST /props are off
+  PASS phase I (M6): model server runs as 65534, read-only, no capabilities, no-new-privileges
+  PASS phase I: the agent reached the model over the private network (chat completion 200)
+  PASS phase I (M5): a clean session (exit 0) left no model container or network behind
+  PASS phase I (M5): a breach in a local-model session exits 99 and leaves nothing behind
+  PASS phase I (M2): a model file that does not match its manifest sha256 was refused (78), nothing started
+  PASS phase I (M2): a model manifest inside the workspace (agent-writable) was refused (78)
+  PASS phase I: aider-local launches aider against http://warden-model:8080/v1, and refuses without a manifest
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.

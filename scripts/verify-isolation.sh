@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Eight phases:
+#  Proves the sandbox actually does what the README claims. Nine phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -30,6 +30,9 @@
 #    H. Egress audit trail    - a proxy whose `docker logs` went silently dead
 #                               (corrupt json log) must be detected by `up`,
 #                               recreated when idle, refused while in use.
+#    I. Local-model session   - WARDEN_MODEL_MANIFEST: agent + llama.cpp server
+#                               offline, keyless, hardened, sha256-pinned model,
+#                               nothing left behind (tiny public GGUF).
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -54,7 +57,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,34p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,37p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -106,7 +109,7 @@ cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
-        warden-verify-rt >/dev/null 2>&1 || true
+        warden-verify-rt warden-verify-i0 warden-verify-h-busy >/dev/null 2>&1 || true
     # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
     # its vault by label in case the suite was interrupted mid-check.
     local rtp_leftover
@@ -776,6 +779,204 @@ else
         "${SCRIPT_DIR}/warden-cli.sh" up >/dev/null 2>&1 || true
     fi
 fi
+
+# =============================================================================
+printf '\n%s============== PHASE I: local-model session (offline) ============%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# WARDEN_MODEL_MANIFEST=<manifest.json> turns `run` into a local-model session:
+# the agent and a llama.cpp server share a private internal network and nothing
+# else - no proxy, no route out - and no cloud key is forwarded. Checks are keyed
+# to the threats in .ai/design-local-model.md (M1-M6). The model is a tiny PUBLIC
+# GGUF (1.2 MB, pinned sha256) so CI can run this without anyone's private model.
+info "a local-model session must be offline, keyless, hardened and leave nothing behind"
+printf '\n'
+
+I_URL="https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf"
+I_SHA="270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d"
+I_CACHE="${PROJECT_ROOT}/workspaces/.verify-model-cache"
+I_WS="${PROJECT_ROOT}/workspaces/.verify-local-$$"
+I_NAME="warden-sbx-.verify-local-$$"
+mkdir -p "$I_CACHE" "$I_WS"; chmod 0777 "$I_WS" 2>/dev/null || true
+i_sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+if [ "$(i_sha "${I_CACHE}/stories260K.gguf")" != "$I_SHA" ]; then
+    # Git Bash's curl is a native Windows program: with MSYS_NO_PATHCONV set it
+    # cannot write to a /d/... path, so path conversion is re-enabled for it.
+    env -u MSYS_NO_PATHCONV -u MSYS2_ARG_CONV_EXCL         curl -sfL --retry 3 --max-time 120 -o "${I_CACHE}/stories260K.gguf" "$I_URL" || true
+fi
+i_leftovers() {  # containers or networks a session with this workspace left behind
+    docker ps -aq --filter "name=verify-local-$$" 2>/dev/null
+    docker network ls -q --filter "name=verify-local-$$" 2>/dev/null
+}
+i_fail() { bad "phase I: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
+
+# I/M0: the entrypoint's offline posture is CHECKED, not assumed. Raw docker, so
+# this proves the image, independent of how the CLI wires it.
+docker run --rm --network "$INTERNAL_NET" --user 1001:1001 --cap-drop=ALL \
+    --security-opt no-new-privileges:true --memory 1g --pids-limit 128 \
+    --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+    -e WARDEN_EGRESS=none --name warden-verify-i0 "$AGENT_IMAGE" \
+    bash -c 'echo "this must never run"' >/dev/null 2>&1
+i0a=$?
+docker network rm warden-verify-i0-net >/dev/null 2>&1 || true
+docker network create --internal warden-verify-i0-net >/dev/null 2>&1
+i0b_out="$(docker run --rm --network warden-verify-i0-net --user 1001:1001 --cap-drop=ALL \
+    --security-opt no-new-privileges:true --memory 1g --pids-limit 128 \
+    --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+    -e WARDEN_EGRESS=none --name warden-verify-i0 "$AGENT_IMAGE" \
+    bash -c 'echo OFFLINE-SESSION-RAN' 2>&1)"
+i0b=$?
+docker network rm warden-verify-i0-net >/dev/null 2>&1 || true
+if [ "$i0a" -eq 78 ]; then
+    good "phase I (M0): WARDEN_EGRESS=none on a network that reaches the proxy refused to start (78)"
+else
+    i_fail "(M0) an 'offline' session that can reach the proxy was not refused (rc=${i0a})"
+fi
+if [ "$i0b" -eq 0 ] && printf '%s' "$i0b_out" | grep -q 'OFFLINE-SESSION-RAN' \
+   && printf '%s' "$i0b_out" | grep -q 'egress             : none'; then
+    good "phase I (M0): a truly offline session starts and says so (egress: none)"
+else
+    i_fail "(M0) a truly offline session did not start cleanly (rc=${i0b})"
+    note "         $(printf '%s' "$i0b_out" | grep -E 'FATAL|egress' | tr '\n' ' ' | cut -c1-240)"
+fi
+
+if [ "$(i_sha "${I_CACHE}/stories260K.gguf")" != "$I_SHA" ]; then
+    i_fail "could not fetch the pinned test model (${I_URL}) - CLI checks not run"
+else
+    printf '{"schema": "warden-model-lab/manifest/1", "model_name": "verify-tiny", "gguf_file": "stories260K.gguf", "gguf_sha256": "%s"}\n' \
+        "$I_SHA" > "${I_CACHE}/manifest.json"
+
+    # I/M1 M3 M4 M6 + e2e: one real session through the CLI. Fake cloud keys are
+    # exported on purpose: none of them may reach the agent (M3).
+    i_probe='
+        r() { if timeout 3 bash -c "</dev/tcp/$1/$2" 2>/dev/null; then echo reachable; else echo unreachable; fi; }
+        echo "I-proxy=$(r warden-egress-proxy 3128)"
+        echo "I-direct=$(r 1.1.1.1 443)"
+        echo "I-keys=${OPENAI_API_KEY:-}|${ANTHROPIC_API_KEY:-}|${GEMINI_API_KEY:-}"
+        c() { curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X "$1" "http://warden-model:8080$2" -H "Content-Type: application/json" -d "{}"; }
+        echo "I-ep=root:$(c GET /) slots:$(c GET /slots) props:$(c POST /props)"
+        echo "I-chat=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 http://warden-model:8080/v1/chat/completions -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":8}")"
+        sleep 6'
+    ( OPENAI_API_KEY="sk-warden-drill-openai-not-real" ANTHROPIC_API_KEY="sk-ant-warden-drill-not-real" \
+      GEMINI_API_KEY="warden-drill-gemini-not-real" WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c "$i_probe" > "${I_CACHE}/run1.log" 2>&1
+      echo "$?" > "${I_CACHE}/run1.rc" ) &
+    i_bg=$!
+    i_model=""; waited=0
+    while [ "$waited" -lt 90 ] && [ -z "$i_model" ]; do
+        i_model="$(docker ps -q --filter 'label=ai.warden.role=model-server' --filter "label=ai.warden.agent=${I_NAME}" 2>/dev/null | head -1)"
+        sleep 1; waited=$((waited + 1))
+    done
+    i_hard=""; i_mnet=""
+    if [ -n "$i_model" ]; then
+        # M6: least privilege, from Docker's record and from the kernel's.
+        i_hard="$(docker inspect -f 'user={{.Config.User}} ro={{.HostConfig.ReadonlyRootfs}} capadd={{.HostConfig.CapAdd}} capdrop={{.HostConfig.CapDrop}} sec={{.HostConfig.SecurityOpt}}' "$i_model" 2>/dev/null)"
+        i_hard="${i_hard} $(docker exec "$i_model" sh -c 'grep -E "^(CapEff|NoNewPrivs):" /proc/1/status | sed -E "s/:[[:space:]]+/=/" | tr "\n" " "' 2>/dev/null)"
+        # M1: the model container itself has no way out either.
+        i_mnet="$(docker exec "$i_model" sh -c 'for t in warden-egress-proxy:3128 1.1.1.1:443; do if curl -s -o /dev/null --max-time 3 "http://$t"; then echo "$t=reachable"; else echo "$t=unreachable"; fi; done' 2>/dev/null | tr '\n' ' ')"
+    fi
+    wait "$i_bg" 2>/dev/null || true
+    i1_rc="$(cat "${I_CACHE}/run1.rc" 2>/dev/null || echo '?')"
+    i1_out="$(cat "${I_CACHE}/run1.log" 2>/dev/null)"
+    i1_left="$(i_leftovers)"
+
+    if [ -z "$i_model" ]; then
+        i_fail "no model container ever appeared for the session (rc=${i1_rc})"
+        note "         $(printf '%s' "$i1_out" | grep -E 'fail|FATAL|refus' | tr '\n' ' ' | cut -c1-240)"
+    else
+        if printf '%s' "$i1_out" | grep -q 'I-proxy=unreachable' && printf '%s' "$i1_out" | grep -q 'I-direct=unreachable' \
+           && [ "$i_mnet" = "warden-egress-proxy:3128=unreachable 1.1.1.1:443=unreachable " ]; then
+            good "phase I (M1): agent and model are offline - neither reaches the proxy nor the internet"
+        else
+            i_fail "(M1) the session is not offline: agent=[$(printf '%s' "$i1_out" | grep -E '^I-(proxy|direct)=' | tr '\n' ' ')] model=[${i_mnet}]"
+        fi
+        # The only key inside is the CLI's inert placeholder (aider needs some value).
+        if printf '%s' "$i1_out" | grep -qx 'I-keys=warden-local-no-key||'; then
+            good "phase I (M3): no cloud API key reached the agent (host had three exported)"
+        else
+            i_fail "(M3) a cloud key reached the local-model session: $(printf '%s' "$i1_out" | grep '^I-keys=' | sed -E 's/(sk-[a-z-]*)[A-Za-z0-9_-]*/\1***/g')"
+        fi
+        if printf '%s' "$i1_out" | grep -q '^I-ep=root:404 slots:501 props:501'; then
+            good "phase I (M4): the model server's web UI, /slots and POST /props are off"
+        else
+            i_fail "(M4) model server endpoints exposed: $(printf '%s' "$i1_out" | grep '^I-ep=')"
+        fi
+        case "$i_hard" in
+            *"user=65534:65534 ro=true capadd=[] capdrop=[ALL] sec=[no-new-privileges:true]"*"CapEff=0000000000000000"*"NoNewPrivs=1"*)
+                good "phase I (M6): model server runs as 65534, read-only, no capabilities, no-new-privileges" ;;
+            *)  i_fail "(M6) model server hardening missing: ${i_hard}" ;;
+        esac
+        if printf '%s' "$i1_out" | grep -q '^I-chat=200'; then
+            good "phase I: the agent reached the model over the private network (chat completion 200)"
+        else
+            i_fail "agent could not use the model: $(printf '%s' "$i1_out" | grep '^I-chat=')"
+        fi
+    fi
+    # Only meaningful if a model container existed - otherwise "nothing left" is vacuous.
+    if [ -n "$i_model" ] && [ "$i1_rc" = "0" ] && [ -z "$i1_left" ]; then
+        good "phase I (M5): a clean session (exit 0) left no model container or network behind"
+    else
+        i_fail "(M5) after exit ${i1_rc} leftovers remain: $(printf '%s' "$i1_left" | tr '\n' ' ')"
+    fi
+
+    # M5 on the breach path: the tripwire still works offline, and cleanup still runs.
+    i2_out="$(WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c 'cat /workspace/.secrets/credentials >/dev/null; sleep 20' 2>&1)"
+    i2_rc=$?
+    i2_left="$(i_leftovers)"
+    rm -f "${I_WS}"/WARDEN_SECURITY_INCIDENT*.json 2>/dev/null || true
+    # "Nothing left" only counts if the model really started (else it is vacuous).
+    if [ "$i2_rc" -eq 99 ] && [ -z "$i2_left" ] && printf '%s' "$i2_out" | grep -q 'local model ready'; then
+        good "phase I (M5): a breach in a local-model session exits 99 and leaves nothing behind"
+    else
+        i_fail "(M5) breach path: rc=${i2_rc}, leftovers: $(printf '%s' "$i2_left" | tr '\n' ' ')"
+    fi
+
+    # M2: one flipped byte in the model file -> refuse (78) before creating anything.
+    cp "${I_CACHE}/stories260K.gguf" "${I_CACHE}/tampered.gguf"
+    printf 'X' | dd of="${I_CACHE}/tampered.gguf" bs=1 seek=4096 conv=notrunc 2>/dev/null
+    sed "s/stories260K.gguf/tampered.gguf/" "${I_CACHE}/manifest.json" > "${I_CACHE}/tampered.json"
+    WARDEN_MODEL_MANIFEST="${I_CACHE}/tampered.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c 'echo THIS MUST NOT RUN' >/dev/null 2>&1
+    i3_rc=$?
+    i3_left="$(i_leftovers)"
+    if [ "$i3_rc" -eq 78 ] && [ -z "$i3_left" ]; then
+        good "phase I (M2): a model file that does not match its manifest sha256 was refused (78), nothing started"
+    else
+        i_fail "(M2) tampered model: rc=${i3_rc}, leftovers: $(printf '%s' "$i3_left" | tr '\n' ' ')"
+    fi
+
+    # M2b: a manifest INSIDE the workspace is refused - the agent could rewrite
+    # the model and its hash together, which would make the sha256 check a lie.
+    mkdir -p "${I_WS}/model"
+    cp "${I_CACHE}/stories260K.gguf" "${I_CACHE}/manifest.json" "${I_WS}/model/"
+    WARDEN_MODEL_MANIFEST="${I_WS}/model/manifest.json" NO_COLOR=1         "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" bash -- -c 'echo THIS MUST NOT RUN' >/dev/null 2>&1
+    i6_rc=$?
+    i6_left="$(i_leftovers)"
+    rm -rf "${I_WS}/model"
+    if [ "$i6_rc" -eq 78 ] && [ -z "$i6_left" ]; then
+        good "phase I (M2): a model manifest inside the workspace (agent-writable) was refused (78)"
+    else
+        i_fail "(M2) manifest inside the workspace: rc=${i6_rc}, leftovers: $(printf '%s' "$i6_left" | tr '\n' ' ')"
+    fi
+
+    # aider-local: wired to the local server, and refused without a manifest.
+    i4_out="$(WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" aider-local -- --version 2>&1)"
+    i4_rc=$?
+    ( unset WARDEN_MODEL_MANIFEST; NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$I_WS" aider-local -- --version >/dev/null 2>&1 )
+    i5_rc=$?
+    i5_left="$(i_leftovers)"
+    i4_wired=0
+    if printf '%s' "$i4_out" | grep -q 'launching agent .*aider .*--openai-api-base http://warden-model:8080/v1'; then i4_wired=1; fi
+    if [ "$i4_rc" -eq 0 ] && [ "$i4_wired" = "1" ] && [ "$i5_rc" -ne 0 ] && [ -z "$i5_left" ]; then
+        good "phase I: aider-local launches aider against http://warden-model:8080/v1, and refuses without a manifest"
+    else
+        i_fail "aider-local wiring: with manifest rc=${i4_rc}, without rc=${i5_rc}"
+        note "         $(printf '%s' "$i4_out" | grep -E 'launching agent|fail' | tr '\n' ' ' | cut -c1-240)"
+    fi
+    rm -f "${I_CACHE}/tampered.gguf" "${I_CACHE}/tampered.json" "${I_CACHE}"/run1.* 2>/dev/null || true
+fi
+rm -rf "$I_WS" 2>/dev/null || true
 
 # =============================================================================
 printf '\n%s=========================== RESULT ==============================%s\n' "$C_BOLD" "$C_RESET"

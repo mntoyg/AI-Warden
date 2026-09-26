@@ -227,6 +227,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | `warden-cli.sh doctor` | ตรวจ prerequisite ของโฮสต์ |
 
 `agent` ที่รองรับ: `claude` | `aider` | `codex` | `bash` — ติดตั้งมาให้ใน image แล้ว
+และ `aider-local` สำหรับโมเดลในเครื่อง (ดูหัวข้อถัดไป)
 
 `codex` ใช้ `OPENAI_API_KEY` จาก `.env` — launcher จะ login ให้จาก environment (ไม่ผ่าน argv)
 และเปิด codex ด้วย sandbox ของมันเองปิดอยู่ เพราะ sandbox นั้นทำงานใน container ที่ไม่มี
@@ -249,6 +250,32 @@ docker build -f core/Dockerfile \
 ```bash
 ./scripts/warden-cli.sh run ./my-api aider -- --model sonnet --no-auto-commits
 ```
+
+### โมเดลของตัวเองในเครื่อง (offline)
+
+มีไฟล์ GGUF ของตัวเอง (เช่นเทรน LoRA บน Colab แล้ว export มา) พร้อม `manifest.json` ที่ระบุ
+`gguf_file` และ `gguf_sha256` — ให้ aider ใช้โมเดลนั้นแทน API ภายนอก:
+
+```bash
+WARDEN_MODEL_MANIFEST=~/models/warden-coder-manifest.json \
+  ./scripts/warden-cli.sh run ./my-project aider-local
+```
+
+session แบบนี้ **offline ล้วน**: agent กับ llama.cpp server อยู่บน network `internal` ส่วนตัวของ
+session นั้น ไม่มี proxy ไม่มี route ออก โค้ดใน workspace จึงออกนอกเครื่องไม่ได้เชิงโครงสร้าง
+และไม่มี cloud API key หรือ `.env` ถูกส่งเข้าไปเลย (entrypoint ตรวจซ้ำเองว่า offline จริง
+ไม่งั้นไม่ยอมเริ่ม — exit 78)
+
+- ไฟล์ GGUF ต้องตรงกับ sha256 ใน manifest และ manifest ต้องอยู่ **นอก** workspace
+  (ถ้าอยู่ข้างใน agent แก้ได้ทั้งโมเดลและ hash) ไม่ผ่านข้อไหน = exit 78 ไม่มีอะไรถูกสร้าง
+- model server รันเป็น uid 65534, rootfs read-only, ไม่มี capability, ปิด web UI และ `/slots`,
+  image ถูก pin ด้วย digest; จบ session (0 / 78 / 99) แล้วถูกลบพร้อม network
+- ใช้ CPU (GPU ยังไม่ได้ทดสอบ) ปรับได้ด้วย `WARDEN_MODEL_CTX` (ค่าเริ่มต้น 8192) และ
+  `WARDEN_MODEL_MEMORY` (ค่าเริ่มต้น `4g`)
+- pip / npm / git ใน session นี้ออกเน็ตไม่ได้ (ตั้งใจ) และ aider จะพิมพ์ error ว่าโหลด
+  `model_prices_and_context_window.json` จาก GitHub ไม่ได้ตอนเริ่ม — ไม่มีผลกับการทำงาน
+- `WARDEN_MODEL_MANIFEST` ไม่อ่านจาก `.env` โดยตั้งใจ: มันเปลี่ยนว่า session เป็นแบบไหน
+  จึงต้องสั่งเองทุกครั้ง ตรวจทั้งหมดนี้โดย phase I ด้วยโมเดลสาธารณะขนาด 1.2 MB
 
 ---
 
@@ -430,7 +457,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 8 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 9 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -442,6 +469,7 @@ agent container is GONE - killed by the sentinel
 | **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
 | **G** | agent launch — `codex` ต้อง login จาก `OPENAI_API_KEY` ได้ (ทดสอบด้วย key ปลอม) และเปิดโดยปิด sandbox ของ codex ที่ใช้ไม่ได้ใน container | `Logged in using an API key` + `sandbox_mode="danger-full-access"` |
 | **H** | egress audit trail — ทำไฟล์ log ของ proxy เสียด้วย NUL (แบบที่เกิดจาก Docker ปิดไม่สะอาด) จน `docker logs` เงียบ | มี sandbox ใช้อยู่ → `up` **ปฏิเสธ**, ไม่มี → `up` สร้าง proxy ใหม่และ trail กลับมามีชีวิต |
+| **I** | local-model session (`WARDEN_MODEL_MANIFEST`) กับโมเดลสาธารณะจิ๋ว: offline จริงทั้ง agent และ model, ไม่มี cloud key, endpoint อันตรายปิด, model server ไม่มีสิทธิ์, ไฟล์โมเดลถูกแก้ / manifest อยู่ใน workspace → ปฏิเสธ, ไม่เหลืออะไรค้างทั้งหลัง exit 0 และ 99 | ผ่านทุกข้อ, ปฏิเสธด้วย **exit 78** |
 
 อยากลองด้วยมือก็ได้:
 
@@ -514,7 +542,7 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 8 เฟส (A-H)
+│   ├── verify-isolation.sh      # ชุดทดสอบ 9 เฟส (A-I)
 │   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/
