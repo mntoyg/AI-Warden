@@ -86,6 +86,11 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 
 ### Decided this session (do not re-raise without new evidence)
 
+- **Local-model sessions are OFFLINE** (user call, 2026-09-26, on evidence): the agent sits
+  on a private internal network with its model container ONLY - no proxy, no route out -
+  so code cannot leave the box structurally, not just because no cloud key was forwarded.
+  Measured first: aider 0.86.2 -> llama-server answered in 5 s with proxy and 1.1.1.1:443
+  both unreachable. Cost accepted: no pip/npm/git network inside such a session.
 - **Fine-tuning path = (b) Colab LoRA -> local GGUF** (user call, 2026-09-26). Not the
   OpenAI fine-tuning API (closed to new users per its own docs, account had 0 jobs) and
   not "no fine-tuning". Do not re-offer the OpenAI probe.

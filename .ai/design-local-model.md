@@ -12,6 +12,14 @@
 > **ตัดสินใจแล้ว 2026-09-26 (session 9):** ผู้ใช้เลือก **(b) Colab LoRA → GGUF ในเครื่อง** ตามเอกสารนี้
 > เดโมเลื่อนแบบไม่มีวัน จึงไม่มี freeze — เริ่มฝั่ง AI Warden ได้ตาม §5 โดย phase A–G และ
 > `demo.sh --auto --agent codex` ต้องเขียวตลอด (ดู HANDOFF Next steps #1)
+>
+> **เปลี่ยนจาก §3 (user call 2026-09-26, หลังทดลอง):** agent **ไม่อยู่บน `warden_internal`** แล้ว —
+> session โหมด local อยู่บนเครือข่าย internal ส่วนตัวที่มีแค่ agent + model **offline ล้วน** โค้ดออก
+> นอกเครื่องไม่ได้เชิงโครงสร้าง (M3 ไม่ต้องพึ่ง log ของ squid อีก) ทดลองแล้ว: aider → llama-server
+> ตอบใน 5 วินาที ขณะที่ proxy และ `1.1.1.1:443` ต่อไม่ได้ทั้งคู่; ผลข้างเคียงที่ยอมรับ: pip/npm/git
+> ในโหมดนี้ออกเน็ตไม่ได้ ที่ยืนยันแล้วอีก: `docker run` รับ `--network` สองตัวได้ (Docker 29.8),
+> llama-server รันเป็น `65534:65534` + `--read-only --cap-drop=ALL` ได้, `--no-webui --no-slots`
+> ทำให้ `GET /` = 404, `/slots` = 501, `POST /props` = 501 (`GET /props` ยัง 200 — อ่านอย่างเดียว)
 
 ## 1. การตัดสินใจ (user call 2026-09-16)
 
