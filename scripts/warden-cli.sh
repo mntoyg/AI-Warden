@@ -960,6 +960,30 @@ cmd_status() {
     sent="$(docker ps --filter 'label=ai.warden.role=canary-sentinel' --format '  {{.Names}}  {{.Status}}' 2>/dev/null || true)"
     printf '%s\n' "${sent:-  ${C_DIM}none${C_RESET}}"
 
+    # A CLI killed hard (no trap) leaves its model server running: RAM, and a GPU
+    # in GPU mode. Show every one, and say so when its sandbox is gone.
+    printf '\n%sLocal model servers%s\n' "$C_BOLD" "$C_RESET"
+    local mrows
+    mrows="$(docker ps -a --filter 'label=ai.warden.role=model-server' \
+              --format '{{.Names}}\t{{.Status}}\t{{.Label "ai.warden.agent"}}' 2>/dev/null || true)"
+    if [ -z "$mrows" ]; then
+        printf '  %snone%s\n' "$C_DIM" "$C_RESET"
+    else
+        printf '%s\n' "$mrows" | while IFS=$'\t' read -r n s a; do
+            local dev owner
+            dev="cpu"
+            case "$(docker inspect -f '{{range .HostConfig.DeviceRequests}}{{.Capabilities}}{{end}}' "$n" 2>/dev/null)" in
+                *gpu*) dev="GPU" ;;
+            esac
+            if docker container inspect -f '{{.Id}}' "$a" >/dev/null 2>&1; then
+                owner="for ${a}"
+            else
+                owner="${C_RED}ORPHANED${C_RESET} (sandbox ${a} is gone) - remove with: $0 stop"
+            fi
+            printf '  %-32s %-22s %-4s %s\n' "$n" "$s" "$dev" "$owner"
+        done
+    fi
+
     printf '\n%sRecent incidents%s\n' "$C_BOLD" "$C_RESET"
     local found=0 report
     while IFS= read -r report; do

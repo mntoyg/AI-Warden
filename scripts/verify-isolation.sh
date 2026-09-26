@@ -931,6 +931,24 @@ else
         i_fail "(M5) breach path: rc=${i2_rc}, leftovers: $(printf '%s' "$i2_left" | tr '\n' ' ')"
     fi
 
+    # M5 (visibility): a model server left behind by a hard-killed CLI (no trap ran)
+    # keeps its RAM - and a GPU, in GPU mode. `status` must show it, flagged as
+    # orphaned, instead of "none running". Created through the real start_model.
+    i7_name="warden-sbx-.verify-orphan-$$"
+    i7_cli() { CLI="${SCRIPT_DIR}/warden-cli.sh" MF="${I_CACHE}/stories260K.gguf" N="$i7_name" F="$1" \
+        bash -c '. "$CLI"; set +eu; MODEL_FILE="$MF"; "$F" "$N"' >/dev/null 2>&1; }
+    i7_cli start_model
+    i7_seen="$(docker ps -q --filter 'label=ai.warden.role=model-server' --filter "label=ai.warden.agent=${i7_name}" 2>/dev/null)"
+    i7_status="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" status 2>&1)"
+    i7_cli stop_model
+    i7_left="$(docker ps -aq --filter "name=verify-orphan-$$" 2>/dev/null; docker network ls -q --filter "name=verify-orphan-$$" 2>/dev/null)"
+    i7_line="$(printf '%s\n' "$i7_status" | grep -F "${i7_name}-model")"
+    if [ -n "$i7_seen" ] && printf '%s' "$i7_line" | grep -q 'ORPHANED' && [ -z "$i7_left" ]; then
+        good "phase I (M5): 'status' shows a model server orphaned by a hard-killed CLI (not 'none running')"
+    else
+        i_fail "(M5) orphaned model server: existed=$([ -n "$i7_seen" ] && echo yes || echo no), status line='${i7_line}', leftovers after cleanup: $(printf '%s' "$i7_left" | tr '\n' ' ')"
+    fi
+
     # M2: one flipped byte in the model file -> refuse (78) before creating anything.
     cp "${I_CACHE}/stories260K.gguf" "${I_CACHE}/tampered.gguf"
     printf 'X' | dd of="${I_CACHE}/tampered.gguf" bs=1 seek=4096 conv=notrunc 2>/dev/null
@@ -1076,7 +1094,7 @@ else
         j_model="$(docker ps -q --filter 'label=ai.warden.role=model-server' --filter "label=ai.warden.agent=${J_NAME}" 2>/dev/null | head -1)"
         sleep 1; waited=$((waited + 1))
     done
-    j_mdev=""; j_adev=""; j_hard=""; j_mnet=""; waited=0
+    j_mdev=""; j_adev=""; j_hard=""; j_mnet=""; j_status_line=""; waited=0
     if [ -n "$j_model" ]; then
         j_mdev="$(docker inspect -f '{{.Config.Image}} {{range .HostConfig.DeviceRequests}}{{.Capabilities}}{{end}}' "$j_model" 2>/dev/null)"
         j_hard="$(docker inspect -f 'user={{.Config.User}} ro={{.HostConfig.ReadonlyRootfs}} capadd={{.HostConfig.CapAdd}} capdrop={{.HostConfig.CapDrop}} sec={{.HostConfig.SecurityOpt}}' "$j_model" 2>/dev/null)"
@@ -1087,6 +1105,9 @@ else
             j_adev="$(docker inspect -f 'agent-devices=[{{range .HostConfig.DeviceRequests}}{{.Capabilities}}{{end}}]' "$J_NAME" 2>/dev/null)"
             sleep 1; waited=$((waited + 1))
         done
+        # While the session runs, `status` must show the model server as GPU and tied
+        # to its live sandbox (the orphaned case is phase I's).
+        j_status_line="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" status 2>&1 | grep -F "${J_NAME}-model")"
     fi
     wait "$j_bg" 2>/dev/null || true
     j1_rc="$(cat "${I_CACHE}/gpu1.rc" 2>/dev/null || echo '?')"
@@ -1105,6 +1126,13 @@ else
         else
             j_fail "GPU session not proven: model=[${j_mdev}] cli=[$(printf '%s' "$j1_out" | grep -E 'local model ready|GPU' | tr '\n' ' ' | cut -c1-200)]"
         fi
+        case "$j_status_line" in
+            *GPU*"for ${J_NAME}"*) case "$j_status_line" in
+                *ORPHANED*) j_fail "status calls a live GPU session's model server orphaned: '${j_status_line}'" ;;
+                *) good "phase J: 'status' lists the running model server as GPU, tied to its sandbox" ;;
+                esac ;;
+            *) j_fail "status does not show the GPU model server of a running session: '${j_status_line}'" ;;
+        esac
         if [ "$j_adev" = "agent-devices=[]" ]; then
             good "phase J (M7): the GPU is handed to the model server only - the agent container has no device request"
         else
