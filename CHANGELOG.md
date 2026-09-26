@@ -4,6 +4,34 @@
 
 ---
 
+## [1.0.6] — 2026-09-26
+
+**Integrity fix ของ audit trail ฝั่ง egress — ทุกคนควรอัปเกรด**
+
+การเปลี่ยนแปลงทั้งหมดอยู่ใน `scripts/warden-cli.sh` (entrypoint กับ monitor เปลี่ยนแค่ version string)
+
+### Fixed
+
+- **audit trail ของ egress ตายเงียบได้** — `docker logs warden-egress-proxy` คือบันทึก request ขาออก
+  ทุกตัว (README) แต่ถ้า Docker ปิดแบบไม่สะอาด ไฟล์ json log ของ proxy จะมี NUL byte ค้าง และหลังจากนั้น
+  `docker logs` คืน**ไม่มีอะไรใหม่เลย** ทั้งที่ squid ยังเขียนอยู่และ proxy ยัง `healthy` — เครื่องทดสอบ
+  เป็นแบบนี้มา **10 วัน** (NUL 519 byte หลัง 2026-09-16 16:01 UTC) พบเพราะ CONNECT ไป
+  `api.openai.com` ที่ยิงเป็น control ไม่ขึ้นใน log `docker restart` ไม่ช่วย เพราะใช้ไฟล์เดิม
+  ตอนนี้ `warden-cli.sh up` (และ `run` ซึ่งเรียก `up`) **พิสูจน์** ว่า trail มีชีวิต: เขียน nonce ลง stderr
+  ของ proxy แล้วต้องอ่านกลับจาก `docker logs` ได้ ถ้าไม่ได้และไม่มี sandbox ใช้ proxy อยู่ → สร้าง proxy
+  container ใหม่ (ได้ไฟล์ log ใหม่) แล้วพิสูจน์ซ้ำ ถ้ามี sandbox ใช้อยู่ → **ปฏิเสธ** (ไม่ตัด egress ของ
+  session ที่กำลังรัน และไม่ยอมรันแบบไม่มี audit) `status` แสดง `audit trail live/DEAD` และ
+  `logs proxy` เตือนเมื่อ output ถูกตัด
+
+### Tests
+
+- phase **H** ใหม่: ทำไฟล์ log ของ proxy เสียด้วย NUL แบบเดียวกับที่เจอจริง (เช็คก่อนว่าทำให้ trail ตายจริง)
+  แล้ว H1 มี sandbox วิ่งอยู่ → `up` ต้อง exit ≠ 0 และไม่แตะ proxy, H2 ไม่มี sandbox → `up` ต้องสร้าง
+  proxy ใหม่และ trail ต้องกลับมามีชีวิต — **FAIL ทั้งสองข้อกับโค้ด v1.0.5** (`up` ตอบ rc=0
+  "already running")
+
+---
+
 ## [1.0.5] — 2026-09-24
 
 **Usability/trust fix ของ launcher — ผู้ใช้ที่รัน `codex` ด้วย API key ควรอัปเกรด**

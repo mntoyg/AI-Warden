@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.0.5"
+readonly WARDEN_VERSION="1.0.6"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -320,19 +320,9 @@ proxy_running() {
     [ "$(docker inspect -f '{{.State.Running}}' "$PROXY_CONTAINER" 2>/dev/null || echo false)" = "true" ]
 }
 
-cmd_up() {
-    docker_available
-    assert_networks_sane
-    if proxy_running; then
-        ok "egress proxy already running"
-    else
-        info "starting egress allowlist proxy (compose also creates both networks)"
-        compose up -d warden-egress-proxy
-    fi
-
-    local waited=0
+wait_proxy_healthy() {
+    local waited=0 health
     while [ "$waited" -lt 45 ]; do
-        local health
         health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
                   "$PROXY_CONTAINER" 2>/dev/null || echo unknown)"
         case "$health" in
@@ -342,6 +332,60 @@ cmd_up() {
         sleep 1; waited=$((waited + 1))
     done
     die "egress proxy did not become healthy within 45s. Inspect with: $0 logs proxy"
+}
+
+# `docker logs warden-egress-proxy` is the egress audit trail, and it can die
+# without a sound: an unclean Docker shutdown leaves NUL bytes in the json log
+# file, after which `docker logs` returns nothing new while squid keeps writing
+# (seen on Docker Desktop: ten days of egress missing, proxy healthy throughout).
+# `docker restart` keeps the damaged file. So liveness is PROVEN, not assumed: a
+# nonce written to the proxy's stderr must come back out of `docker logs`.
+audit_trail_live() {
+    local nonce="warden-audit-probe-$$-${RANDOM}${RANDOM}"
+    docker exec "$PROXY_CONTAINER" sh -c 'printf "[warden-cli] audit trail probe %s\n" "$0" > /proc/1/fd/2' \
+        "$nonce" >/dev/null 2>&1 || return 1
+    for _ in 1 2 3 4 5; do
+        if docker logs --since 60s "$PROXY_CONTAINER" 2>&1 | grep -qF "$nonce"; then return 0; fi
+        sleep 1
+    done
+    return 1
+}
+
+# A dead trail is healed by recreating the proxy (a new container gets a new log
+# file) - but only when no sandbox is using it, because recreation cuts every
+# live session's egress. Otherwise refuse: egress would run unaudited.
+assert_audit_trail() {
+    if audit_trail_live; then
+        ok "egress audit trail live (docker logs returned a fresh probe)"
+        return 0
+    fi
+    local busy
+    busy="$(docker ps -q --filter 'label=ai.warden.role=agent-sandbox' 2>/dev/null || true)"
+    if [ -n "$busy" ]; then
+        die "the egress audit trail is DEAD: 'docker logs ${PROXY_CONTAINER}' does not return
+        what the proxy writes (usually a log file damaged by an unclean Docker shutdown).
+        Sandboxes are using the proxy, so it was not recreated under them. Refusing to
+        run with unaudited egress. Stop them ($0 stop), then run: $0 up"
+    fi
+    warn "the egress audit trail is DEAD: 'docker logs ${PROXY_CONTAINER}' does not return what the proxy writes (usually a log file damaged by an unclean Docker shutdown) - recreating the proxy"
+    compose up -d --force-recreate warden-egress-proxy
+    wait_proxy_healthy
+    audit_trail_live \
+        || die "the egress audit trail is still dead after recreating the proxy. Refusing to run with unaudited egress."
+    ok "egress audit trail restored (proxy recreated with a fresh log)"
+}
+
+cmd_up() {
+    docker_available
+    assert_networks_sane
+    if proxy_running; then
+        ok "egress proxy already running"
+    else
+        info "starting egress allowlist proxy (compose also creates both networks)"
+        compose up -d warden-egress-proxy
+    fi
+    wait_proxy_healthy
+    assert_audit_trail
 }
 
 cmd_down() {
@@ -678,6 +722,12 @@ cmd_status() {
         local rules
         rules="$(grep -cvE '^[[:space:]]*(#|$)' "${PROJECT_ROOT}/core/network/whitelist_domains.txt" 2>/dev/null || echo '?')"
         printf '  %-22s %s domain rule(s)\n' "allowlist" "$rules"
+        if audit_trail_live; then
+            printf '  %-22s %slive%s (docker logs returned a fresh probe)\n' "audit trail" "$C_GREEN" "$C_RESET"
+        else
+            printf '  %-22s %sDEAD%s - docker logs does not return what the proxy writes; fix: %s up\n' \
+                "audit trail" "$C_RED" "$C_RESET" "$0"
+        fi
     else
         printf '  %s%-22s%s stopped   (start it with: %s up)\n' "$C_RED" "$PROXY_CONTAINER" "$C_RESET" "$0"
     fi
@@ -766,7 +816,12 @@ cmd_logs() {
     local what="${1:-proxy}"
     shift || true
     case "$what" in
-        proxy|egress) docker logs "$PROXY_CONTAINER" "$@" ;;
+        proxy|egress)
+            # Silence here is only evidence if the trail is alive.
+            if proxy_running && ! audit_trail_live; then
+                warn "the egress audit trail is DEAD - output below stops where the log file was damaged. Recreate the proxy with: $0 up"
+            fi
+            docker logs "$PROXY_CONTAINER" "$@" ;;
         *)            docker logs "$what" "$@" ;;
     esac
 }

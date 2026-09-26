@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Seven phases:
+#  Proves the sandbox actually does what the README claims. Eight phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -27,6 +27,9 @@
 #                               gVisor happy-path is skipped where runsc is absent.
 #    G. Agent launch (codex)  - warden-cli must log codex in from OPENAI_API_KEY
 #                               and turn codex's own (unworkable) sandbox off.
+#    H. Egress audit trail    - a proxy whose `docker logs` went silently dead
+#                               (corrupt json log) must be detected by `up`,
+#                               recreated when idle, refused while in use.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -51,7 +54,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,31p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,34p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -687,6 +690,91 @@ else
     bad  "phase G: codex launch is not usable (rc=${g_rc}, logged_in=${g_logged_in}, sandbox_off=${g_sandbox})"
     note "         $(printf '%s' "$g_out" | grep -E 'launching agent|Not logged in|Logged in' | sed -E 's/sk-[A-Za-z0-9_*-]+/sk-REDACTED/g' | tr '\n' ' ' | cut -c1-300)"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# =============================================================================
+printf '\n%s================= PHASE H: egress audit trail ====================%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# `docker logs warden-egress-proxy` is the egress audit trail. An unclean Docker
+# shutdown can leave NUL bytes in the proxy's json log file; from then on
+# `docker logs` silently returns nothing new while squid keeps writing (found
+# 2026-09-26: this box's trail had been empty for 10 days - 519 NULs after
+# 2026-09-16 16:01 UTC). `docker restart` does not help; the file survives it.
+# `warden-cli.sh up` must prove the trail is live, recreate the proxy when it is
+# not, and refuse - not recreate - while sandboxes are using the proxy.
+info "a silently dead egress audit trail must be detected and healed, never trusted"
+printf '\n'
+
+PROXY_C="warden-egress-proxy"
+# Reproduce the corruption: append NULs to the proxy's own json log, as root,
+# from a helper container that mounts the log directory (works on Docker Desktop,
+# where the path is inside the VM, and on a Linux host alike).
+h_corrupt() {
+    local lp; lp="$(docker inspect -f '{{.LogPath}}' "$PROXY_C" 2>/dev/null || true)"
+    [ -n "$lp" ] || return 1
+    docker run --rm --user 0:0 --network none -v "$(dirname "$lp"):/logdir" \
+        --entrypoint sh "$AGENT_IMAGE" -c \
+        'head -c 519 /dev/zero >> "/logdir/$1" && printf "\n\n" >> "/logdir/$1"' h "$(basename "$lp")" \
+        >/dev/null 2>&1
+}
+# The trail is live iff a line written to the proxy's stderr comes back from
+# `docker logs`. Written here directly, independent of the CLI under test.
+h_live() {
+    local nonce="verify-h-probe-$$-${RANDOM}${RANDOM}"
+    docker exec "$PROXY_C" sh -c 'printf "[verify] %s\n" "$0" > /proc/1/fd/2' "$nonce" >/dev/null 2>&1 || return 1
+    for _ in 1 2 3 4 5; do
+        if docker logs --since 60s "$PROXY_C" 2>&1 | grep -qF "$nonce"; then return 0; fi
+        sleep 1
+    done
+    return 1
+}
+h_id() { docker inspect -f '{{.Id}}' "$PROXY_C" 2>/dev/null || true; }
+
+if [ "$(docker inspect -f '{{.HostConfig.LogConfig.Type}}' "$PROXY_C" 2>/dev/null)" != "json-file" ]; then
+    note "phase H: the proxy does not use the json-file log driver here - drill skipped"
+else
+    # H-precondition: the drill's own corruption must actually kill the trail,
+    # or a "healed" verdict below would prove nothing.
+    "${SCRIPT_DIR}/warden-cli.sh" up >/dev/null 2>&1
+    h_corrupt
+    if h_live; then
+        bad  "phase H: corrupting the proxy log did not break docker logs - the drill has no teeth here"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    else
+        # H1: sandboxes are using the proxy -> refuse, do not recreate it under them.
+        docker rm -f warden-verify-h-busy >/dev/null 2>&1 || true
+        docker run -d --name warden-verify-h-busy --label ai.warden.role=agent-sandbox \
+            --network none --entrypoint sleep "$AGENT_IMAGE" 120 >/dev/null 2>&1
+        h_id_before="$(h_id)"
+        NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" up >/dev/null 2>&1
+        h1_rc=$?
+        h1_same=0; if [ "$(h_id)" = "$h_id_before" ]; then h1_same=1; fi
+        docker rm -f warden-verify-h-busy >/dev/null 2>&1 || true
+        if [ "$h1_rc" -ne 0 ] && [ "$h1_same" = "1" ]; then
+            good "phase H: with a sandbox running, 'up' refused a dead audit trail (rc=${h1_rc}) and left the proxy alone"
+        else
+            bad  "phase H: with a sandbox running, 'up' accepted a dead audit trail (rc=${h1_rc}, proxy_untouched=${h1_same})"
+            PHASE_FAILURES=$((PHASE_FAILURES + 1))
+        fi
+
+        # H2: nothing running -> recreate the proxy and prove the new trail is live.
+        h_id_before="$(h_id)"
+        NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" up >/dev/null 2>&1
+        h2_rc=$?
+        h2_new=0; if [ -n "$(h_id)" ] && [ "$(h_id)" != "$h_id_before" ]; then h2_new=1; fi
+        h2_live=0; if h_live; then h2_live=1; fi
+        if [ "$h2_rc" -eq 0 ] && [ "$h2_new" = "1" ] && [ "$h2_live" = "1" ]; then
+            good "phase H: 'up' detected the dead audit trail, recreated the proxy, and the new trail is live"
+        else
+            bad  "phase H: dead audit trail not healed (rc=${h2_rc}, recreated=${h2_new}, live=${h2_live})"
+            PHASE_FAILURES=$((PHASE_FAILURES + 1))
+        fi
+    fi
+    # Never leave the suite's host with a dead trail, whatever the verdict.
+    if ! h_live; then
+        docker rm -f "$PROXY_C" >/dev/null 2>&1 || true
+        "${SCRIPT_DIR}/warden-cli.sh" up >/dev/null 2>&1 || true
+    fi
 fi
 
 # =============================================================================

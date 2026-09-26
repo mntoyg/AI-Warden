@@ -430,7 +430,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 7 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 8 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -441,6 +441,7 @@ agent container is GONE - killed by the sentinel
 | **E** | audit regression drills — 4 exploit ที่แก้ใน v1.0.1 (E1 symlink redirect รายงานเหตุ, E2 log injection ผ่าน argv, E3 mount guard, E4 dangling canary symlink) + E5 หลบการระบุตัวด้วย argv ปลอมเป็น warden (แก้ใน v1.0.4) | refuse/ป้องกันทุกกรณี |
 | **F** | runtime fail-closed — `WARDEN_RUNTIME` (gVisor/Kata) ต้องถูกใช้จริงหรือปฏิเสธไปเลย ห้ามถอยไป `runc` แบบเงียบ ๆ | runtime ที่ไม่มีอยู่ → ปฏิเสธ, runtime ที่มีอยู่ → ถูกใช้จริง |
 | **G** | agent launch — `codex` ต้อง login จาก `OPENAI_API_KEY` ได้ (ทดสอบด้วย key ปลอม) และเปิดโดยปิด sandbox ของ codex ที่ใช้ไม่ได้ใน container | `Logged in using an API key` + `sandbox_mode="danger-full-access"` |
+| **H** | egress audit trail — ทำไฟล์ log ของ proxy เสียด้วย NUL (แบบที่เกิดจาก Docker ปิดไม่สะอาด) จน `docker logs` เงียบ | มี sandbox ใช้อยู่ → `up` **ปฏิเสธ**, ไม่มี → `up` สร้าง proxy ใหม่และ trail กลับมามีชีวิต |
 
 อยากลองด้วยมือก็ได้:
 
@@ -513,7 +514,7 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 7 เฟส (A-G)
+│   ├── verify-isolation.sh      # ชุดทดสอบ 8 เฟส (A-H)
 │   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/

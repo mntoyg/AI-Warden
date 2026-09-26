@@ -164,6 +164,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
 
 บรรทัด `TCP_DENIED/403` คือคำขอที่ถูกปฏิเสธ `TCP_TUNNEL/200` คือ CONNECT ที่อนุญาต
 
+ความเงียบใน log นี้เป็นหลักฐานได้ก็ต่อเมื่อ trail ยังมีชีวิต: ถ้า Docker ปิดแบบไม่สะอาด ไฟล์ log ของ
+proxy อาจมี NUL ค้าง แล้ว `docker logs` จะไม่คืนอะไรใหม่เลยทั้งที่ squid ยังเขียนอยู่ เช็คด้วย
+
+```bash
+./scripts/warden-cli.sh status     # แถว "audit trail" ต้องเป็น live
+```
+
+ถ้าขึ้น `DEAD` ให้รัน `./scripts/warden-cli.sh up` — มันจะสร้าง proxy ใหม่ (ถ้าไม่มี sandbox ใช้อยู่)
+แล้วพิสูจน์ซ้ำ `run` ทำขั้นนี้ให้อัตโนมัติ (phase H ของชุดทดสอบ)
+
 ### 1.4 Canary tripwire
 
 ก่อนอื่น ดูว่า path ไหน "บังคับใช้ได้จริง" บนเครื่องคุณ — monitor รายงานไว้ตอนเริ่ม container:
