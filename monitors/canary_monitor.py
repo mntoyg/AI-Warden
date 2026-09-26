@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.2.1"
+WARDEN_VERSION = "1.2.2"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------
@@ -461,8 +461,10 @@ def publish_new_file(path: Path, content: str) -> None:
 # /proc/<pid>/cmdline is attacker-controlled: a process can name itself
 # anything, including terminal escape sequences or forged '[canary ...]' lines.
 # This is a forensic record a human reads under pressure, so nothing reaching it
-# gets to move the cursor or fake a log line.
-_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+# gets to move the cursor or fake a log line. That includes newline and tab: an
+# exe path with a newline in it used to print a whole forged "[canary ...]" line
+# (drill E2b) - the shape the CLI's sentinel witness reads.
+_CONTROL_CHARS = re.compile(r'[\x00-\x1f\x7f-\x9f]')
 
 
 def sanitize(text: str, limit: int = 500) -> str:

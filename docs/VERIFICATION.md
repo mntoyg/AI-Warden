@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T08:24:16Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T09:02:38Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -48,6 +48,7 @@
 ================= PHASE E: audit regression drills ==============
   PASS phase E1: breach contained (99); report refused the symlink and was preserved as a tamper-tagged fallback
   PASS phase E2: breach contained (99) and the injected escape sequences were neutralised (?[2K) in the log
+  PASS phase E2b: a newline in the reader's exe path was neutralised (?) - no forged log line
   PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
   PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
   PASS phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=complete)
@@ -339,6 +340,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | ไม่มี proxy = ไม่ยอมเริ่ม | `docker stop warden-egress-proxy` แล้ว run | exit `78` |
 | รายงานเหตุ redirect ผ่าน symlink ไม่ได้ (E1) | วาง symlink ที่ `WARDEN_SECURITY_INCIDENT.json` แล้ว trip canary | exit `99` + มี fallback ที่ติด `report_path_tampered` |
 | ชื่อ process ปลอมไม่ทำลาย forensic log (E2) | ตั้ง `argv[0]` เป็น escape sequence แล้ว trip canary | บรรทัด suspect เป็น `?[2K` (ไม่ใช่ ESC ดิบ) |
+| newline ใน exe path ปลอมบรรทัด log ไม่ได้ (E2b) | รัน `sleep` ที่ copy ไปไว้ใต้ไดเรกทอรีที่ชื่อมี newline + บรรทัด `[canary ...]` ปลอม แล้วถือ fd ของ canary | exit `99` + suspect ขึ้น `exe=/tmp/a?[canary ...` ไม่มีบรรทัดปลอมแยกออกมา |
 | mount guard ปฏิเสธ path อันตราย (E3) | source `assert_safe_mount` แล้วป้อน `/ /etc /home /mnt/c ...` | refuse ทุกอัน; project dir ปกติ accept |
 | seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
 | ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |

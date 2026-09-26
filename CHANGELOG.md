@@ -4,6 +4,22 @@
 
 ---
 
+## [1.2.2] — 2026-09-26
+
+**hardening: log ของ monitor ปลอมบรรทัดไม่ได้อีก**
+
+### Security
+
+- `sanitize()` ของ monitor ปล่อย newline กับ tab ผ่าน: process ที่ exe path มี newline (ไดเรกทอรีชื่อมี
+  newline) ทำให้ monitor พิมพ์บรรทัด `[canary ...] *** [SECURITY BREACH] file=... mode=sentinel` ปลอม
+  **ทั้งบรรทัด** ลง log ได้ ซึ่งเป็นรูปแบบที่พยาน sentinel ของ v1.2.1 อ่าน — ตอนนี้ยังใช้โจมตีพยานไม่ได้
+  (sentinel อ่าน exe ของ uid 1001 ไม่ได้) แต่ log ต้องปลอมแบบนี้ไม่ได้เลย ตอนนี้ control char ทุกตัว
+  รวม newline และ tab กลายเป็น `?` (drill E2b — FAIL กับ v1.2.1: บรรทัดปลอมโผล่จริง)
+
+### Fixed
+
+- `status`: แถวของ sentinel ไม่มีย่อหน้า (docker `--format` ตัดช่องว่างนำหน้าทิ้ง)
+
 ## [1.2.1] — 2026-09-26
 
 **security: incident records ที่เชื่อได้ — อัปเกรดจาก v1.2.0 และก่อนหน้า**

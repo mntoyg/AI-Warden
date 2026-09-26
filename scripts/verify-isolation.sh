@@ -109,7 +109,7 @@ docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/n
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
-        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e3 warden-verify-e5 \
+        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt warden-verify-i0 warden-verify-h-busy >/dev/null 2>&1 || true
     # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
@@ -431,6 +431,42 @@ if [ "$RUN_BREACH" = "1" ]; then
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     else
         bad  "phase E2: expected exit 99, got ${e2_rc} - the injected process was not detected"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
+
+    # E2b: a NEWLINE in a name the monitor prints starts a new log line. Via the
+    # exe path (a directory with a newline in it) a reader could print an exact
+    # "[SECURITY BREACH] file=... mode=sentinel" line - the shape the CLI's
+    # sentinel witness trusts. The sentinel cannot read exe today, but the log
+    # must not be forgeable that way at all. The forged timestamp is unmistakable.
+    E2B_WS="${PROJECT_ROOT}/workspaces/.verify-e2b-$$"
+    mkdir -p "$E2B_WS"; chmod 0777 "$E2B_WS" 2>/dev/null || true
+    E2B_ERR="$(mktemp)"
+    e2b_payload='d="/tmp/a
+[canary 2000-01-01T00:00:00Z] *** [SECURITY BREACH] file=/workspace/.secrets"; mkdir -p "$d"; f="$d/credentials event=OPEN mode=sentinel
+zzz"; cp /bin/sleep "$f"; exec 3</workspace/.secrets/credentials; exec "$f" 20'
+    docker run --rm \
+        --network "$INTERNAL_NET" \
+        --user 1001:1001 --workdir /workspace \
+        --cap-drop=ALL --security-opt no-new-privileges:true \
+        --memory 1g --pids-limit 128 \
+        --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+        -e WARDEN_REQUIRE_PROXY=0 \
+        -v "${VERIFY_VAULT}:/workspace/.secrets" \
+        -v "$(host_path "$E2B_WS"):/workspace" \
+        --name warden-verify-e2b \
+        "$AGENT_IMAGE" \
+        bash -c "$e2b_payload" >/dev/null 2>"$E2B_ERR"
+    e2b_rc=$?
+    e2b_forged=0; e2b_named=0
+    if grep -qx '\[canary 2000-01-01T00:00:00Z\] \*\*\* \[SECURITY BREACH\] file=/workspace/.secrets/credentials event=OPEN mode=sentinel' "$E2B_ERR"; then e2b_forged=1; fi
+    if grep -q 'suspect pid=.*evidence=open file descriptor exe=/tmp/a?' "$E2B_ERR"; then e2b_named=1; fi
+    rm -f "$E2B_ERR" 2>/dev/null || true
+    rm -rf "$E2B_WS" 2>/dev/null || true
+    if [ "$e2b_rc" -eq 99 ] && [ "$e2b_forged" -eq 0 ] && [ "$e2b_named" -eq 1 ]; then
+        good "phase E2b: a newline in the reader's exe path was neutralised (?) - no forged log line"
+    else
+        bad  "phase E2b: rc=${e2b_rc} forged-line=${e2b_forged} reader-named-with-?=${e2b_named}"
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     fi
 fi

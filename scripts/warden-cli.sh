@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.1"
+readonly WARDEN_VERSION="1.2.2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -1036,7 +1036,8 @@ cmd_status() {
 
     printf '\n%sSentinels%s\n' "$C_BOLD" "$C_RESET"
     local sent
-    sent="$(docker ps --filter 'label=ai.warden.role=canary-sentinel' --format '  {{.Names}}  {{.Status}}' 2>/dev/null || true)"
+    # docker's --format drops leading spaces, so the indent is added here.
+    sent="$(docker ps --filter 'label=ai.warden.role=canary-sentinel' --format '{{.Names}}  {{.Status}}' 2>/dev/null | sed 's/^/  /' || true)"
     printf '%s\n' "${sent:-  ${C_DIM}none${C_RESET}}"
 
     # A CLI killed hard (no trap) leaves its model server running: RAM, and a GPU

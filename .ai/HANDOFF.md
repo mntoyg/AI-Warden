@@ -82,19 +82,12 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    (gVisor + `--pid container:` is a known limitation, THREAT_MODEL §4.1). Idea, ASK first: this
    box has a WSL kali distro - dockerd + runsc inside it would be a real gVisor host (installs
    software into the user's WSL = their call).
-4. **(low) `sanitize()` in canary_monitor.py lets newline and tab through** (its character class
-   skips \x09-\x0a). No exploit today: cmdline is printed `repr()`-quoted and the sentinel
-   cannot read `exe`. But v1.2.1's sentinel witness trusts that no agent string opens a new line
-   in the sentinel's log - make the class `[\x00-\x1f\x7f-\x9f]`, extend drill E2
-   with a newline, ship with the next image rebuild.
-5. **(low, idea) Surface the inline monitor's richer record without new privileges.**
+4. **(low, idea) Surface the inline monitor's richer record without new privileges.**
    Since v1.2.1 the inline monitor's own report survives the race as a labelled second file when
    it is not killed first, so this may already be enough - check a few real two-monitor breaches
    before designing anything.
-6. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
+5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
    heuristic (is it a mountpoint?), not a path pattern — decide before coding.
-7. **(cosmetic) `status` prints sentinel rows without the two-space indent** (docker's `--format`
-   drops leading spaces) - pipe through `sed 's/^/  /'`.
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -183,7 +176,7 @@ would I know if this silently did nothing?" — then run that.
 |---|---|
 | Docker Desktop is often not running at session start | `Start-Process "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"` (PowerShell), then poll `docker info` in the background |
 | Bash tool is Git Bash: `/workspace` gets rewritten into a Windows path | `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` — and then pass *host* paths through `cygpath -w` |
-| Backslashes and `\n` inside heredoc-fed Python collapse | Use `chr(92)`/`chr(10)`, or the Write/Edit tools, for any source containing backslashes |
+| Backslashes and `\n` inside heredoc-fed Python collapse | Use `chr(92)`/`chr(10)`, or the Write/Edit tools, for any source containing backslashes. **Doubling them does NOT help**: session 10 put real newlines/tabs into HANDOFF and CHANGELOG three times that way, and two `sed` one-liners with escaped backslashes broke too. After any scripted doc edit, scan the file for control characters. |
 | Backticks in `git commit -m` get eaten | Write the message to a file and use `git commit -F file` |
 | `set -e` + `[ test ] && cmd` exits the script when the test is false | Use `if ...; then ...; fi` |
 | `die` inside `$(...)` only kills the subshell | Call guard functions directly; publish results in a global |
@@ -224,7 +217,7 @@ would I know if this silently did nothing?" — then run that.
 | A scratch harness is a COPY of the suite | It is sed-extracted at one moment; edit the drill afterwards and the harness still runs the old text. Session 10 watched E7 "fail" on a fixed build because the harness still grepped a message the drill no longer used. Regenerate the harness after every edit of `verify-isolation.sh`. |
 | `git commit -F /tmp/...` fails with `MSYS_NO_PATHCONV=1` exported | git.exe is a native program; the Git Bash path `/tmp/claude/...` reaches it unconverted (`could not read log file`). Do not export `MSYS_NO_PATHCONV` in the same command as `git commit -F`, or pass a `cygpath -w` path. |
 | Everything an incident record lives in is agent-writable | PID 1 runs as uid 1001 (the agent can SIGUSR1 it), `/run/warden` is a uid-1001 tmpfs, the workspace and the vault are writable by the agent. So never let a monitor or the CLI *defer to* an existing record it cannot authenticate (the pre-v1.2.1 O_TRUNC report bug) - write your own, and label what cannot be proven. The only record the agent cannot touch is the sentinel container's own log. |
-| CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. Pinning + a pull retry would remove it (low-priority next-step). |
+| CI "Secret scan" flakes on the Docker Hub pull | It pulls `zricethezav/gitleaks:latest` at runtime; Docker Hub occasionally resets the connection (`read: connection reset by peer`, exit 125). Not your code — `gh run rerun <id> --failed`. The static job's pre-pull step now retries 5x (checked session 10), so this should be rare; pinning by digest is optional. |
 
 ---
 

@@ -14,7 +14,7 @@
 # =============================================================================
 set -uo pipefail
 
-readonly WARDEN_VERSION="1.2.1"
+readonly WARDEN_VERSION="1.2.2"
 readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
