@@ -979,6 +979,161 @@ fi
 rm -rf "$I_WS" 2>/dev/null || true
 
 # =============================================================================
+printf '\n%s============== PHASE J: GPU model server (opt-in) ================%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# WARDEN_MODEL_GPU=1 serves the local model from llama.cpp's CUDA build with
+# --gpus all. That build silently falls back to the CPU when it sees no usable
+# GPU ("no usable GPU found, --gpu-layers option will be ignored") and still
+# turns healthy - a "GPU session" that is not one. So GPU mode must be proven
+# from the server's own load log, or refused. The GPU goes to the model server
+# only, never to the agent (M7 in .ai/design-local-model.md). One side of this
+# phase needs a GPU and the other needs none: each host runs the side it can
+# and prints SKIP for the other (this box: GPU; CI: none).
+info "WARDEN_MODEL_GPU=1 must be proven on the GPU or refused - never a silent CPU fallback"
+printf '\n'
+j_fail() { bad "phase J: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
+J_WS="${PROJECT_ROOT}/workspaces/.verify-gpu-$$"
+J_NAME="warden-sbx-.verify-gpu-$$"
+mkdir -p "$J_WS"; chmod 0777 "$J_WS" 2>/dev/null || true
+j_leftovers() {
+    docker ps -aq --filter "name=verify-gpu-$$" 2>/dev/null
+    docker network ls -q --filter "name=verify-gpu-$$" 2>/dev/null
+}
+
+# J-func: the offload verdict, fed lines that real b10991 runs printed (a full
+# offload on the RTX 3050, and the CUDA image started without --gpus).
+j_out="$(CLI="${SCRIPT_DIR}/warden-cli.sh" bash -c '
+    . "$CLI"; set +eu; f=0
+    full="0.29.417.930 I load_tensors: offloaded 29/29 layers to GPU"
+    nogpu="warning: no usable GPU found, --gpu-layers option will be ignored"
+    cpu="0.00.058.319 I load_tensors:   CPU_Mapped model buffer size =     1.12 MiB"
+    v="$(gpu_offload_verdict "$full" 2>/dev/null)"
+    if [ "$v" != "29/29" ]; then echo "FULL-OFFLOAD-REJECTED(${v})"; f=$((f+1)); fi
+    for case in "${nogpu}
+${cpu}" "load_tensors: offloaded 20/29 layers to GPU" "load_tensors: offloaded 0/29 layers to GPU" \
+                "${full}
+${nogpu}" ""; do
+        if gpu_offload_verdict "$case" >/dev/null 2>&1; then
+            echo "ACCEPTED[$(printf "%s" "$case" | tr "\n" "|" | cut -c1-70)]"; f=$((f+1))
+        fi
+    done
+    echo "JFAILS=$f"; exit $f' 2>&1)"
+j_func_rc=$?
+if [ "$j_func_rc" -eq 0 ]; then
+    good "phase J: the offload verdict accepts a full GPU offload and rejects CPU fallback, partial and zero offload"
+else
+    j_fail "offload verdict is wrong: $(printf '%s' "$j_out" | grep -E 'REJECTED|ACCEPTED|not found' | tr '\n' ' ' | cut -c1-240)"
+fi
+
+# J-cfg: GPU is for local-model sessions only, and only 0/1 is accepted.
+j_cfg1="$(WARDEN_MODEL_GPU=1 NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$J_WS" bash -- -c 'echo THIS MUST NOT RUN' 2>&1)"
+j_cfg1_rc=$?
+j_cfg2="$(WARDEN_MODEL_GPU=yes WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+    "${SCRIPT_DIR}/warden-cli.sh" run "$J_WS" bash -- -c 'echo THIS MUST NOT RUN' 2>&1)"
+j_cfg2_rc=$?
+j_cfg_left="$(j_leftovers)"
+if [ "$j_cfg1_rc" -ne 0 ] && printf '%s' "$j_cfg1" | grep -q 'WARDEN_MODEL_GPU=1 needs a local model' \
+   && [ "$j_cfg2_rc" -ne 0 ] && printf '%s' "$j_cfg2" | grep -q 'WARDEN_MODEL_GPU must be 0 or 1' \
+   && ! printf '%s%s' "$j_cfg1" "$j_cfg2" | grep -q 'THIS MUST NOT RUN' && [ -z "$j_cfg_left" ]; then
+    good "phase J: WARDEN_MODEL_GPU without a local model, or not 0/1, is refused before anything starts"
+else
+    j_fail "config guard: no-manifest rc=${j_cfg1_rc}, bad-value rc=${j_cfg2_rc}, leftovers: $(printf '%s' "$j_cfg_left" | tr '\n' ' ')"
+    note "         $(printf '%s\n%s' "$j_cfg1" "$j_cfg2" | grep -E 'fail|refus|RUN' | tr '\n' ' ' | cut -c1-240)"
+fi
+
+j_gpu=0
+if docker run --rm --gpus all --network none --entrypoint true "$AGENT_IMAGE" >/dev/null 2>&1; then j_gpu=1; fi
+
+if [ "$(i_sha "${I_CACHE}/stories260K.gguf")" != "$I_SHA" ] || [ ! -f "${I_CACHE}/manifest.json" ]; then
+    j_fail "the pinned test model from phase I is missing - GPU session checks not run"
+elif [ "$j_gpu" = "0" ]; then
+    # J-refuse: no GPU -> refuse up front (before pulling the CUDA image), start nothing.
+    j2_out="$(WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$J_WS" bash -- -c 'echo THIS MUST NOT RUN' 2>&1)"
+    j2_rc=$?
+    j2_left="$(j_leftovers)"
+    if [ "$j2_rc" -ne 0 ] && printf '%s' "$j2_out" | grep -q 'no GPU is available to Docker' \
+       && ! printf '%s' "$j2_out" | grep -q 'THIS MUST NOT RUN' && [ -z "$j2_left" ]; then
+        good "phase J: WARDEN_MODEL_GPU=1 on a host with no GPU is refused, nothing started"
+    else
+        j_fail "no-GPU host: rc=${j2_rc}, leftovers: $(printf '%s' "$j2_left" | tr '\n' ' ')"
+        note "         $(printf '%s' "$j2_out" | grep -E 'fail|refus|ready|RUN' | tr '\n' ' ' | cut -c1-240)"
+    fi
+    note "  SKIP phase J: the GPU session itself (this host has no GPU for Docker)"
+else
+    # J-gpu: a real GPU session through the CLI, inspected while it runs.
+    j_probe='
+        r() { if timeout 3 bash -c "</dev/tcp/$1/$2" 2>/dev/null; then echo reachable; else echo unreachable; fi; }
+        echo "J-proxy=$(r warden-egress-proxy 3128) J-direct=$(r 1.1.1.1 443)"
+        echo "J-chat=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 http://warden-model:8080/v1/chat/completions -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":8}")"
+        sleep 6'
+    ( WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST="${I_CACHE}/manifest.json" NO_COLOR=1 \
+        "${SCRIPT_DIR}/warden-cli.sh" run "$J_WS" bash -- -c "$j_probe" > "${I_CACHE}/gpu1.log" 2>&1
+      echo "$?" > "${I_CACHE}/gpu1.rc" ) &
+    j_bg=$!
+    j_model=""; waited=0
+    while [ "$waited" -lt 120 ] && [ -z "$j_model" ]; do
+        j_model="$(docker ps -q --filter 'label=ai.warden.role=model-server' --filter "label=ai.warden.agent=${J_NAME}" 2>/dev/null | head -1)"
+        sleep 1; waited=$((waited + 1))
+    done
+    j_mdev=""; j_adev=""; j_hard=""; j_mnet=""; waited=0
+    if [ -n "$j_model" ]; then
+        j_mdev="$(docker inspect -f '{{.Config.Image}} {{range .HostConfig.DeviceRequests}}{{.Capabilities}}{{end}}' "$j_model" 2>/dev/null)"
+        j_hard="$(docker inspect -f 'user={{.Config.User}} ro={{.HostConfig.ReadonlyRootfs}} capadd={{.HostConfig.CapAdd}} capdrop={{.HostConfig.CapDrop}} sec={{.HostConfig.SecurityOpt}}' "$j_model" 2>/dev/null)"
+        j_hard="${j_hard} $(docker exec "$j_model" sh -c 'grep -E "^(CapEff|NoNewPrivs):" /proc/1/status | sed -E "s/:[[:space:]]+/=/" | tr "\n" " "' 2>/dev/null)"
+        j_mnet="$(docker exec "$j_model" sh -c 'for t in warden-egress-proxy:3128 1.1.1.1:443; do if curl -s -o /dev/null --max-time 3 "http://$t"; then echo "$t=reachable"; else echo "$t=unreachable"; fi; done' 2>/dev/null | tr '\n' ' ')"
+        # The agent container appears after the model is ready; the GPU must not reach it.
+        while [ "$waited" -lt 120 ] && [ -z "$j_adev" ]; do
+            j_adev="$(docker inspect -f 'agent-devices=[{{range .HostConfig.DeviceRequests}}{{.Capabilities}}{{end}}]' "$J_NAME" 2>/dev/null)"
+            sleep 1; waited=$((waited + 1))
+        done
+    fi
+    wait "$j_bg" 2>/dev/null || true
+    j1_rc="$(cat "${I_CACHE}/gpu1.rc" 2>/dev/null || echo '?')"
+    j1_out="$(cat "${I_CACHE}/gpu1.log" 2>/dev/null)"
+    j1_left="$(j_leftovers)"
+    if [ -z "$j_model" ]; then
+        j_fail "no GPU model container ever appeared (rc=${j1_rc})"
+        note "         $(printf '%s' "$j1_out" | grep -E 'fail|FATAL|refus' | tr '\n' ' ' | cut -c1-240)"
+    else
+        case "$j_mdev" in
+            *"llama.cpp@sha256:d4bdfe78ad26a1ef3ccc834fc4e4a106d882e0f2163dd9a06e067c580c742101 "*gpu*) ;;
+            *) j_mdev="BAD ${j_mdev}" ;;
+        esac
+        if [ "${j_mdev#BAD }" = "$j_mdev" ] && printf '%s' "$j1_out" | grep -qE 'local model ready: .* on GPU \(offloaded ([0-9]+)/\1 layers\)'; then
+            good "phase J: the model server runs the pinned CUDA image with a GPU and proved a full offload ($(printf '%s' "$j1_out" | grep -oE 'offloaded [0-9]+/[0-9]+' | head -1))"
+        else
+            j_fail "GPU session not proven: model=[${j_mdev}] cli=[$(printf '%s' "$j1_out" | grep -E 'local model ready|GPU' | tr '\n' ' ' | cut -c1-200)]"
+        fi
+        if [ "$j_adev" = "agent-devices=[]" ]; then
+            good "phase J (M7): the GPU is handed to the model server only - the agent container has no device request"
+        else
+            j_fail "(M7) agent container devices: '${j_adev}' (must be agent-devices=[])"
+        fi
+        case "$j_hard" in
+            *"user=65534:65534 ro=true capadd=[] capdrop=[ALL] sec=[no-new-privileges:true]"*"CapEff=0000000000000000"*"NoNewPrivs=1"*)
+                good "phase J (M6): the GPU model server keeps 65534, read-only, no capabilities, no-new-privileges" ;;
+            *)  j_fail "(M6) GPU model server hardening missing: ${j_hard}" ;;
+        esac
+        if printf '%s' "$j1_out" | grep -q 'J-proxy=unreachable J-direct=unreachable' \
+           && [ "$j_mnet" = "warden-egress-proxy:3128=unreachable 1.1.1.1:443=unreachable " ] \
+           && printf '%s' "$j1_out" | grep -q '^J-chat=200'; then
+            good "phase J (M1): a GPU session is still offline for agent and model, and the agent got an answer (200)"
+        else
+            j_fail "(M1) GPU session: agent=[$(printf '%s' "$j1_out" | grep -E '^J-' | tr '\n' ' ')] model=[${j_mnet}]"
+        fi
+    fi
+    if [ -n "$j_model" ] && [ "$j1_rc" = "0" ] && [ -z "$j1_left" ]; then
+        good "phase J (M5): the GPU session (exit 0) left no model container or network behind"
+    else
+        j_fail "(M5) GPU session exit ${j1_rc}, leftovers: $(printf '%s' "$j1_left" | tr '\n' ' ')"
+    fi
+    rm -f "${I_CACHE}"/gpu1.* 2>/dev/null || true
+    note "  SKIP phase J: the no-GPU refusal (this host has a GPU; CI runs that side)"
+fi
+rm -rf "$J_WS" 2>/dev/null || true
+
+# =============================================================================
 printf '\n%s=========================== RESULT ==============================%s\n' "$C_BOLD" "$C_RESET"
 if [ "$PHASE_FAILURES" -eq 0 ]; then
     printf '  %sAll phases passed. The sandbox is holding.%s\n\n' "$C_GREEN" "$C_RESET"

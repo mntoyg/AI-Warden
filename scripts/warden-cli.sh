@@ -52,9 +52,14 @@ WARDEN_RUNTIME="${WARDEN_RUNTIME:-}"                   # empty = Docker default 
 WARDEN_MODEL_MANIFEST="${WARDEN_MODEL_MANIFEST:-}"
 WARDEN_MODEL_CTX="${WARDEN_MODEL_CTX:-8192}"
 WARDEN_MODEL_MEMORY="${WARDEN_MODEL_MEMORY:-4g}"
+# 1 = serve the local model on the GPU. Per run only, like the manifest: it hands
+# the host's GPU driver to the model server (M7), so it is never a .env default.
+WARDEN_MODEL_GPU="${WARDEN_MODEL_GPU:-0}"
 
 # llama.cpp's OpenAI-compatible server, pinned by digest (never a floating tag).
+# Both are build b10991: server-b10991 (CPU) and server-cuda-b10991 (GPU).
 readonly MODEL_IMAGE="ghcr.io/ggml-org/llama.cpp@sha256:79903855d3de1689e9856219283591be12ba6f40a8e65fc7223824109446ad88"
+readonly MODEL_IMAGE_CUDA="ghcr.io/ggml-org/llama.cpp@sha256:d4bdfe78ad26a1ef3ccc834fc4e4a106d882e0f2163dd9a06e067c580c742101"
 readonly MODEL_ALIAS="warden-local"
 readonly MODEL_URL="http://warden-model:8080/v1"
 # aider's OpenAI client will not start without a key; this inert value is the
@@ -615,6 +620,28 @@ verify_model_manifest() {
     ok "model file matches its manifest (sha256 ${sha:0:16}...)"
 }
 
+# llama.cpp's CUDA build silently falls back to the CPU when it sees no usable
+# GPU ("no usable GPU found, --gpu-layers option will be ignored") and still
+# turns healthy. So GPU mode is proven from the server's own load log: every
+# layer offloaded, or it is not a GPU session. Prints "N/N" on success.
+gpu_offload_verdict() {
+    local log="$1" counts n m
+    if printf '%s\n' "$log" | grep -q 'no usable GPU found'; then return 1; fi
+    counts="$(printf '%s\n' "$log" | sed -n 's/.*load_tensors: offloaded \([0-9][0-9]*\)\/\([0-9][0-9]*\) layers to GPU.*/\1 \2/p' | tail -1)"
+    [ -n "$counts" ] || return 1
+    n="${counts% *}"; m="${counts#* }"
+    if [ "$m" -gt 0 ] && [ "$n" -eq "$m" ]; then printf '%s/%s' "$n" "$m"; return 0; fi
+    return 1
+}
+
+# Checked before anything starts, and before the multi-GB CUDA image is pulled.
+assert_gpu_available() {
+    docker run --rm --gpus all --network none --entrypoint true "$AGENT_IMAGE" >/dev/null 2>&1 \
+        || die "WARDEN_MODEL_GPU=1 but no GPU is available to Docker ('docker run --gpus all' failed).
+        Install the NVIDIA driver + container toolkit (Docker Desktop: WSL2 GPU support),
+        or unset WARDEN_MODEL_GPU to serve the model on the CPU."
+}
+
 model_net_for()       { printf '%s-net' "$1"; }
 model_container_for() { printf '%s-model' "$1"; }
 
@@ -636,10 +663,18 @@ start_model() {
 
     local -a rt=()
     if [ -n "$RESOLVED_RUNTIME" ]; then rt=(--runtime "$RESOLVED_RUNTIME"); fi
+    # GPU: the device goes to this container only, never to the agent. -lv 4 is
+    # what prints the load_tensors offload line (it does not log prompt text:
+    # checked with a marker on b10991).
+    local image="$MODEL_IMAGE"
+    local -a gpu=() gpu_args=()
+    if [ "$WARDEN_MODEL_GPU" = "1" ]; then
+        image="$MODEL_IMAGE_CUDA"; gpu=(--gpus all); gpu_args=(-ngl 999 -lv 4)
+    fi
     # Hardened like the sentinel. The server flags are pinned here and nothing
     # else is passed: no web UI, no /slots, and never --tools / --props / MCP.
     docker run -d --name "$model" \
-        "${rt[@]}" \
+        "${rt[@]}" "${gpu[@]}" \
         --network "$net" --network-alias warden-model \
         --user 65534:65534 --read-only --cap-drop=ALL \
         --security-opt no-new-privileges:true \
@@ -647,16 +682,26 @@ start_model() {
         --label ai.warden.role=model-server --label "ai.warden.agent=${name}" \
         --log-opt max-size=10m --log-opt max-file=2 \
         -v "$(host_path "$MODEL_FILE"):/models/model.gguf:ro" \
-        "$MODEL_IMAGE" \
+        "$image" \
         -m /models/model.gguf --host 0.0.0.0 --port 8080 --alias "$MODEL_ALIAS" \
-        --no-webui --no-slots -c "$WARDEN_MODEL_CTX" >/dev/null \
-        || { stop_model "$name"; die "could not start the model server (image ${MODEL_IMAGE})"; }
+        --no-webui --no-slots -c "$WARDEN_MODEL_CTX" "${gpu_args[@]}" >/dev/null \
+        || { stop_model "$name"; die "could not start the model server (image ${image})"; }
 
-    local waited=0 health
+    local waited=0 health verdict
     while [ "$waited" -lt 180 ]; do
         health="$(docker inspect -f '{{if .State.Running}}{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}{{else}}exited{{end}}' "$model" 2>/dev/null || echo gone)"
         case "$health" in
-            healthy) ok "local model ready: ${MODEL_ALIAS} on offline network ${net} (no proxy, no route out)"; return 0 ;;
+            healthy)
+                if [ "$WARDEN_MODEL_GPU" != "1" ]; then
+                    ok "local model ready: ${MODEL_ALIAS} on offline network ${net} (no proxy, no route out)"; return 0
+                fi
+                if verdict="$(gpu_offload_verdict "$(docker logs "$model" 2>&1)")"; then
+                    ok "local model ready: ${MODEL_ALIAS} on GPU (offloaded ${verdict} layers), offline network ${net} (no proxy, no route out)"; return 0
+                fi
+                docker logs "$model" 2>&1 | grep -E 'no usable GPU|offload|CUDA0' | tail -5 >&2 || true
+                stop_model "$name"
+                die "WARDEN_MODEL_GPU=1 but the model server did not offload every layer to a GPU (log above).
+        Refusing to run a CPU session labelled GPU. Unset WARDEN_MODEL_GPU to use the CPU." ;;
             exited|gone)
                 docker logs --tail 15 "$model" >&2 2>&1 || true
                 stop_model "$name"; die "the model server exited while loading (log above)" ;;
@@ -688,6 +733,10 @@ cmd_run() {
         die "aider-local needs a local model: set WARDEN_MODEL_MANIFEST=<path to the model's manifest.json>"
     fi
     case "$WARDEN_MODEL_CTX" in ''|*[!0-9]*) die "WARDEN_MODEL_CTX must be a number (got '${WARDEN_MODEL_CTX}')" ;; esac
+    case "$WARDEN_MODEL_GPU" in 0|1) ;; *) die "WARDEN_MODEL_GPU must be 0 or 1 (got '${WARDEN_MODEL_GPU}')" ;; esac
+    if [ "$WARDEN_MODEL_GPU" = "1" ] && [ "$local_model" = "0" ]; then
+        die "WARDEN_MODEL_GPU=1 needs a local model (WARDEN_MODEL_MANIFEST): only a local model server ever gets the GPU, never an agent"
+    fi
 
     docker image inspect "$AGENT_IMAGE" >/dev/null 2>&1 \
         || die "image ${AGENT_IMAGE} is missing. Run: $0 build"
@@ -706,6 +755,7 @@ cmd_run() {
     local agent_net="$INTERNAL_NET"
     if [ "$local_model" = "1" ]; then
         verify_model_manifest "$WARDEN_MODEL_MANIFEST" "$abs"
+        if [ "$WARDEN_MODEL_GPU" = "1" ]; then assert_gpu_available; fi
         agent_net="$(model_net_for "$name")"
     else
         cmd_up
@@ -1045,6 +1095,7 @@ ${C_BOLD}EXAMPLES${C_RESET}
   $0 run ./workspaces/default claude
   $0 run ~/src/my-api aider -- --model sonnet
   WARDEN_MODEL_MANIFEST=~/models/manifest.json $0 run ./proj aider-local   # offline
+  WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=~/models/manifest.json $0 run ./proj aider-local   # offline, on the GPU
   $0 logs proxy --since 10m
   $0 verify
 
