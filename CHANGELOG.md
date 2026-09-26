@@ -4,6 +4,14 @@
 
 ---
 
+## [1.2.3] — 2026-09-26
+
+### Fixed
+
+- `warden-cli.sh status` แสดงเฉพาะไฟล์ชื่อ `WARDEN_SECURITY_INCIDENT.json` ตั้งแต่ v1.2.1 breach ใน workspace ที่มี
+  report อยู่แล้วเขียนไฟล์ชื่อ `WARDEN_SECURITY_INCIDENT.<mode>....json` ของตัวเอง status จึงเห็นแค่ report เก่า
+  และไม่เห็นอันใหม่ (regression ที่ผมใส่เองใน v1.2.1) ตอนนี้แสดง report ทุกไฟล์ (drill E6 เพิ่มเงื่อนไข — FAIL กับ v1.2.2)
+
 ## [1.2.2] — 2026-09-26
 
 **hardening: log ของ monitor ปลอมบรรทัดไม่ได้อีก**

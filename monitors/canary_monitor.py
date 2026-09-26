@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.2.2"
+WARDEN_VERSION = "1.2.3"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------

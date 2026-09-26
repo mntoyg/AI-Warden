@@ -31,7 +31,7 @@
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T09:02:38Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
+[canary 2026-09-26T09:47:11Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -52,8 +52,9 @@
   PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
   PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
   PASS phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=complete)
-  PASS phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and the CLI named the new one
+  PASS phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and both the CLI and 'status' named the new one
   PASS phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach
+  PASS phase E8: with df failing, doctor says it could not measure disk space instead of passing it
 
 =========== PHASE F: runtime fail-closed (gVisor plumbing) ==========
   PASS phase F: assert_runtime refuses an unknown runtime and accepts a valid one
@@ -345,6 +346,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | seeding ไม่เขียนทะลุ dangling symlink (E4) | วาง symlink ค้างที่ path ของ canary แล้ว seed | target ปลายทางไม่ถูกสร้าง |
 | ปลอม argv เป็น warden หลบการระบุตัวไม่ได้ (E5) | `exec -a /opt/warden/canary_monitor.py python3 -c "f = open(...canary...)"` | exit `99` + suspect `argv impersonates a warden process` |
 | report ที่มีอยู่แล้วไม่กลืน report ใหม่ (E6) | วาง `WARDEN_SECURITY_INCIDENT.json` (0444, uid 1001) แล้ว trip canary ผ่าน `warden-cli.sh run` | exit `99` + ไฟล์เดิมไม่ถูกแตะ + report ใหม่มี `report_path_preexisting` และ CLI แสดงชื่อไฟล์ใหม่ |
+| doctor ไม่ pass สิ่งที่วัดไม่ได้ (E8) | วาง `df` ที่ล้มไว้หน้า PATH แล้วรัน `setup-host.sh` | ยังมี `Summary` + บอก `could not measure free disk space` ไม่ใช่ `sufficient free disk space` |
 | สัญญาณที่ agent ส่งเองไม่ใช่ breach (E7) | `kill -USR1 1` จากใน sandbox | exit `99` แต่ `no breach record found` + `NO incident report` ไม่มีคำว่า tripwire terminated |
 | รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
 | codex ใช้ได้จริงใน sandbox (G) | `OPENAI_API_KEY=<fake> warden-cli.sh run <dir> codex -- login status` | `Logged in using an API key` + บรรทัด launching มี `sandbox_mode="danger-full-access"` |
