@@ -14,7 +14,7 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
 
 1) START — before any work
    a. Read .ai/HANDOFF.md fully — a claim to verify, including any Next-steps DIAGNOSIS or
-      OPEN QUESTION: re-run its repro before building on it (v7, and #1 has one now).
+      OPEN QUESTION: re-run its repro first (v7; v15's "CLI + 4096 died" was contamination).
    b. Reality check: git status, git fetch + commits on origin not in HEAD, latest tag vs
       commits after it, `gh run list --limit 3`, `docker info` (if DOWN: PowerShell
       Start-Process Docker Desktop, poll in the background), `./scripts/warden-cli.sh status`
