@@ -61,14 +61,18 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    (gVisor + `--pid container:` is a known limitation, THREAT_MODEL §4.1). Idea, ASK first: this
    box has a WSL kali distro - dockerd + runsc inside it would be a real gVisor host (installs
    software into the user's WSL = their call).
-4. **(low, idea) Surface the inline monitor's richer record without new privileges.**
-   Since v1.2.1 the inline monitor's own report survives the race as a labelled second file when
-   it is not killed first, so this may already be enough - check a few real two-monitor breaches
-   before designing anything.
-5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
+4. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
    heuristic (is it a mountpoint?), not a path pattern — decide before coding.
 
 ### Decided this session (do not re-raise without new evidence)
+
+- **The inline monitor's richer record stays best-effort; PID 1 does not wait for it** (session 11,
+  measured): 3 real breaches through `warden-cli.sh run` (python holding the canary open). The
+  inline monitor detected all 3 with full evidence (`evidence=open file descriptor exe=...`) and
+  printed it to the console 3/3, but its report FILE survived 1/3 - when the sentinel signals first,
+  PID 1's `stop_monitor` kills it before it writes. The only fix is PID 1 waiting for it after a
+  confirmed breach, i.e. letting the agent's other processes run on to save a record the agent can
+  forge anyway (workspace). Not worth it; the sentinel's `restricted` report + console line suffice.
 
 - **GPU is opt-in, per run, and proven or refused** (session 10, on evidence): llama.cpp's CUDA
   image with no usable GPU turns healthy on the CPU, so `WARDEN_MODEL_GPU=1` requires
