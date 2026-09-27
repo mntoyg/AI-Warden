@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.4"
+readonly WARDEN_VERSION="1.2.5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -824,6 +824,18 @@ cmd_run() {
 
     docker rm -f "$name" >/dev/null 2>&1 || true
 
+    # Under gVisor --pids-limit caps the sandbox's HOST tasks (the Sentry plus a
+    # stub per guest address space), not the processes inside it: 512 killed a
+    # whole sandbox at ~150-300 processes, exit 2, no output (CI, 2026-09-27).
+    # The guest bound there is RLIMIT_NPROC (nproc=512 below, enforced by gVisor),
+    # so the host cap becomes a backstop nproc reaches first: with 4096 the same
+    # fork bomb stopped at 508 with EAGAIN through this CLI. Measured for runsc
+    # only; other runtimes keep the cap as given.
+    local host_pids="$WARDEN_PIDS_LIMIT"
+    case "$RESOLVED_RUNTIME" in
+        runsc*) host_pids=$((WARDEN_PIDS_LIMIT * 8)) ;;
+    esac
+
     # --- assemble the run arguments -----------------------------------------
     local -a args=(
         run --rm
@@ -837,7 +849,7 @@ cmd_run() {
         --memory "$WARDEN_MEMORY"
         --memory-swap "$WARDEN_MEMORY"
         --cpus "$WARDEN_CPUS"
-        --pids-limit "$WARDEN_PIDS_LIMIT"
+        --pids-limit "$host_pids"
         --ulimit nofile=8192:8192
         --ulimit nproc=512:512
         --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
@@ -925,6 +937,9 @@ cmd_run() {
         info "model      : ${MODEL_ALIAS} at ${MODEL_URL} - OFFLINE session, no proxy"
     fi
     info "runtime    : ${RESOLVED_RUNTIME:-default (runc)}"
+    if [ "$host_pids" != "$WARDEN_PIDS_LIMIT" ]; then
+        info "processes  : bounded by nproc 512 inside; host task cap ${host_pids} (gVisor counts its own host tasks)"
+    fi
     printf '\n'
 
     if [ "$local_model" = "1" ]; then

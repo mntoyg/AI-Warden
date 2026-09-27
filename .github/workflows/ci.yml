@@ -338,15 +338,13 @@ jobs:
           ls workspaces/gvb/WARDEN_SECURITY_INCIDENT*.json
           echo "breach under runsc: exit 99, report written"
 
-      # Measured 2026-09-27 (python:3.12-alpine, CLI-like flags): runc stops a
-      # fork bomb at RLIMIT_NPROC with EAGAIN (511 of 600); under runsc 150
-      # forks work and 300 kill the WHOLE sandbox - exit 2, no output, not OOM.
-      # The cause is --pids-limit: under runsc it caps gVisor's HOST tasks
-      # (without it 400 forks succeed; nofile/nproc are not involved; a CLI run
-      # with WARDEN_PIDS_LIMIT=4096 still died - the per-process cost is not
-      # measured yet). Either way the bomb must not reach 2000 processes, and
-      # the session must end.
-      - name: A fork bomb under runsc is bounded
+      # Under runsc --pids-limit caps gVisor's HOST tasks, not guest processes:
+      # with the CLI's old 512 the whole sandbox died at ~150-300 processes
+      # (exit 2, no output - v1.2.4 passed this step only as "bounded by death").
+      # Since v1.2.5 the CLI raises the host cap 8x under runsc so RLIMIT_NPROC
+      # (512, enforced by gVisor) stops the bomb inside the sandbox with EAGAIN,
+      # and the session survives it (probe 36286866296: 508 forks, errno 11).
+      - name: A fork bomb under runsc stops at RLIMIT_NPROC and the session survives
         run: |
           set +e
           mkdir -p workspaces/gvf && chmod 0777 workspaces/gvf
@@ -371,11 +369,13 @@ jobs:
           rc=$?
           echo "fork bomb under runsc: rc=${rc} $(grep -hE '^forked|^python rc' /tmp/gv-fork.log | paste -sd ' ')"
           if grep -q 'no limit hit' /tmp/gv-fork.log; then echo "::error::2000 forks hit no limit under runsc"; exit 1; fi
-          if [ "$rc" -eq 124 ]; then echo "::error::the session did not end within 300 s"; exit 1; fi
-          if [ "$rc" -eq 0 ] && ! grep -qE '^forked [0-9]+, then: errno 11' /tmp/gv-fork.log; then
-            echo "::error::the session ended cleanly with no evidence of a bound"; exit 1
+          if [ "$rc" -ne 0 ] || ! grep -qE '^forked [0-9]+, then: errno 11' /tmp/gv-fork.log \
+             || ! grep -qx 'python rc=0' /tmp/gv-fork.log; then
+            echo "::error::the fork bomb was not stopped by RLIMIT_NPROC inside a surviving sandbox (rc=${rc})"
+            tail -15 /tmp/gv-fork.log; exit 1
           fi
-          echo "bounded: the bomb did not reach 2000 processes and the session ended"
+          grep -q 'host task cap 4096' /tmp/gv-fork.log || { echo "::error::the CLI did not report the raised host task cap"; exit 1; }
+          echo "stopped at RLIMIT_NPROC with EAGAIN; the sandbox survived"
 
       - name: Nothing may be left behind
         if: always()

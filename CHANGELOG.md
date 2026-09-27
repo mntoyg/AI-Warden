@@ -4,6 +4,19 @@
 
 ---
 
+## [1.2.5] — 2026-09-27
+
+**fix: ใต้ gVisor agent ที่ใช้ process เยอะไม่ทำ sandbox ตายเงียบ ๆ อีก**
+
+### Fixed
+
+- ใต้ gVisor (`WARDEN_RUNTIME=runsc`) `--pids-limit` นับ task ของ gVisor บนโฮสต์ (Sentry + stub ต่อ address space)
+  ไม่ใช่ process ในกรง ค่า 512 ของ CLI จึงทำ sandbox **ตายทั้งตัว** exit 2 ไม่มีข้อความ เมื่อในกรงมี ~150–300 process
+  (v1.2.4 ผ่าน CI แค่แบบ "จำกัดด้วยการตาย") ตอนนี้ภายใต้ runsc CLI ตั้ง host cap เป็น 8 เท่า (4096 ค่า default)
+  ให้ RLIMIT_NPROC (512, gVisor บังคับจริง) เป็นตัวหยุดในกรง: fork bomb หยุดที่ 508 ด้วย EAGAIN และ session
+  อยู่รอด (วัดผ่าน CLI บน runner) และ CLI บอก `processes : bounded by nproc 512 inside; host task cap 4096`
+  ขั้น fork bomb ใน CI job gVisor ตอนนี้บังคับ EAGAIN + session รอด (บน v1.2.4 ขั้นนี้ล้มแบบนี้: sandbox ตาย ไม่มี errno 11)
+
 ## [1.2.4] — 2026-09-27
 
 **security: sentinel ต้องพิสูจน์ว่ามองเห็น agent ก่อน arm · gVisor รันจริงครั้งแรก (CI)**
