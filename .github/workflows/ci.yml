@@ -340,9 +340,12 @@ jobs:
 
       # Measured 2026-09-27 (python:3.12-alpine, CLI-like flags): runc stops a
       # fork bomb at RLIMIT_NPROC with EAGAIN (511 of 600); under runsc 150
-      # forks work and 300 kill the WHOLE sandbox - exit 2, no output, not OOM,
-      # with --pids-limit 512 or 4096 alike (cause not identified yet). Either
-      # way the bomb must not reach 2000 processes, and the session must end.
+      # forks work and 300 kill the WHOLE sandbox - exit 2, no output, not OOM.
+      # The cause is --pids-limit: under runsc it caps gVisor's HOST tasks
+      # (without it 400 forks succeed; nofile/nproc are not involved; a CLI run
+      # with WARDEN_PIDS_LIMIT=4096 still died - the per-process cost is not
+      # measured yet). Either way the bomb must not reach 2000 processes, and
+      # the session must end.
       - name: A fork bomb under runsc is bounded
         run: |
           set +e

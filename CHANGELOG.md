@@ -31,8 +31,9 @@
 - self-test: ใต้ gVisor `pids.max` ในกรงเป็น `max` (cgroup จำลองของ gVisor) แต่ RLIMIT_NPROC ถูกบังคับจริง
   (`--ulimit nproc=40` → fork ได้ 39 แล้ว EAGAIN) ซึ่ง CLI ตั้งไว้ 512 อยู่แล้ว — ถ้าไม่เห็น pids cap self-test
   ยอมรับ `ulimit -u` ที่มีค่าจำกัดเป็นขอบเขตแทน; phase A ใช้ rlimit ชุดเดียวกับ CLI
-  **ข้อจำกัดที่วัดได้แต่ยังไม่รู้สาเหตุ:** ใต้ gVisor เกิน ~150–300 process sandbox ตายทั้งตัว exit 2 โดยไม่มีข้อความ
-  (ไม่ใช่ OOM) — fork bomb ยังถูกจำกัด แต่ด้วยการที่ session ตาย ไม่ใช่ EAGAIN (THREAT_MODEL §4.1)
+  **ข้อจำกัดที่วัดได้:** ใต้ gVisor `--pids-limit` (512) นับ task ของ gVisor บนโฮสต์ ไม่ใช่ process ในกรง เกิน
+  ~150–300 process sandbox จึงตายทั้งตัว exit 2 โดยไม่มีข้อความ (ไม่ใช่ OOM; ไม่มี `--pids-limit` → fork 400 ผ่าน)
+  — fork bomb ยังถูกจำกัด แต่ด้วยการที่ session ตาย ไม่ใช่ EAGAIN (THREAT_MODEL §4.1)
 - ชุดทดสอบ: phase A และ B ใช้ `WARDEN_RUNTIME` ด้วย (ก่อนหน้านี้รันบน runc เสมอ แม้ในรอบ "gVisor"); phase D และ E7
   ยอมรับ "sentinel NOT armed" **เฉพาะนอก runc**; CLI เปลี่ยนจาก `sentinel attached` เป็น
   `sentinel started ... it arms only if it can see the agent`
