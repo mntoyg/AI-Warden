@@ -20,16 +20,16 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
       Start-Process Docker Desktop, poll in the background), `./scripts/warden-cli.sh status`
       ("audit trail" must say live; if DEAD, `up` heals it - v15 saw it twice). Fix HANDOFF first.
    c. BUDGET: `get_usage` (via ToolSearch). Write down weekly % at start and the STOP LINE
-      (default: start + 10%, v15 user rule) - END fires at ~70% context OR ~1.5% before the
-      stop line, whichever first. A 5-hour limit alone is never a reason to stop (v14).
+      (default: start + 10%, v15 user rule) - END fires at ~70% context OR ~1% before the stop
+      line (END costs ~0.5%: v15 began it 5% early, then resumed). 5-hour limit: never (v14).
    d. Keys live only in `.env`: test presence, never print one (redact `sk-[A-Za-z0-9_*-]+`).
    e. Check yourself before asking: a Colab GGUF in Downloads / D: / G: / lab outputs (v15:
       I said "check it for me"). Then report in 3-5 lines and ask with the AskUserQuestion
       TOOL only what blocks work: demo date, OpenAI credit (empty since 2026-09-26), downloads.
 
 2) WORK
-   - Default task: HANDOFF Next steps #1 - gVisor pids: re-run its OPEN QUESTION repro first
-     (CLI + WARDEN_PIDS_LIMIT=4096 died, raw docker >=2048 did not), then make nproc the bound.
+   - Default task: HANDOFF Next steps #1 - run my Colab GGUF (WARDEN_MODEL_GPU=1 aider-local vs
+     the untuned base in the lab's outputs/qwen-base/) if it exists, else the next item.
    - A platform this host lacks (runsc, KVM, Linux ext4): a GitHub runner via a TEMPORARY
      branch with its own `on: push: branches: [it]` workflow, in a `git worktree` (never switch
      the tree a suite runs from); delete branch + worktree after (v15: 5 gVisor rounds, main green).
@@ -48,8 +48,9 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
    - JUDGE BY MEASUREMENT, NEVER BY A LABEL: "attached", fstype `9p`, `pids.max max` all
      misled v15. SILENCE IS NOT EVIDENCE: positive control first; absence checks prove existence.
    - Probes must survive their own failure and print state (v15: a fork loop with 2>/dev/null
-     died silently 6 times) - python try/except + `docker inspect` exit/OOM. When the log echoes
-     the command, anchor greps on output lines (`grep -x`, `^`).
+     died silently 6 times) - python try/except + `docker inspect` exit/OOM; one measurement per
+     clean container (v15: a run right after a crashed sandbox faked an OPEN QUESTION). When the
+     log echoes the command, anchor greps on output lines (`grep -x`, `^`).
    - Agent CLIs: assert on output, never rc. codex "Quota exceeded" = my credit - ask, don't debug.
    - Output surprises you: STOP reading code, run the smallest experiment by hand (v14, v15).
    - NEVER edit a script a background run is executing. verify-isolation.sh is

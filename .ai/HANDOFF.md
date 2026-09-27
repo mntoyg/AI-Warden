@@ -5,7 +5,7 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-09-27 (session 11)
-- **Latest release:** [v1.2.4](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.4) — the sentinel proves it can see the agent before it arms (says `NOT armed` under gVisor instead of lying), gVisor sessions reach the proxy (`--add-host`), CI job `gVisor (runsc) drills`. v1.0.0–v1.2.3 carry a superseded/hardening note
+- **Latest release:** [v1.2.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.5) — under gVisor the CLI raises the host task cap 8x so RLIMIT_NPROC stops a fork bomb inside a surviving sandbox; on top of v1.2.4 — the sentinel proves it can see the agent before it arms (says `NOT armed` under gVisor instead of lying), gVisor sessions reach the proxy (`--add-host`), CI job `gVisor (runsc) drills`. v1.0.0–v1.2.4 carry a superseded/hardening note
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v15)
 - **🚩 MILESTONE — first live test: POSTPONED, no new date** (asked again 2026-09-27: none).
   It is still a video recorded on THIS Windows Docker Desktop box with a real agent + live
@@ -17,12 +17,12 @@
 
 | Thing | State |
 |---|---|
-| `main` | tag **`v1.2.4`** (`b1bcecd`) + `cad1428` (docs: fork-death cause) + this handoff commit, in sync with origin |
-| Tags | `v1.0.0`…`v1.2.3` carry a superseded warning (v1.2.1's is a hardening note) · **`v1.2.4` (Latest, security)** |
-| CI | **4 jobs** now: static · CVE scan · ext4 drills · **gVisor (runsc) drills**. Green on `4e9344e`, `21e76ad`, `b1bcecd` (36284692220) and tag **`v1.2.4`** (36285330668); release published, v1.2.3 marked superseded, both re-read |
-| Local suite (Docker Desktop / Windows) | on the **v1.2.4** image (rebuilt `--pull` 2026-09-27, agents unchanged: codex-cli 0.156.1, claude 2.1.197, aider 0.86.2): **A–K** all PASS, exit 0, 50 PASS lines + phase A, `enforced=4/7`; K 4/4 via a docker shim; J GPU side 7/7 |
+| `main` | tag **`v1.2.5`** (`60b530c`) + this handoff commit, in sync with origin |
+| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning (v1.2.1's is a hardening note) · **`v1.2.5` (Latest, gVisor fix)** |
+| CI | **4 jobs** now: static · CVE scan · ext4 drills · **gVisor (runsc) drills**. Green on `4e9344e`, `21e76ad`, `b1bcecd` (36284692220) tag `v1.2.4` (36285330668), `60b530c` (36287609871) and tag **`v1.2.5`** (36288229108); releases published, older ones marked superseded, re-read |
+| Local suite (Docker Desktop / Windows) | on the **v1.2.5** image (rebuilt `--pull` 2026-09-27, also run on v1.2.4, agents unchanged: codex-cli 0.156.1, claude 2.1.197, aider 0.86.2): **A–K** all PASS, exit 0, 50 PASS lines + phase A, `enforced=4/7`; K 4/4 via a docker shim; J GPU side 7/7 |
 | CI suite, ext4 | all phases A–K · `enforced=7/7` · K passes on Linux too |
-| CI suite, **gVisor** | `WARDEN_RUNTIME=runsc`: all phases pass (A and B now really run under runsc; D = honest SKIP, sentinel `NOT armed`); real session reaches api.anthropic.com via the proxy; live breach → 99 + report; fork bomb bounded (sandbox dies, see Next steps #1) |
+| CI suite, **gVisor** | `WARDEN_RUNTIME=runsc`: all phases pass (A and B now really run under runsc; D = honest SKIP, sentinel `NOT armed`); real session reaches api.anthropic.com via the proxy; live breach → 99 + report; fork bomb stops at RLIMIT_NPROC (`forked 508, then: errno 11`, `python rc=0`) with the CLI's host task cap 4096 - the sandbox survives (v1.2.5) |
 | CVEs | CI's gate green on v1.2.4 (0 HIGH/CRITICAL OS, 0 under `/opt/warden`); not re-run locally this session |
 | Egress audit trail | was DEAD at session 11 start (173 NUL bytes after an unclean Docker Desktop stop - 2nd time); `up` healed it → `live`. `run` calls `up`, so a session heals it too |
 | Incident records | unchanged since v1.2.3 (never deferred to; `Confirmed by the sentinel`); plus: the CLI prints `the out-of-band sentinel did NOT arm (from its own log ...)` when it refused to arm |
@@ -36,18 +36,7 @@
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 
-1. **gVisor: make RLIMIT_NPROC the guest bound, so a busy agent does not kill its sandbox.**
-   Measured session 11: under runsc `--pids-limit` caps gVisor's HOST tasks (Sentry + stubs), so the
-   CLI's 512 kills the whole sandbox at ~150-300 guest processes (exit 2, no output, not OOM). Raw
-   docker sweep (python:3.12-alpine, nproc 512, 700 forks): pids 1024 dies; **2048/4096/8192/16384/
-   none → `forked 511, then: errno 11`** (branch run 36286027462). OPEN QUESTION first: a CLI run with
-   `WARDEN_PIDS_LIMIT=4096` still died (CI run 36284149059, agent image, entrypoint + monitor) -
-   re-run that repro by hand before coding (is the env honoured? does the agent image cost more host
-   tasks per process?). Then: under a non-runc runtime the CLI sets a host cap that leaves nproc
-   binding, and CI's fork step (ci.yml, gvisor job) asserts `errno 11` instead of "bounded by death".
-   Probe pattern that worked: a temporary branch with its own `on: push: branches: [<it>]` workflow,
-   a git worktree for it (never switch the main tree while a suite runs), delete both after.
-2. **Local model: the user trains a real one on Colab; then run it here.** The AI Warden side
+1. **Local model: the user trains a real one on Colab; then run it here.** The AI Warden side
    is DONE: offline `aider-local` (v1.1.0) + GPU (v1.2.0) + aider gets local metadata, no GitHub
    fetch (v1.2.1), and the resource envelope of the default base model is MEASURED (Status row).
    Checked 2026-09-27: no `.gguf` in Downloads, D:, G:; lab `data/` has only `example.jsonl`.
@@ -58,17 +47,20 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    optimising (measured session 10: sha256 of 1.9 GB = 8 s; model load = 31 s from a named volume
    AND from the 9p bind mount - ~12 s I/O + ~19 s llama.cpp CPU work; `--no-mmap` was far worse;
    the 63-65 s loads were a cold cache). Do not build a model store.
-3. **Demo recording — no date (asked 2026-09-27: still none; OpenAI credit still empty). Ask again each session**
+2. **Demo recording — no date (asked 2026-09-27: still none; OpenAI credit still empty). Ask again each session**
    (with the AskUserQuestion tool). With a date: no rebuild in the days before it; the
    interactive `./scripts/demo.sh --agent codex` rehearsal is the user's step (Git Bash, not
    `bash` in PowerShell); `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
    Since v1.2.1 the take shows `Confirmed by the sentinel (outside the agent's reach)` - say it
    out loud (DEMO.md act 3). A second, labelled report file is normal when both monitors fire.
-4. **(idea, decide first) A detect-only witness under gVisor.** Measured (P9): a **runc** sentinel
+3. **(idea, decide first) A detect-only witness under gVisor.** Measured (P9): a **runc** sentinel
    beside a runsc agent HEARS canary reads on the shared vault (OPEN + ACCESS) but sees only gVisor's
    Sentry as PID 1 and cannot signal it (`Permission denied`), so it could restore the unforgeable
    `Confirmed by the sentinel` record under gVisor, not containment. Costs: the sentinel leaves the
    gVisor boundary (it runs no agent code; `--network none`, CAP_KILL only). Ask the user before building.
+4. **(low) Other VM runtimes (Kata) are unmeasured.** The CLI's gVisor handling keys on `runsc*` only
+   (host task cap) or on "not runc" (`--add-host`); the sentinel self-proof is generic. Measure on a
+   runner the same way (temporary branch) before claiming Kata works - do not extend `runsc*` by guess.
 5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
    heuristic (is it a mountpoint?), not a path pattern — decide before coding.
 
@@ -220,6 +212,7 @@ would I know if this silently did nothing?" — then run that.
 | `grep -q X log` where the log echoes the command | The CLI prints `launching agent : <cmd>`, so the breach check matched the drill's own `echo NOT KILLED` text and failed a contained breach. Anchor on the output line: `grep -qx` or `^`. |
 | A chained commit that reuses a message file | `... && grep -c ... && git add && cat > msg <<EOF ... && git commit -F msg`: grep -c exits 1 on a zero count, the chain stopped, and the next commit silently took the PREVIOUS message. Use a new file name per commit, or check `git log -1` before pushing (fixed with `--amend` before push). |
 | Heredoc-fed Python ate a backslash for the 5th time | `tr '\n' ' '` written inside a `python - <<'EOF'` non-raw string became a real newline in a workflow file (session 11). No exceptions: write `chr(10)`, use `paste -sd ' '`, or the Edit tool. |
+| Two measurements back to back share state | Session 11's CI step ran the fork bomb at pids 512 and, right after the crashed sandbox, at 4096 - the second "died" too and became a false OPEN QUESTION. A clean run of 4096 alone stopped at 508 with EAGAIN three times. One measurement per clean session/container, or a fresh workspace each. |
 
 ---
 
@@ -257,6 +250,12 @@ would I know if this silently did nothing?" — then run that.
   branch + worktree keeps main green and the local suite untouched; (3) three of my own probes/checks
   lied first (a loop that died silently, a grep that matched the echoed command, a wrong theory
   about pids 4096) - each was caught only because the next step demanded positive evidence.
+- **Cont. (after the first handoff, weekly still at 25% of the 30% line):** I had started END
+  early by over-estimating its cost (it took ~0.5%). Kept going on Next steps #1: probe 4 showed
+  the "CLI + 4096 still died" repro was contamination (clean run: 508 forks, EAGAIN); set the host
+  task cap to 8x under `runsc*`, made CI's fork step demand EAGAIN + a surviving session, local A-K
+  exit 0, CI green on main (`forked 508 ... python rc=0` through the real CLI) and on the tag -
+  shipped **v1.2.5**, v1.2.4 superseded.
 - **Prompt should have said:** the user's budget rule (this chat: stop at weekly +10%, i.e. 30%) is
   an END trigger alongside 70% context; check the Colab GGUF yourself before asking; verify on a CI
   runner via a temp branch when this host lacks the platform. All in v15.
@@ -593,7 +592,7 @@ it and say why.
   (c) **probes must survive their own failure and print state** - a fork loop with `2>/dev/null` died
   silently in 6 configurations; (d) **judge by measurement, never by a label** - `attached`, `9p`,
   `pids.max max` all misled this session; (e) START checks the Colab GGUF itself (user: "check it for
-  me"); (f) default task = Next steps #1 (gVisor pids) with its open repro first. Cut: v14's
+  me"); (f) the gVisor pids item was finished in the same session (v1.2.5), so the default task is the local model again; (g) END's cost is ~0.5% weekly - do not start it 5% early (I did, then resumed). Cut: v14's
   "CONTEXT % is the only END trigger" (superseded by (a)) and the local-model default task.
 - **v14 · 2026-09-26** — session 10 (cont.). (a) **CONTEXT is the only END trigger** (user call):
   v13 made the plan's 5-hour limit an END trigger; I handed off at 30% context, the user said
