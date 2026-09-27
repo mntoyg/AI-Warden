@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.3"
+readonly WARDEN_VERSION="1.2.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -566,10 +566,14 @@ start_sentinel() {
             --run-dir=/tmp/warden --wait-for-canaries=45 \
             --wait-for-marker=/workspace/.secrets/.warden-seeded \
             --armed-marker=/workspace/.secrets/.warden-sentinel-armed \
+            --unarmed-marker=/workspace/.secrets/.warden-sentinel-unarmed \
             --canaries="$SENTINEL_CANARIES" \
         >/dev/null 2>&1
     then
-        ok "canary sentinel attached (CAP_KILL only, no network, read-only rootfs)"
+        # Started is not armed: it arms only once it can see the agent's PID 1,
+        # and the sandbox log below says which (v1.2.3 said "attached" under
+        # gVisor, where it could see nothing).
+        ok "canary sentinel started (CAP_KILL only, no network, read-only rootfs); it arms only if it can see the agent"
     else
         warn "could not start the out-of-band sentinel; the in-container tripwire is still armed"
     fi
@@ -592,6 +596,27 @@ sentinel_breach_paths() {
         | while IFS= read -r path; do
               case ":${SENTINEL_CANARIES}:" in *":${path}:"*) printf '%s\n' "$path" ;; esac
           done
+}
+
+# Why the sentinel refused to arm, from its own log (empty = it did not refuse).
+# Same trust argument as above: the agent cannot write this log.
+sentinel_unarmed_reason() {
+    docker logs "${1}-sentinel" 2>&1 \
+        | sed -n 's/^\[canary [0-9TZ:.-]*\] \*\*\* \[NOT ARMED\] mode=sentinel: \(.*\)$/\1/p' \
+        | head -1 | LC_ALL=C tr -cd '[:print:]'
+}
+
+# Docker's embedded DNS (127.0.0.11) does not answer inside gVisor's netstack:
+# CI probe 2026-09-27 under runsc - `getent hosts warden-egress-proxy` empty,
+# the proxy's IP reachable, --add-host resolves. So under a non-default runtime
+# the names a sandbox needs are pinned in its /etc/hosts; runc keeps Docker DNS.
+# Prints nothing when not needed, and fails when the address cannot be read.
+pinned_host_args() {
+    local host="$1" container="$2" net="$3" ip
+    if [ -z "$RESOLVED_RUNTIME" ] || [ "$RESOLVED_RUNTIME" = "runc" ]; then return 0; fi
+    ip="$(docker inspect -f "{{with index .NetworkSettings.Networks \"${net}\"}}{{.IPAddress}}{{end}}" "$container" 2>/dev/null || true)"
+    [ -n "$ip" ] || return 1
+    printf '%s\n' --add-host "${host}:${ip}"
 }
 
 # Incident reports in a workspace, one path per line, sorted (for comm).
@@ -836,6 +861,14 @@ cmd_run() {
     if [ -n "$RESOLVED_RUNTIME" ]; then
         args+=(--runtime "$RESOLVED_RUNTIME")
     fi
+    local pins pin
+    if [ "$local_model" != "1" ]; then
+        pins="$(pinned_host_args warden-egress-proxy "$PROXY_CONTAINER" "$INTERNAL_NET")" \
+            || die "cannot read the egress proxy's address on ${INTERNAL_NET} to pin it for runtime ${RESOLVED_RUNTIME}"
+        while IFS= read -r pin; do
+            if [ -n "$pin" ]; then args+=("$pin"); fi
+        done <<< "$pins"
+    fi
 
     # Secrets: by NAME only. The value is read by the docker client from this
     # process's environment and never appears in argv, so it stays out of `ps`,
@@ -897,6 +930,11 @@ cmd_run() {
     if [ "$local_model" = "1" ]; then
         trap 'stop_model "$name"; remove_vault "$vault"' EXIT INT TERM
         start_model "$name"
+        pins="$(pinned_host_args warden-model "$(model_container_for "$name")" "$(model_net_for "$name")")" \
+            || die "cannot read the model server's address to pin it for runtime ${RESOLVED_RUNTIME}"
+        while IFS= read -r pin; do
+            if [ -n "$pin" ]; then args+=("$pin"); fi
+        done <<< "$pins"
     fi
     if [ "$WARDEN_SENTINEL" = "1" ]; then
         ( start_sentinel "$name" "$mount_src" "$vault" ) &
@@ -912,9 +950,10 @@ cmd_run() {
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
     # Read the sentinel's own log before it is removed: the one breach record
     # the agent cannot forge (see sentinel_breach_paths).
-    local sentinel_ran=0 sentinel_seen="" seen
+    local sentinel_ran=0 sentinel_seen="" sentinel_unarmed="" seen
     if [ "$WARDEN_SENTINEL" = "1" ] && docker container inspect "${name}-sentinel" >/dev/null 2>&1; then
-        sentinel_ran=1
+        sentinel_unarmed="$(sentinel_unarmed_reason "$name")"
+        if [ -z "$sentinel_unarmed" ]; then sentinel_ran=1; fi
         sentinel_seen="$(sentinel_breach_paths "$name")"
     fi
     # Order matters: the sentinel must be gone before anything touches a
@@ -926,6 +965,10 @@ cmd_run() {
     cleanup_workspace_canaries "$abs"
 
     printf '\n'
+    if [ -n "$sentinel_unarmed" ]; then
+        warn "the out-of-band sentinel did NOT arm (from its own log, outside the agent's reach): ${sentinel_unarmed}"
+        warn "  only the in-sandbox tripwire guarded this session"
+    fi
     if [ "$rc" -eq 99 ]; then
         local new_reports report
         new_reports="$(LC_ALL=C comm -13 <(printf '%s\n' "$reports_before") <(incident_reports "$abs") | sed '/^$/d')"

@@ -14,7 +14,7 @@
 # =============================================================================
 set -uo pipefail
 
-readonly WARDEN_VERSION="1.2.3"
+readonly WARDEN_VERSION="1.2.4"
 readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
@@ -22,6 +22,7 @@ readonly WARDEN_PY="/opt/warden/venv/bin/python3"
 readonly VAULT_DIR="${WARDEN_VAULT_DIR:-/workspace/.secrets}"
 readonly SEEDED_MARKER="${VAULT_DIR}/.warden-seeded"
 readonly SENTINEL_MARKER="${VAULT_DIR}/.warden-sentinel-armed"
+readonly SENTINEL_UNARMED_MARKER="${VAULT_DIR}/.warden-sentinel-unarmed"
 
 BREACH_EXIT_CODE="${WARDEN_BREACH_EXIT_CODE:-99}"
 STRICT="${WARDEN_STRICT:-1}"          # 1 = refuse to start on a weak posture
@@ -401,6 +402,16 @@ wait_for_sentinel() {
 ") path(s))"
             return 0
         fi
+        # The sentinel refused to arm because it cannot see this container's
+        # processes (e.g. gVisor gives it a PID namespace of its own). Written
+        # before the agent runs, so the agent cannot have staged it.
+        if [ -f "$SENTINEL_UNARMED_MARKER" ]; then
+            warn "canary sentinel    : NOT armed - $(head -c 400 "$SENTINEL_UNARMED_MARKER" 2>/dev/null | tr -cd '[:print:]')"
+            warn "  only the in-container tripwire guards the canaries in this session; an agent"
+            warn "  that kills it is not contained. Capability dropping, mount scope and the"
+            warn "  egress allowlist are unaffected."
+            return 0
+        fi
         sleep 1
         waited=$((waited + 1))
     done
@@ -477,7 +488,7 @@ mkdir -p "$RUN_DIR" 2>/dev/null || true
 rm -f "$BREACH_FLAG" "${RUN_DIR}/armed" 2>/dev/null || true
 # Compose reuses one named vault across runs, so a marker from a previous
 # session would let the sentinel arm mid-seed. Clear both before anything else.
-rm -f "$SEEDED_MARKER" "$SENTINEL_MARKER" 2>/dev/null || true
+rm -f "$SEEDED_MARKER" "$SENTINEL_MARKER" "$SENTINEL_UNARMED_MARKER" 2>/dev/null || true
 REPORTS_AT_START="$(list_incident_reports)"
 
 banner

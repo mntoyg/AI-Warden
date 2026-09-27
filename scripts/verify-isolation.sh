@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Nine phases:
+#  Proves the sandbox actually does what the README claims. Eleven phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -35,6 +35,12 @@
 #    I. Local-model session   - WARDEN_MODEL_MANIFEST: agent + llama.cpp server
 #                               offline, keyless, hardened, sha256-pinned model,
 #                               nothing left behind (tiny public GGUF).
+#    J. GPU model server      - WARDEN_MODEL_GPU=1 must prove a full offload or
+#                               refuse (the CUDA image falls back to CPU silently).
+#    K. Sentinel self-proof   - a sentinel that cannot see the agent's processes
+#                               (gVisor gives it its own PID namespace) must say
+#                               NOT armed; simulated here with a docker shim, run
+#                               for real under runsc by CI's gVisor job.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -59,7 +65,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,37p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,43p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -126,9 +132,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# WARDEN_RUNTIME applies to the raw-docker phases A and B too, so a gVisor run
+# puts the self-test and a live breach under gVisor - not quietly under runc
+# while the CLI phases use runsc. Docker's DNS does not answer inside gVisor, so
+# the proxy's name is pinned the way warden-cli.sh pins it.
+VERIFY_RT=()
+if [ -n "${WARDEN_RUNTIME:-}" ] && [ "${WARDEN_RUNTIME}" != "runc" ]; then
+    v_proxy_ip="$(docker inspect -f '{{with index .NetworkSettings.Networks "warden_internal"}}{{.IPAddress}}{{end}}' warden-egress-proxy 2>/dev/null || true)"
+    if [ -z "$v_proxy_ip" ]; then bad "cannot read the egress proxy's address to pin it for ${WARDEN_RUNTIME}"; exit 1; fi
+    VERIFY_RT=(--runtime "$WARDEN_RUNTIME" --add-host "warden-egress-proxy:${v_proxy_ip}")
+    info "phases A and B run under WARDEN_RUNTIME=${WARDEN_RUNTIME}"
+fi
+
 # The exact hardened flag set. Anything the sandbox is allowed to do, it is
 # allowed to do under these flags and no others.
 warden_flags=(
+    "${VERIFY_RT[@]}"
     --rm
     --network "$INTERNAL_NET"
     --user 1001:1001
@@ -168,7 +187,7 @@ mkdir -p "$BREACH_WS"
 chmod 0777 "$BREACH_WS" 2>/dev/null || true
 BREACH_WS_MOUNT="$(host_path "$BREACH_WS")"
 
-docker run --rm \
+docker run --rm "${VERIFY_RT[@]}" \
     --network "$INTERNAL_NET" \
     --user 1001:1001 --workdir /workspace \
     --cap-drop=ALL --security-opt no-new-privileges:true \
@@ -309,6 +328,14 @@ if [ "$phase_d" -eq 99 ]; then
     else
         note "phase D: no workspace incident report to inspect here (bind-mount write restricted); false-alarm check skipped"
     fi
+elif [ -n "${WARDEN_RUNTIME:-}" ] && [ "${WARDEN_RUNTIME}" != "runc" ] \
+     && grep -q 'canary sentinel    : NOT armed' "${D_OUT:-/dev/null}" \
+     && ! grep -q 'armed out-of-band' "${D_OUT:-/dev/null}"; then
+    # gVisor/VM runtimes give the sentinel a PID namespace of its own, so it
+    # cannot contain this agent - a documented limit (THREAT_MODEL 4.1). Allowed
+    # ONLY off the default runtime, and only when everything said so; phase K
+    # holds the honesty side on every host.
+    note "  SKIP phase D: under WARDEN_RUNTIME=${WARDEN_RUNTIME} the sentinel cannot see the agent and said NOT armed (exit ${phase_d}) - documented limit"
 else
     bad "phase D: expected exit 99, got ${phase_d} - an agent that disarms the inline"
     bad "         monitor is not contained by the out-of-band sentinel"
@@ -1328,6 +1355,77 @@ else
     note "  SKIP phase J: the no-GPU refusal (this host has a GPU; CI runs that side)"
 fi
 rm -rf "$J_WS" 2>/dev/null || true
+
+# =============================================================================
+printf '\n%s========== PHASE K: the sentinel proves it can see the agent ==========%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# Under gVisor (runsc) `--pid container:<agent>` is silently ignored: the sentinel
+# gets a PID namespace of its own, sees only itself, and its SIGUSR1 to "PID 1"
+# lands on itself (CI gVisor probe, 2026-09-27). v1.2.3 armed anyway, so the
+# sandbox logged "armed out-of-band" while nothing outside the agent could see or
+# stop it. This host has no runsc, so a docker shim drops --pid from the
+# sentinel's run only - the same separate-namespace shape. The sentinel must then
+# refuse to arm, and the sandbox and the CLI must both say so.
+info "a sentinel that cannot see the agent's processes must say NOT armed, never 'armed out-of-band'"
+printf '\n'
+K_DIR="$(mktemp -d)"
+K_REAL_DOCKER="$(command -v docker)"
+K_MARK="${K_DIR}/stripped"
+cat > "${K_DIR}/docker" <<'SHIM'
+#!/usr/bin/env bash
+# phase K shim: the sentinel in a PID namespace of its own, as runsc does it.
+if [ "${1:-}" = "run" ]; then
+    case " $* " in
+        *" ai.warden.role=canary-sentinel "*)
+            a=(); skip=0
+            for x in "$@"; do
+                if [ "$skip" = 1 ]; then skip=0; continue; fi
+                case "$x" in --pid) skip=1; continue ;; --pid=*) continue ;; esac
+                a+=("$x")
+            done
+            : > "$WARDEN_K_MARK"
+            exec "$WARDEN_K_REAL_DOCKER" "${a[@]}" ;;
+    esac
+fi
+exec "$WARDEN_K_REAL_DOCKER" "$@"
+SHIM
+chmod +x "${K_DIR}/docker"
+k_live="$(PATH="${K_DIR}:${PATH}" command -v docker)"
+K_WS="${PROJECT_ROOT}/workspaces/.verify-k-$$"
+mkdir -p "$K_WS"; chmod 0777 "$K_WS" 2>/dev/null || true
+K_OUT="$(mktemp)"
+PATH="${K_DIR}:${PATH}" WARDEN_K_REAL_DOCKER="$K_REAL_DOCKER" WARDEN_K_MARK="$K_MARK" NO_COLOR=1 \
+    "${SCRIPT_DIR}/warden-cli.sh" run "$K_WS" bash -- -lc 'echo "[drill] K agent ran"' > "$K_OUT" 2>&1
+k_rc=$?
+k_fail() { bad "phase K: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
+if [ "$k_live" != "${K_DIR}/docker" ] || [ ! -f "$K_MARK" ]; then
+    # Silence is not evidence: a shim that never ran proves nothing either way.
+    k_fail "the docker shim was not used (command -v docker -> '${k_live}', stripped=$([ -f "$K_MARK" ] && echo yes || echo no))"
+else
+    if grep -q 'armed out-of-band' "$K_OUT"; then
+        k_fail "the sandbox said 'armed out-of-band' although the sentinel could not see the agent"
+        grep -E 'canary sentinel' "$K_OUT" | sed 's/^/         /'
+    else
+        good "phase K: no 'armed out-of-band' claim from a sentinel in its own PID namespace"
+    fi
+    if grep -q 'canary sentinel    : NOT armed' "$K_OUT"; then
+        good "phase K: the sandbox said the sentinel is NOT armed, with its reason"
+    else
+        k_fail "the sandbox did not say the sentinel is NOT armed"
+    fi
+    if grep -q "did NOT arm (from its own log, outside the agent's reach)" "$K_OUT"; then
+        good "phase K: the CLI reported it from the sentinel's own log"
+    else
+        k_fail "the CLI did not report the unarmed sentinel from the sentinel's own log"
+    fi
+    if [ "$k_rc" -eq 0 ] && grep -q '^\[drill\] K agent ran' "$K_OUT" && grep -q 'canary tripwire    : armed' "$K_OUT"; then
+        good "phase K: the session still ran, guarded by the in-sandbox tripwire (rc=0)"
+    else
+        k_fail "the session did not run with the in-sandbox tripwire (rc=${k_rc})"
+        tail -5 "$K_OUT" | sed 's/^/         /'
+    fi
+fi
+rm -rf "$K_DIR" "$K_WS" "$K_OUT" 2>/dev/null || true
 
 # =============================================================================
 printf '\n%s=========================== RESULT ==============================%s\n' "$C_BOLD" "$C_RESET"

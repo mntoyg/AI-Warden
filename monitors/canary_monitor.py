@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-WARDEN_VERSION = "1.2.3"
+WARDEN_VERSION = "1.2.4"
 BREACH_EXIT_CODE = int(os.environ.get("WARDEN_BREACH_EXIT_CODE", "99"))
 
 # --- inotify(7) constants -----------------------------------------------------
@@ -790,6 +790,32 @@ def parse_canaries(raw: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def sentinel_sees_agent() -> Optional[str]:
+    """None if PID 1 here is the agent's warden-entrypoint, else why not.
+
+    The sentinel only works from inside the agent's PID namespace: that is where
+    it finds the processes to kill and the PID 1 it signals for exit 99. Docker's
+    `--pid container:<agent>` gives it that under runc, but gVisor (runsc) and
+    VM runtimes give every container a namespace of its own - silently, rc 0.
+    There the sentinel is PID 1 of an empty namespace, "kill -USR1 1" hits
+    itself, and a sentinel that armed anyway reported itself live while it could
+    neither see nor stop the agent (CI gVisor probe, 2026-09-27). Checked once,
+    before the agent runs, so the agent cannot stage PID 1 for this test.
+    """
+    if os.getpid() == 1:
+        return ("this sentinel is PID 1 of its own PID namespace - the runtime did not "
+                "share the agent's (gVisor and VM runtimes give each container its own), "
+                "so it can neither see, kill nor signal the agent")
+    try:
+        argv0 = Path("/proc/1/cmdline").read_bytes().split(b"\0")
+    except OSError as exc:
+        return f"cannot read /proc/1/cmdline ({exc.strerror}), so it cannot tell whose PID namespace this is"
+    if not any(os.path.basename(a) == b"warden-entrypoint" for a in argv0):
+        shown = sanitize(b" ".join(a for a in argv0 if a).decode("utf-8", "replace"), 120)
+        return f"PID 1 in this namespace is '{shown}', not the agent's warden-entrypoint"
+    return None
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="canary_monitor.py",
@@ -838,6 +864,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
              "entrypoint can hold the agent back until this monitor is live",
     )
     parser.add_argument(
+        "--unarmed-marker",
+        default="",
+        help="sentinel mode: if this monitor cannot see the agent's processes, "
+             "write the reason here and exit 78 instead of arming",
+    )
+    parser.add_argument(
         "--quiesce",
         type=float,
         default=-1.0,
@@ -864,6 +896,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             log(f"seeding handshake received ({args.wait_for_marker})")
         else:
             log(f"WARNING: {args.wait_for_marker} never appeared; arming anyway")
+
+    # A sentinel that cannot see the agent must not arm: its watches would only
+    # make the sandbox say "armed out-of-band" while nothing outside the agent
+    # can stop it. After the seeding handshake, so the entrypoint - which clears
+    # stale markers at start - is already past that point when this is written.
+    if args.mode == "sentinel":
+        why_not = sentinel_sees_agent()
+        if why_not is not None:
+            alert(f"[NOT ARMED] mode=sentinel: {why_not}")
+            if args.unarmed_marker:
+                try:
+                    write_no_follow(Path(args.unarmed_marker), why_not + "\n")
+                except OSError as exc:
+                    log(f"could not publish the unarmed marker: {exc}")
+            return 78
 
     # Wait for the entrypoint to finish seeding before arming.
     #
