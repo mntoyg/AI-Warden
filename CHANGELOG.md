@@ -4,6 +4,44 @@
 
 ---
 
+## [1.2.4] — 2026-09-27
+
+**security: sentinel ต้องพิสูจน์ว่ามองเห็น agent ก่อน arm · gVisor รันจริงครั้งแรก (CI)**
+
+### Security
+
+- **ใต้ gVisor (`WARDEN_RUNTIME=runsc`) sandbox บอกว่า sentinel `armed out-of-band` ทั้งที่มันมองไม่เห็นและหยุด
+  agent ไม่ได้เลย** — runsc เพิกเฉย `--pid container:<agent>` แบบเงียบ ๆ (rc 0): sentinel ได้ PID namespace ของตัวเอง
+  เห็นแค่ตัวเอง `kill -USR1 1` ไปโดนตัวเอง และไม่ได้ยิน inotify event จาก sandbox อื่น (วัดบน GitHub runner ที่ติดตั้ง
+  runsc) จำลองบนเครื่อง Docker Desktop ด้วย docker shim ที่ตัด `--pid` ออกจากคำสั่งของ sentinel: agent ที่ฆ่า inline
+  monitor แล้วอ่าน canary **รอดและจบ exit 0** ขณะที่ log บอกว่า sentinel armed
+  ตอนนี้ sentinel ตรวจ **ก่อน agent เริ่ม** ว่า PID 1 ใน namespace ของมันคือ `warden-entrypoint` ของ agent ถ้าไม่ใช่
+  จะไม่ arm: log ของตัวเองขึ้น `[NOT ARMED] mode=sentinel: <เหตุผล>`, sandbox ขึ้น `canary sentinel : NOT armed - ...`
+  และ CLI ทวนซ้ำจาก log ของ sentinel (ที่ agent เขียนไม่ได้) session ยังรันต่อโดยมี inline tripwire เฝ้า — agent
+  ที่ฆ่า inline tripwire ได้จะไม่ถูกกักใต้ gVisor ซึ่งตอนนี้ **บอกตรง ๆ** แทนที่จะอ้างว่ามีสองชั้น
+  (drill K — FAIL 3 ใน 4 ข้อกับ v1.2.3)
+
+### Fixed
+
+- **gVisor: ทุก session ที่ผ่าน CLI ล้มด้วย exit 78** — DNS ในตัวของ Docker (127.0.0.11) ไม่ตอบใน netstack ของ gVisor
+  sandbox จึงหา `warden-egress-proxy` ไม่เจอแล้ว fail closed (IP ของ proxy ต่อได้ปกติ) ตอนนี้ภายใต้ runtime ที่ไม่ใช่
+  runc CLI ปักชื่อ `warden-egress-proxy` (และ `warden-model` ใน session โมเดลในเครื่อง) ลง `/etc/hosts` ด้วย `--add-host`
+- self-test ในกรงตัดสิน canary vault จาก **ชื่อ** filesystem (`9p` = ใช้ไม่ได้) ใต้ gVisor vault แสดงเป็น `9p` แต่ส่ง
+  event ในกรงได้จริง ตอนนี้ **วัด** ด้วย probe ของ monitor เอง (volume → PASS, bind mount 9p → FAIL — ทดสอบทั้งสองทาง)
+- self-test: ใต้ gVisor `pids.max` ในกรงเป็น `max` (cgroup จำลองของ gVisor) แต่ RLIMIT_NPROC ถูกบังคับจริง
+  (`--ulimit nproc=40` → fork ได้ 39 แล้ว EAGAIN) ซึ่ง CLI ตั้งไว้ 512 อยู่แล้ว — ถ้าไม่เห็น pids cap self-test
+  ยอมรับ `ulimit -u` ที่มีค่าจำกัดเป็นขอบเขตแทน; phase A ใช้ rlimit ชุดเดียวกับ CLI
+  **ข้อจำกัดที่วัดได้แต่ยังไม่รู้สาเหตุ:** ใต้ gVisor เกิน ~150–300 process sandbox ตายทั้งตัว exit 2 โดยไม่มีข้อความ
+  (ไม่ใช่ OOM) — fork bomb ยังถูกจำกัด แต่ด้วยการที่ session ตาย ไม่ใช่ EAGAIN (THREAT_MODEL §4.1)
+- ชุดทดสอบ: phase A และ B ใช้ `WARDEN_RUNTIME` ด้วย (ก่อนหน้านี้รันบน runc เสมอ แม้ในรอบ "gVisor"); phase D และ E7
+  ยอมรับ "sentinel NOT armed" **เฉพาะนอก runc**; CLI เปลี่ยนจาก `sentinel attached` เป็น
+  `sentinel started ... it arms only if it can see the agent`
+
+### Added
+
+- CI job **`gVisor (runsc) drills`**: ติดตั้ง runsc บน runner แล้วรันชุดทดสอบทั้งชุดด้วย `WARDEN_RUNTIME=runsc`,
+  session จริงที่ต้องต่อ proxy ได้และบอกว่า sentinel NOT armed, breach จริงที่ต้องจบ exit 99 และ fork bomb ที่ต้องไม่ถึง 2000 process
+
 ## [1.2.3] — 2026-09-26
 
 ### Fixed

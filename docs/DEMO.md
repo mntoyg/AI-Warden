@@ -234,8 +234,8 @@ login และตอบผ่าน sandbox ได้จริง (`codex exec`
   แปลว่า "ระบุตัวไม่ได้" ไม่ใช่ "ไม่มีใครอ่าน" การกักกันไม่กระทบ (ยัง exit 99)
   ดู [THREAT_MODEL](THREAT_MODEL.md) §3.3
 - **นี่ไม่ใช่ VM** — เป็น isolation ที่แชร์ kernel kernel LPE เจาะได้
-  `WARDEN_RUNTIME=runsc` (gVisor) ต่อสายไว้แล้วและ fail closed แต่ happy path ของ
-  gVisor ยังไม่ได้ verify ดู §4.1
+  `WARDEN_RUNTIME=runsc` (gVisor) ใช้งานได้และทดสอบใน CI แล้ว (v1.2.4) แต่ใต้ gVisor
+  sentinel กักไม่ได้และบอกว่า `NOT armed` ดู THREAT_MODEL §4.1 (เดโมนี้ใช้ runc)
 
 ---
 

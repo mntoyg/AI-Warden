@@ -90,7 +90,9 @@ agent จึง `kill` มันได้ตรง ๆ — tripwire ชั้น
 **วิธีแก้:** `warden-canary-sentinel` เป็น container แยก
 - `--network none` → ไม่มีทาง exfiltrate ผ่านตัวมันเอง
 - `--cap-drop=ALL --cap-add=KILL` → capability เดียวในระบบทั้งหมด และให้เฉพาะ component ที่ต้องใช้
-- แชร์ PID namespace กับ sandbox → ฆ่า process ของ agent ได้
+- แชร์ PID namespace กับ sandbox → ฆ่า process ของ agent ได้ — และ **พิสูจน์ก่อน arm** ว่า PID 1 ที่เห็นคือ
+  `warden-entrypoint` ของ agent จริง ถ้าไม่ใช่ (เช่นใต้ gVisor ที่ runtime เพิกเฉย `--pid container:`) จะไม่ arm
+  และบอก `NOT armed` (v1.2.4, ดู §4.1)
 - `--read-only` rootfs, mount แค่ workspace กับ canary vault
 - agent (uid 1001, ไม่มี capability) ส่งสัญญาณหาไม่ได้ และ ptrace ไม่ได้
 
@@ -250,10 +252,21 @@ sandbox นี้ยืนอยู่บน Linux namespace ถ้ามี CVE
 sentinel `assert_runtime` เช็คกับรายชื่อ runtime ของ daemon **ก่อน** สร้าง container
 ถ้าไม่มี runtime นั้นจะ **ปฏิเสธที่จะเริ่ม** ไม่ตกไป runc เงียบ ๆ (phase F ใน
 verify-isolation.sh พิสูจน์: fail-closed + ส่ง runtime ผ่านจริง e2e).
-**ยังไม่ทดสอบบน gVisor จริง** — เครื่องพัฒนา/CI ยังไม่มี `runsc` ติดตั้ง จึงพิสูจน์ได้แค่
-ว่า runtime ถูกส่งผ่านถูกต้อง (ใช้ runtime อื่นเป็น stand-in) ยังไม่ยืนยันว่า gVisor +
-shared PID namespace ของ sentinel (`--pid container:`) ทำงานเข้ากันได้ — gVisor มี
-ข้อจำกัดเรื่องนี้ ต้องรันบน host ที่มี gVisor เพื่อยืนยัน (Next-steps ใน HANDOFF)
+
+**ทดสอบบน gVisor จริงแล้ว (v1.2.4, CI job `gVisor (runsc) drills`)** — runner ของ GitHub
+ติดตั้ง runsc จาก repo ของ gVisor แล้วรันชุดทดสอบทั้งชุดด้วย `WARDEN_RUNTIME=runsc` ผลที่วัดได้:
+
+| เรื่อง | ใต้ gVisor | ผลต่อ AI Warden |
+|---|---|---|
+| DNS ของ Docker (127.0.0.11) | ไม่ตอบใน netstack ของ gVisor, IP ต่อได้ | CLI ปักชื่อ proxy / model ลง `/etc/hosts` (`--add-host`) — ก่อน v1.2.4 ทุก session ล้ม exit 78 |
+| `--pid container:<agent>` | ถูกเพิกเฉยเงียบ ๆ: sentinel ได้ PID namespace ของตัวเอง | **sentinel กักไม่ได้** — มันตรวจเจอว่าตัวเองเป็น PID 1 แล้วบอก `NOT armed` (phase K) |
+| inotify ข้าม sandbox | watcher ใน sandbox หนึ่งไม่ได้ยินการเปิดไฟล์จากอีก sandbox | inline tripwire (อยู่ sandbox เดียวกับ agent) ใช้ได้ `enforced=7/7`, breach → exit 99 |
+| `--pids-limit` / fork | cgroup ในกรงแสดง `pids.max` = `max`; `--ulimit nproc` ถูกบังคับจริง (40 → fork ได้ 39 แล้ว EAGAIN) แต่เกิน ~150–300 process sandbox **ตายทั้งตัว** exit 2 เงียบ ๆ (ไม่ใช่ OOM, `--pids-limit` 512 หรือ 4096 ก็เหมือนกัน — ยังไม่รู้สาเหตุ) | fork bomb ยังถูกจำกัด (session จบ, โฮสต์ไม่กระทบ) แต่ agent ที่ใช้ process เยอะจริง ๆ (build ขนาน) จะทำ session ตายแบบไม่มีข้อความ |
+
+**สิ่งที่ต้องยอมรับถ้าเลือก gVisor:** ได้ชั้นกันการหลุดระดับ kernel แต่ **เสีย sentinel** — agent ที่ฆ่า inline
+tripwire (uid เดียวกัน) แล้วอ่าน canary จะไม่ถูกกัก ทุกจุดบอกเรื่องนี้ตรง ๆ (sandbox, CLI จาก log ของ sentinel เอง)
+ไม่มีการอ้างว่ามีสองชั้น sentinel แบบ runc ที่อยู่ข้าง agent แบบ runsc ได้ยินการอ่าน canary จริง (วัดแล้ว) แต่เห็น
+แค่ process ของ gVisor Sentry และส่งสัญญาณหามันไม่ได้ (`Permission denied`) จึงเป็นได้แค่พยาน ไม่ใช่ตัวกัก
 
 ### 4.2 การรั่วผ่านช่องทางที่อนุญาต
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา

@@ -16,22 +16,43 @@
 ```
 ================= PHASE A: in-sandbox self-test =================
   [PASS] running as unprivileged ai_user (uid 1001)
+  [PASS] username is ai_user
   [PASS] all Linux capabilities dropped (CapEff=0000000000000000)
   [PASS] capability bounding set is empty (no regain path)
   [PASS] no_new_privs is set (setuid escalation impossible)
   [PASS] no setuid binaries remain in the image
-  ...
-  [PASS] canary vault mounted on ext4 (an inotify-capable filesystem)
+  [PASS] sudo is not installed
+  [PASS] /etc is read-only to the agent
+  [PASS] agent binaries in /usr/local/bin are not writable
+  [PASS] no Docker socket inside the sandbox
+  [PASS] no host filesystem bind mount found
+  [PASS] the only project bind mount is /workspace
+  [PASS] /workspace is present
+  [PASS] canary vault on ext4 delivers inotify events (probed)
+  [PASS] /root is not accessible
+  [PASS] /etc/shadow is not readable
+  [PASS] no host private keys reachable
   [PASS] no direct TCP egress (the sandbox network is internal)
+  [PASS] external DNS resolvers are unreachable
+  [PASS] egress proxy reachable at warden-egress-proxy:3128
+  [PASS] allowlisted host api.anthropic.com reachable through the proxy (HTTP 401)
+  [PASS] allowlisted host registry.npmjs.org reachable (HTTP 200)
   [PASS] non-allowlisted http://example.com refused with 403
+  [PASS] CONNECT to non-allowlisted example.com:443 refused
   [PASS] IP-literal destination 1.1.1.1:443 refused
   [PASS] CONNECT to a non-443 port (github.com:22) refused
+  [PASS] known exfiltration relays are all blocked
   [PASS] 7 canary token(s) seeded and in place (checked with stat, never opened)
+  [PASS] canary_monitor.py is running inside the sandbox
   [PASS] 4 canary path(s) are genuinely enforced (probed, not assumed)
+  [PASS] no breach recorded during this run
+  [PASS] memory is capped in the cgroup (memory.max=2147483648)
+  [PASS] swap is disabled (memory.swap.max=0) - the memory cap can't be sidestepped
+  [PASS] process count is capped (pids.max=256) - fork bombs are bounded
+  34 passed, 0 failed, 0 skipped
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
-[canary 2026-09-26T09:47:11Z] *** [SECURITY BREACH] Canary file accessed by Agent Process!
   PASS phase B: canary trip terminated the sandbox with exit 99
   PASS phase B: forensic incident report written to the workspace
 
@@ -39,7 +60,6 @@
   PASS phase C: the sandbox refused an unsafe launch posture
 
 ================= PHASE D: sentinel drill =======================
-  [drill] inline monitor killed; a sentinel monitor survives (root)
   PASS phase D: the sentinel contained a breach after the inline monitor was killed
   PASS phase D: the CLI confirmed the breach from the sentinel's own log (outside the agent's reach)
   PASS phase D: the breach left a single clean incident report (no false tamper alarm from the race)
@@ -95,6 +115,12 @@
   PASS phase J (M1): a GPU session is still offline for agent and model, and the agent got an answer (200)
   PASS phase J (M5): the GPU session (exit 0) left no model container or network behind
     SKIP phase J: the no-GPU refusal (this host has a GPU; CI runs that side)
+
+========== PHASE K: the sentinel proves it can see the agent ==========
+  PASS phase K: no 'armed out-of-band' claim from a sentinel in its own PID namespace
+  PASS phase K: the sandbox said the sentinel is NOT armed, with its reason
+  PASS phase K: the CLI reported it from the sentinel's own log
+  PASS phase K: the session still ran, guarded by the in-sandbox tripwire (rc=0)
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.

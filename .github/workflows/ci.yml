@@ -264,3 +264,120 @@ jobs:
       - name: Egress audit trail
         if: always()
         run: docker logs warden-egress-proxy 2>&1 | tail -40 || true
+
+  # ===========================================================================
+  # gVisor is THREAT_MODEL 4.1's answer to a kernel escape, so it has to be run,
+  # not only plumbed. A GitHub runner is a real Linux VM and runsc installs from
+  # gVisor's own apt repo. What running it found the first time (2026-09-27):
+  # Docker's DNS does not answer inside gVisor, so every CLI session failed
+  # closed (78) until the CLI pinned the proxy/model names; and `--pid
+  # container:` is silently ignored, so the sentinel could see nothing while
+  # the sandbox said "armed out-of-band" (it now says NOT armed - phase K).
+  gvisor:
+    name: gVisor (runsc) drills
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install gVisor (runsc) and register it with Docker
+        run: |
+          set -e
+          curl -fsSL --retry 5 https://gvisor.dev/archive.key \
+            | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+            | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq runsc
+          sudo runsc install
+          sudo systemctl restart docker
+          runsc --version
+
+      - name: runsc must really be what runs
+        run: |
+          docker run --rm --runtime runsc alpine dmesg > /tmp/dmesg.txt
+          grep -q 'Starting gVisor' /tmp/dmesg.txt && echo "gVisor kernel answered: OK"
+
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build --pull
+
+      - name: Start the egress filter
+        run: ./scripts/warden-cli.sh up
+
+      - name: Isolation suite under WARDEN_RUNTIME=runsc
+        run: WARDEN_RUNTIME=runsc NO_COLOR=1 ./scripts/verify-isolation.sh
+
+      - name: A real session under runsc reaches the proxy and says the sentinel is NOT armed
+        run: |
+          set +e   # Actions runs bash -e; the rc and the log are the evidence here
+          mkdir -p workspaces/gv && chmod 0777 workspaces/gv
+          WARDEN_RUNTIME=runsc NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/gv bash -- -lc \
+            'curl -sS -o /dev/null -w "proxy path: HTTP %{http_code}\n" -m 30 https://api.anthropic.com/v1/models; dmesg 2>&1 | head -1' \
+            > /tmp/gv-ok.log 2>&1
+          echo "rc=$?"; cat /tmp/gv-ok.log
+          f=0
+          grep -q 'proxy path: HTTP [1-5][0-9][0-9]' /tmp/gv-ok.log || { echo "::error::the runsc sandbox did not reach api.anthropic.com through the proxy"; f=1; }
+          grep -q 'canary sentinel    : NOT armed' /tmp/gv-ok.log || { echo "::error::the sandbox did not say the sentinel is NOT armed under runsc"; f=1; }
+          if grep -q 'armed out-of-band' /tmp/gv-ok.log; then echo "::error::'armed out-of-band' under runsc, where the sentinel cannot see the agent"; f=1; fi
+          exit "$f"
+
+      - name: A live breach under runsc is contained by the in-sandbox tripwire (exit 99)
+        run: |
+          set +e   # a contained breach exits 99 on purpose
+          mkdir -p workspaces/gvb && chmod 0777 workspaces/gvb
+          WARDEN_RUNTIME=runsc NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/gvb bash -- -lc \
+            'cat /workspace/.secrets/credentials > /dev/null; sleep 20; echo "[drill] NOT KILLED"' \
+            > /tmp/gv-breach.log 2>&1
+          rc=$?
+          cat /tmp/gv-breach.log
+          # -x: the command line itself is echoed in the log ("launching agent: ...")
+          if [ "$rc" -ne 99 ] || grep -qx '\[drill\] NOT KILLED' /tmp/gv-breach.log; then
+            echo "::error::a canary read under runsc was not contained (rc=${rc})"
+            exit 1
+          fi
+          ls workspaces/gvb/WARDEN_SECURITY_INCIDENT*.json
+          echo "breach under runsc: exit 99, report written"
+
+      # Measured 2026-09-27 (python:3.12-alpine, CLI-like flags): runc stops a
+      # fork bomb at RLIMIT_NPROC with EAGAIN (511 of 600); under runsc 150
+      # forks work and 300 kill the WHOLE sandbox - exit 2, no output, not OOM,
+      # with --pids-limit 512 or 4096 alike (cause not identified yet). Either
+      # way the bomb must not reach 2000 processes, and the session must end.
+      - name: A fork bomb under runsc is bounded
+        run: |
+          set +e
+          mkdir -p workspaces/gvf && chmod 0777 workspaces/gvf
+          cat > workspaces/gvf/forks.py <<'PY'
+          import os, time
+          n = 0
+          for i in range(2000):
+              try:
+                  pid = os.fork()
+              except OSError as e:
+                  print(f"forked {n}, then: errno {e.errno} {e.strerror}", flush=True)
+                  break
+              if pid == 0:
+                  time.sleep(15)
+                  os._exit(0)
+              n += 1
+          else:
+              print(f"forked {n} - no limit hit", flush=True)
+          PY
+          bomb='python3 /workspace/forks.py; echo "python rc=$?"'
+          timeout 300 env WARDEN_RUNTIME=runsc NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/gvf bash -- -lc "$bomb" > /tmp/gv-fork.log 2>&1
+          rc=$?
+          echo "fork bomb under runsc: rc=${rc} $(grep -hE '^forked|^python rc' /tmp/gv-fork.log | paste -sd ' ')"
+          if grep -q 'no limit hit' /tmp/gv-fork.log; then echo "::error::2000 forks hit no limit under runsc"; exit 1; fi
+          if [ "$rc" -eq 124 ]; then echo "::error::the session did not end within 300 s"; exit 1; fi
+          if [ "$rc" -eq 0 ] && ! grep -qE '^forked [0-9]+, then: errno 11' /tmp/gv-fork.log; then
+            echo "::error::the session ended cleanly with no evidence of a bound"; exit 1
+          fi
+          echo "bounded: the bomb did not reach 2000 processes and the session ended"
+
+      - name: Nothing may be left behind
+        if: always()
+        run: |
+          ./scripts/warden-cli.sh down || true
+          left="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' | wc -l)"
+          echo "leftover canary vaults: ${left}"
+          test "$left" -eq 0

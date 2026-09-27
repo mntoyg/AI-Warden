@@ -474,7 +474,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 10 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 11 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -488,6 +488,7 @@ agent container is GONE - killed by the sentinel
 | **H** | egress audit trail — ทำไฟล์ log ของ proxy เสียด้วย NUL (แบบที่เกิดจาก Docker ปิดไม่สะอาด) จน `docker logs` เงียบ | มี sandbox ใช้อยู่ → `up` **ปฏิเสธ**, ไม่มี → `up` สร้าง proxy ใหม่และ trail กลับมามีชีวิต |
 | **I** | local-model session (`WARDEN_MODEL_MANIFEST`) กับโมเดลสาธารณะจิ๋ว: offline จริงทั้ง agent และ model, ไม่มี cloud key, endpoint อันตรายปิด, model server ไม่มีสิทธิ์, ไฟล์โมเดลถูกแก้ / manifest อยู่ใน workspace → ปฏิเสธ, ไม่เหลืออะไรค้างทั้งหลัง exit 0 และ 99 | ผ่านทุกข้อ, ปฏิเสธด้วย **exit 78** |
 | **J** | GPU model server (`WARDEN_MODEL_GPU=1`): ตัวตัดสินจาก log ต้องรับ offload ครบและปฏิเสธ CPU fallback / offload บางส่วน, GPU ไปที่ model server เท่านั้นไม่ใช่ agent, ยัง offline และไม่มีสิทธิ์เหมือน phase I — เครื่องที่มี GPU รันฝั่ง session จริง, เครื่องที่ไม่มี (CI) รันฝั่งปฏิเสธ แล้วพิมพ์ SKIP ให้อีกฝั่ง | offload ครบ หรือ **ปฏิเสธ** ไม่ตกไป CPU เงียบ ๆ |
+| **K** | sentinel พิสูจน์ตัวเอง — docker shim ตัด `--pid container:` ออกจาก sentinel (แบบที่ gVisor ทำ) แล้วดูว่าใครบอกอะไร (CI job gVisor รันของจริงด้วย `WARDEN_RUNTIME=runsc`) | ไม่มีคำว่า `armed out-of-band`, sandbox และ CLI บอก **NOT armed** พร้อมเหตุผล |
 
 อยากลองด้วยมือก็ได้:
 
@@ -517,7 +518,8 @@ AI Warden ยกระดับความปลอดภัยได้จร�
    ถ้าต้องการชั้นนี้ด้วย ตั้ง `WARDEN_RUNTIME=runsc` (gVisor) หรือ runtime อื่นที่ daemon
    ลงทะเบียนไว้ — warden จะส่ง `--runtime` ให้ทั้ง agent และ sentinel และ **ปฏิเสธที่จะเริ่ม**
    ถ้า daemon ไม่มี runtime นั้น (ไม่ตกไป runc เงียบ ๆ) และรัน Docker แบบ rootless ด้วย
-   > gVisor path ยังไม่ได้ทดสอบบน host จริงที่ลง gVisor — ดู `docs/THREAT_MODEL.md` §4.1
+   > ทดสอบบน gVisor จริงใน CI แล้ว (v1.2.4): ใช้งานได้ แต่ **sentinel กักไม่ได้ใต้ gVisor** (runtime ไม่ให้แชร์
+   > PID namespace) — มันบอก `NOT armed` แทนที่จะอ้างว่ามีสองชั้น ดู `docs/THREAT_MODEL.md` §4.1
 
 2. **การรั่วผ่านช่องทางที่อนุญาต** — ถ้า agent มีสิทธิ์คุยกับ `api.anthropic.com` ได้
    มันก็ส่งซอร์สโค้ดของคุณไปในนั้นได้ allowlist ควบคุมได้แค่ "คุยกับใคร" ไม่ใช่ "คุยว่าอะไร"
@@ -560,7 +562,7 @@ ai-warden/
 ├── scripts/
 │   ├── warden-cli.sh            # CLI หลักฝั่งโฮสต์
 │   ├── setup-host.sh            # ตรวจ prerequisite + setup
-│   ├── verify-isolation.sh      # ชุดทดสอบ 10 เฟส (A-J)
+│   ├── verify-isolation.sh      # ชุดทดสอบ 11 เฟส (A-K)
 │   ├── demo.sh                  # walkthrough สาธิต ที่ตรวจข้ออ้างตัวเอง
 │   └── selftest-in-container.sh # assertion ที่รันในกรง
 ├── devcontainer/
