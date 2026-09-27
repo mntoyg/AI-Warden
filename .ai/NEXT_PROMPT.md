@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v14 · 2026-09-26
+# AI Warden — next-session prompt · v15 · 2026-09-27
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -13,58 +13,57 @@ Docs are Thai prose + English commands/output/table headers — don't draft a do
    in the days before it and rehearse; without one: ship normally (drill + tag + CI).
 
 1) START — before any work
-   a. Read .ai/HANDOFF.md fully — a claim to verify, including any Next-steps DIAGNOSIS:
-      re-run its repro before building on it (v7: session 6's repro A blamed the wrong one).
+   a. Read .ai/HANDOFF.md fully — a claim to verify, including any Next-steps DIAGNOSIS or
+      OPEN QUESTION: re-run its repro before building on it (v7, and #1 has one now).
    b. Reality check: git status, git fetch + commits on origin not in HEAD, latest tag vs
       commits after it, `gh run list --limit 3`, `docker info` (if DOWN: PowerShell
-      Start-Process Docker Desktop, poll `docker info` in the background), and
-      `./scripts/warden-cli.sh status` ("audit trail" must say live, v12). HANDOFF wrong? Fix + commit first.
-   c. BUDGET: `get_usage` tool (via ToolSearch). CONTEXT % is the only END trigger (v14: I
-      stopped at 30% for a plan limit that reset a minute later - you rejected that).
+      Start-Process Docker Desktop, poll in the background), `./scripts/warden-cli.sh status`
+      ("audit trail" must say live; if DEAD, `up` heals it - v15 saw it twice). Fix HANDOFF first.
+   c. BUDGET: `get_usage` (via ToolSearch). Write down weekly % at start and the STOP LINE
+      (default: start + 10%, v15 user rule) - END fires at ~70% context OR ~1.5% before the
+      stop line, whichever first. A 5-hour limit alone is never a reason to stop (v14).
    d. Keys live only in `.env`: test presence, never print one (redact `sk-[A-Za-z0-9_*-]+`).
-   e. Report in 3-5 lines (state, budget, first task), then ask what blocks work with the
-      AskUserQuestion TOOL: demo date, OpenAI credit (v14: my key hit "Quota exceeded" -
-      demo act 4 cannot pass until I top up), downloads (name+source+size).
+   e. Check yourself before asking: a Colab GGUF in Downloads / D: / G: / lab outputs (v15:
+      I said "check it for me"). Then report in 3-5 lines and ask with the AskUserQuestion
+      TOOL only what blocks work: demo date, OpenAI credit (empty since 2026-09-26), downloads.
 
 2) WORK
-   - Default task: HANDOFF Next steps #1 - local model side DONE (offline, GPU, metadata,
-     measured); if my Colab GGUF exists, run it WARDEN_MODEL_GPU=1 aider-local vs the untuned
-     base in the lab's outputs/qwen-base/, else the next item. Act 4 = CODEX.
-   - Blocked on something only I can produce? Find a PUBLIC STAND-IN with the same shape
-     (v13: the untuned Qwen 1.5B answered every resource question the trained one would).
-   - After ANY `build --pull`, re-run the real agent path with my key before trusting the
-     image (v10: a rebuild moved codex-cli 0.154.0 → 0.156.1). Bump versions BEFORE it.
-   - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-J,
+   - Default task: HANDOFF Next steps #1 - gVisor pids: re-run its OPEN QUESTION repro first
+     (CLI + WARDEN_PIDS_LIMIT=4096 died, raw docker >=2048 did not), then make nproc the bound.
+   - A platform this host lacks (runsc, KVM, Linux ext4): a GitHub runner via a TEMPORARY
+     branch with its own `on: push: branches: [it]` workflow, in a `git worktree` (never switch
+     the tree a suite runs from); delete branch + worktree after (v15: 5 gVisor rounds, main green).
+   - Blocked on something only I can produce? Find a PUBLIC STAND-IN with the same shape (v13).
+   - After ANY `build --pull`, re-run the real agent path with my key (v10). Bump versions first.
+   - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-K,
      exit 0, enforced=4/7 here; report CONTENT claims via `warden-cli.sh run`.
    - New drill/assertion: write it FIRST, watch it FAIL on the OLD code, fix, run green -
-     ONLY that phase (preamble + phase block sed-extracted into a scratch harness).
-     REGENERATE the harness after every suite edit (v14: a stale copy failed E7 on a fix).
-   - A drill side this host cannot run: a PATH shim, proven live with `command -v` first.
-   - EVERY RECORD THE AGENT CAN WRITE IS FORGEABLE (workspace, /run/warden, PID 1's signal,
-     its own stdout). Never let a monitor or the CLI defer to one; write your own and label
-     what is unproven. v14's three record bugs (swallowed report, self-sent SIGUSR1, newline
-     in exe) all came from asking "how does the agent make this lie?" - ask it of the TOOL
-     too (v13: CUDA image healthy on CPU). Only the sentinel's container log is unforgeable.
-   - SILENCE IS NOT EVIDENCE: make X happen once before trusting "the log shows no X", and a
-     "nothing left behind" PASS must prove the thing EXISTED (v12, both).
-   - Agent CLIs: assert on output, never rc. codex "Quota exceeded" = my credit, not the
-     sandbox - ask me, don't debug (v14).
-   - Output surprises you / a drill fails on a fixed build: STOP reading code, run the
-     smallest experiment by hand (v14: E8's "said nothing" was the doctor dying silently).
+     ONLY that phase (preamble + phase block extracted into a scratch harness, regenerated
+     after every suite edit - v14). Prove a new check both ways (v15: vault volume PASS, 9p FAIL).
+   - A drill side this host cannot run: a PATH shim, proven live with `command -v` first
+     (v15's phase K shim reproduced gVisor's PID-namespace bug on Docker Desktop).
+   - EVERY RECORD THE AGENT CAN WRITE IS FORGEABLE; only the sentinel's container log is not.
+     Ask "how does the agent - or the TOOL/RUNTIME - make this lie?" (v15: runsc made the
+     sentinel say armed while it saw nothing).
+   - JUDGE BY MEASUREMENT, NEVER BY A LABEL: "attached", fstype `9p`, `pids.max max` all
+     misled v15. SILENCE IS NOT EVIDENCE: positive control first; absence checks prove existence.
+   - Probes must survive their own failure and print state (v15: a fork loop with 2>/dev/null
+     died silently 6 times) - python try/except + `docker inspect` exit/OOM. When the log echoes
+     the command, anchor greps on output lines (`grep -x`, `^`).
+   - Agent CLIs: assert on output, never rc. codex "Quota exceeded" = my credit - ask, don't debug.
+   - Output surprises you: STOP reading code, run the smallest experiment by hand (v14, v15).
    - NEVER edit a script a background run is executing. verify-isolation.sh is
      `set -uo pipefail` (NO -e): NEVER add `set -e` in a phase.
    - Canary paths (`$WARDEN_CANARY_FILES`, e.g. ~/.aws/credentials) trip if opened; `[ -f ]` doesn't.
-   - Quoted output in docs comes from ONE real run; check every quoted line against its log
-     with a script (strip ANSI: the in-container self-test prints colour regardless).
-   - Scripted doc edits: NO backslashes in heredoc-fed Python or sed, not even doubled (v14:
-     three corrupted files) - use chr(92) or the Edit tool, then scan for control chars.
-     Read the Gotchas table first (MSYS paths, curl.exe, commit -F without MSYS_NO_PATHCONV).
+   - Quoted output in docs/releases comes from ONE real run, checked line by line by script.
+   - NEVER type a backslash in heredoc-fed Python or sed (5th corruption in v15): chr(10),
+     `paste -sd ' '`, or the Edit tool; scan for control chars. Read the Gotchas table first.
+   - Commit messages: a NEW file per commit, check `git log -1` before push (v15 reused one).
    - Commit + push after every step. A security fix ships as TAG + release + superseded
      note (CI green on the tag, re-read); a feature is a minor version; never leave main red.
 
-3) END — self-triggered at ~70% CONTEXT, do NOT wait to be asked, do NOT stop earlier
-   a. At ~70% context STOP taking new work, finish and verify only what is in flight, then run
-      this END sequence. A plan limit near 85% only earns a HANDOFF checkpoint commit.
+3) END — self-triggered (1c), do NOT wait to be asked, do NOT stop earlier
+   a. STOP taking new work, finish and verify only what is in flight.
    b. Update .ai/HANDOFF.md: Status, re-prioritised Next steps, new Gotchas, Session
       log (Did / Learned / "Prompt should have said").
    c. Rewrite .ai/NEXT_PROMPT.md so the NEXT chat does MORE per chat and gets BETTER results:
@@ -83,5 +82,7 @@ Reality-check first — including the *diagnosis* in a handoff item and the live
 egress audit trail. Done-means-run on the real CLI path. The loop that makes sessions
 productive: assertion first → fails on old code → fix → passes, run per-phase so it costs
 seconds. v12 added the two ways a check passes while proving nothing; v13 added public
-stand-ins and live-proven shims; v14 makes context the only stop signal (the user's call),
-and turns session 10's record bugs into one rule: never trust a record the agent can write.
+stand-ins and live-proven shims; v14 turned session 10's record bugs into one rule: never
+trust a record the agent can write. v15 adds the user's budget line as a stop signal, a
+public CI runner for platforms this box lacks, and "measure, never read a label" - the
+three things that made session 11 find four gVisor bugs without breaking anything.
