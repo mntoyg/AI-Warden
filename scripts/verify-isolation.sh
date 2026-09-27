@@ -156,6 +156,9 @@ warden_flags=(
     --security-opt no-new-privileges:true
     --memory 2g --memory-swap 2g
     --pids-limit 256
+    # Same rlimits as warden-cli.sh: under gVisor nproc is the fork-bomb bound.
+    --ulimit nofile=8192:8192
+    --ulimit nproc=512:512
     --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001"
     -v "${VERIFY_VAULT}:/workspace/.secrets"
     -v "${VERIFY_WS_MOUNT}:/workspace"
@@ -700,10 +703,19 @@ e7_rc=$?
 e7_reports="$(find "$E7_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
 rmdir "${E7_WS}/.secrets" 2>/dev/null || true
 rm -rf "$E7_WS" 2>/dev/null || true
+# The sentinel's silence is evidence only if it was armed. Off runc (gVisor) it
+# cannot see the agent and says so instead - accepted there only (phase K).
+e7_sentinel=0
+if printf '%s' "$e7_out" | grep -q "The sentinel (outside the agent's reach) recorded no breach"; then
+    e7_sentinel=1
+elif [ -n "${WARDEN_RUNTIME:-}" ] && [ "${WARDEN_RUNTIME}" != "runc" ] \
+     && printf '%s' "$e7_out" | grep -q 'out-of-band sentinel did NOT arm'; then
+    e7_sentinel=1
+fi
 if [ "$e7_rc" -eq 99 ] && [ "$e7_reports" = "0" ] \
    && printf '%s' "$e7_out" | grep -q 'no breach record found' \
    && printf '%s' "$e7_out" | grep -q 'NO incident report' \
-   && printf '%s' "$e7_out" | grep -q "The sentinel (outside the agent's reach) recorded no breach" \
+   && [ "$e7_sentinel" = "1" ] \
    && ! printf '%s' "$e7_out" | grep -q 'Confirmed by the sentinel' \
    && ! printf '%s' "$e7_out" | grep -qE 'SIGUSR1 received from the canary tripwire|the canary tripwire terminated this sandbox'; then
     good "phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach"

@@ -111,10 +111,11 @@ pass "no host filesystem bind mount found"
 
 # Only /workspace may be a real bind mount. Docker always injects /etc/hosts,
 # /etc/hostname and /etc/resolv.conf; those are expected and harmless. Kernel
-# pseudo-filesystems are ignored.
+# pseudo-filesystems are ignored (gVisor's own /dev is type "dev").
 unexpected="$(awk '
     { mp = $2; fs = $3 }
     fs ~ /^(proc|sysfs|tmpfs|devtmpfs|devpts|mqueue|shm|overlay|cgroup|cgroup2|securityfs|pstore|bpf|tracefs|debugfs|configfs|fusectl|hugetlbfs|nsfs|binfmt_misc|autofs|ramfs|rpc_pipefs)$/ { next }
+    mp == "/dev" && fs == "dev" { next }
     mp == "/" || mp == "/workspace" || mp == "/workspace/.secrets" { next }
     mp == "/etc/hosts" || mp == "/etc/hostname" || mp == "/etc/resolv.conf" { next }
     { print mp " (" fs ")" }
@@ -133,17 +134,22 @@ fi
 
 # The canary vault must sit on a filesystem that actually delivers inotify.
 # A 9p/virtiofs bind mount accepts inotify_add_watch() and then stays silent,
-# which would leave the tripwire inert without any error anywhere.
+# which would leave the tripwire inert without any error anywhere. Measured with
+# the monitor's own probe (a throwaway file, never a canary), not guessed from
+# the type name: under gVisor the vault shows up as "9p" and still delivers
+# in-sandbox events (CI, 2026-09-27), so the name alone failed a working vault.
 vault_fs="$(awk '$2 == "/workspace/.secrets" {print $3}' /proc/mounts | head -1)"
-case "${vault_fs:-none}" in
-    none)
-        fail "the canary vault is not mounted at /workspace/.secrets" \
-             "launch through warden-cli.sh or compose, not a bare docker run" ;;
-    9p|virtiofs|fuse*|cifs|nfs*)
-        fail "the canary vault is on ${vault_fs}, which does not deliver inotify events" ;;
-    *)
-        pass "canary vault mounted on ${vault_fs} (an inotify-capable filesystem)" ;;
-esac
+if [ -z "$vault_fs" ]; then
+    fail "the canary vault is not mounted at /workspace/.secrets" \
+         "launch through warden-cli.sh or compose, not a bare docker run"
+else
+    vault_probe="$(/opt/warden/venv/bin/python3 -c 'import sys; sys.path.insert(0, "/opt/warden"); from canary_monitor import probe_inotify_delivery as p; print(p("/workspace/.secrets"))' 2>&1 | tail -1)"
+    case "$vault_probe" in
+        True)  pass "canary vault on ${vault_fs} delivers inotify events (probed)" ;;
+        False) fail "the canary vault is on ${vault_fs} and delivers no inotify events (probed)" ;;
+        *)     fail "could not probe inotify delivery on the canary vault (${vault_fs})" "${vault_probe:-no output}" ;;
+    esac
+fi
 
 if ls /root >/dev/null 2>&1; then
     fail "/root is readable by the agent"
@@ -351,19 +357,31 @@ else
     skip "no cgroup memory controller found; cannot assert a memory cap"
 fi
 
+# gVisor applies --pids-limit to the sandbox's HOST threads, not to processes
+# in here: its emulated cgroup shows pids.max 'max', and the bound that holds is
+# RLIMIT_NPROC (CI 2026-09-27, python fork counter: nproc=40 -> 39 forks then
+# EAGAIN under runsc; --pids-limit 32 alone killed the whole sandbox silently).
+# So with no visible pids cap, a finite `ulimit -u` is the fork-bomb bound.
+nproc_cap="$(ulimit -u 2>/dev/null || echo unlimited)"
+pids_uncapped() {
+    case "$nproc_cap" in
+        ''|unlimited) fail "$1" "no fork-bomb limit - launch with --pids-limit (or --ulimit nproc under gVisor)" ;;
+        *) pass "process count bounded by RLIMIT_NPROC=${nproc_cap} (the cgroup here shows no pids cap, e.g. gVisor's emulated one)" ;;
+    esac
+}
 if [ -f /sys/fs/cgroup/pids.max ]; then                         # cgroup v2
     pmax="$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo max)"
     if [ "$pmax" != "max" ]; then
         pass "process count is capped (pids.max=${pmax}) - fork bombs are bounded"
     else
-        fail "pids.max is 'max'" "no fork-bomb limit - launch with --pids-limit"
+        pids_uncapped "pids.max is 'max'"
     fi
 elif [ -f /sys/fs/cgroup/pids/pids.max ]; then                  # cgroup v1
     pmax="$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || echo max)"
     if [ "$pmax" != "max" ]; then
         pass "process count is capped (v1 pids.max=${pmax})"
     else
-        fail "pids.max is 'max' (v1)" "launch with --pids-limit"
+        pids_uncapped "pids.max is 'max' (v1)"
     fi
 else
     skip "no cgroup pids controller found; cannot assert a pid cap"
