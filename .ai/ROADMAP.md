@@ -52,8 +52,16 @@ inotify ล้น ตัวแก้อยู่บน branch `claude/wizardly-e
    **เสร็จเมื่อ:** drill ใหม่ (เขียนก่อน, FAIL บนโค้ดเดิม) ผ่าน และ E7 ยังผ่าน
 2. **probe ที่ตอบ "unknown" ถูกนับเป็น enforced** — ถ้า monitor เขียนไดเรกทอรีไม่ได้ มันไม่รู้ว่า
    inotify ส่ง event หรือไม่ แต่ยังนับ path นั้นใน `enforced=N/M` ข้อเสนอ: นับเป็น `unverified`
-   ต้องวัดก่อนว่าบนโฮสต์ไหนเกิดจริง (sentinel บน Linux ที่ workspace เป็นของ uid อื่น?)
+   **เกิดจริงแล้ว** (run 36369383799): sentinel บน workspace 0755 พิมพ์
+   `unknown : /workspace (ext4) - could not probe (not writable?)` แล้วยังนับ 5/5
    **เสร็จเมื่อ:** มีการวัดทั้งสองทาง และ CI (`enforced=7/7`) ยังสอดคล้อง
+3. **ไม่มี incident report เลยเมื่อ sentinel ชนะ race บน Linux** (run 36369383799, 36368859278) —
+   sentinel (root ไม่มี `CAP_DAC_OVERRIDE`) เขียนลง workspace 0755 ไม่ได้ 6/6 ครั้ง ถ้ามันฆ่า inline
+   monitor ก่อน inline เขียน report จะไม่เหลือ report เลย และ CLI พิมพ์ "possibly forged termination"
+   ทั้งที่มีบรรทัด "Confirmed by the sentinel" ข้อเสนอ: (ก) CLI ฝั่ง host เขียน record จาก log ของ
+   sentinel ลง workspace เอง (host มีสิทธิ์ และ log นั้นเป็นแหล่งเดียวที่ agent ปลอมไม่ได้) (ข) CLI ไม่พิมพ์
+   "possibly forged" เมื่อ sentinel ยืนยัน **เสร็จเมื่อ:** drill บน workspace 0755 ที่บังคับให้ sentinel ชนะ
+   FAIL บนโค้ดเดิม แล้ว PASS
 
 ---
 

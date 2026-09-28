@@ -255,6 +255,7 @@ login และตอบผ่าน sandbox ได้จริง (`codex exec`
 | องก์ 2 fail ที่ `api.anthropic.com` | เน็ตไม่มี หรือ proxy ไม่ healthy | `./scripts/warden-cli.sh status` แล้ว `down` + `up` |
 | องก์ 3 ได้ exit `0` ไม่ใช่ `99` | tripwire ไม่ทำงาน — **หยุด อย่าอัด** | ดูค่า `enforced=` ใน banner แล้วรัน `./scripts/verify-isolation.sh` |
 | องก์ 3 ได้ exit `78` | posture check ปฏิเสธ container | อ่านบรรทัดที่ปฏิเสธ — container ถูก launch ด้วย flag ผิด |
+| องก์ 3 `FAIL no incident report` + CLI บอก `possibly forged termination` แต่มีบรรทัด `Confirmed by the sentinel` | race: sentinel ฆ่า inline monitor ก่อนมันเขียน report และ sentinel เขียนลง workspace ไม่ได้ (เจอบน Linux ที่ workspace เป็น 0755: 2 ใน ~8 เทค, session 12; บน Docker Desktop 9p sentinel เขียนได้) | การกักยังได้ผล (exit 99, sentinel ยืนยัน) — อัดเทคใหม่ ถ้าอยู่บน Linux ให้ `chmod 0777 workspaces/demo` ก่อน |
 | `"suspects": []` ใน report | reader อายุสั้น + attribution ของ sentinel ไม่ครบ | ปกติสำหรับ `cat` เปล่า ๆ — คำสั่งใน demo ถือ fd ค้างไว้แล้ว |
 | องก์ 4 `FAIL --agent codex needs OPENAI_API_KEY` | ไม่มี key ใน `.env` | ใส่ `OPENAI_API_KEY=...` ใน `.env` แล้วรัน `./scripts/demo.sh --agent codex` ใหม่ |
 | องก์ 4 `FAIL codex did not answer through the sandbox` | key หมดอายุ/ไม่มี credit, `api.openai.com` ไม่ผ่าน proxy หรือ codex ถูก build ใหม่เป็นรุ่นอื่น | ดู `./scripts/warden-cli.sh logs proxy`, เช็ค credit, เช็คข้อ 2 ของ pre-flight |
