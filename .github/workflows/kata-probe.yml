@@ -31,9 +31,8 @@ jobs:
             *.xz)  sudo tar -xJf /tmp/kata.tar -C / ;;
           esac
           sudo ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
-          sudo ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime
-          kata-runtime --version
-          sudo kata-runtime check --no-network-checks || true
+          ls /opt/kata/bin
+          test -x /opt/kata/bin/containerd-shim-kata-v2
           sudo python3 - <<'EOF'
           import json, os
           p = "/etc/docker/daemon.json"
