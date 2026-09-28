@@ -22,7 +22,7 @@ jobs:
       - name: Suite must FAIL phase L on the old rules
         run: |
           docker exec warden-egress-proxy squid -v | head -1
-          NO_COLOR=1 ./scripts/verify-isolation.sh > /tmp/suite.log 2>&1; rc=$?
+          rc=0; NO_COLOR=1 ./scripts/verify-isolation.sh > /tmp/suite.log 2>&1 || rc=$?
           grep -E 'phase L' /tmp/suite.log
           echo "suite rc=${rc}"
           if [ "$rc" -ne 0 ] && grep -q 'the proxy resolved the non-allowlisted name' /tmp/suite.log; then
