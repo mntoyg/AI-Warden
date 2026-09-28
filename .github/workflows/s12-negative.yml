@@ -10,23 +10,26 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
-      - name: Put back the pre-session-12 squid.conf (rule order before the fix)
+      - name: Put back the pre-session-12 squid.conf and warden-cli.sh
         run: |
           git fetch -q --depth=1 origin main
           git show origin/main:core/network/squid.conf > core/network/squid.conf
+          git show origin/main:scripts/warden-cli.sh > scripts/warden-cli.sh
           grep -n '^http_access' core/network/squid.conf
       - name: Build both images
         run: ./scripts/warden-cli.sh build --pull
       - name: Start the egress filter (old rules)
         run: ./scripts/warden-cli.sh up
-      - name: Suite must FAIL phase L on the old rules
+      - name: Suite must FAIL phase L and E10 on the old code
         run: |
           docker exec warden-egress-proxy squid -v | head -1
           rc=0; NO_COLOR=1 ./scripts/verify-isolation.sh > /tmp/suite.log 2>&1 || rc=$?
           grep -E 'phase L' /tmp/suite.log
           echo "suite rc=${rc}"
-          if [ "$rc" -ne 0 ] && grep -q 'the proxy resolved the non-allowlisted name' /tmp/suite.log; then
-            echo "OK: phase L caught the DNS leak on the real image with the old rules"
+          grep -E 'phase E10' /tmp/suite.log
+          if [ "$rc" -ne 0 ] && grep -q 'the proxy resolved the non-allowlisted name' /tmp/suite.log \
+             && grep -q 'FAIL phase E10' /tmp/suite.log; then
+            echo "OK: phase L and E10 both caught the old code on the real images"
           else
             echo "::error::phase L did not catch the old rule order"; tail -40 /tmp/suite.log; exit 1
           fi
