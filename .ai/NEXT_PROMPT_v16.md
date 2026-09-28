@@ -31,15 +31,15 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       "there is a date" without giving it, ask for the date itself (session 12 needed 2 rounds).
 
 2) WORK
-   - FIRST, if `.ai/SESSION12.md` or my session-12 patches (`000*.patch`) exist: session 12 could not
-     push. `git am` the patches on a branch, merge SESSION12.md into HANDOFF, delete it. They hold two
-     UNSHIPPED security fixes (proxy DNS exfiltration: phase L; inotify overflow: E9) proven only
-     with stand-in images - after the demo: rebuild, real codex path, suite A-L, CI, tag v1.2.6.
-   - Default task after that: HANDOFF Next steps. Kata has a ready probe workflow
-     from session 12 (`kata-probe.yml`, given to the user as a file): put it on a TEMPORARY branch
-     `kata-probe` with its own `on: push: branches: [kata-probe]`, in a `git worktree`, read the
-     run, delete branch + worktree after. Do not extend `runsc*` handling to Kata by guess.
-   - A platform this host lacks (runsc, KVM, Linux ext4): a GitHub runner via a temporary branch.
+   - FIRST, if `.ai/SESSION12.md` exists: merge it into HANDOFF, delete it, replace NEXT_PROMPT.md
+     with this file. Branch `claude/wizardly-edison-9pzqzk` holds two UNSHIPPED security fixes (proxy
+     DNS exfiltration: phase L; inotify overflow: E9), already green on real images in temp-branch CI;
+     v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex path, suite A-L on
+     Docker Desktop, CI, tag v1.2.6 + superseded note. Delete origin branches kata-probe, verify-s12.
+   - Then work `.ai/ROADMAP.md` phase by phase (HANDOFF wins if they disagree; fix the roadmap).
+   - A platform or image this host lacks (runsc, KVM, real build): a TEMPORARY branch whose ci.yml push trigger
+     includes it + a negative job that restores the old file (session 12). In workflow steps capture
+     rc as `rc=0; cmd || rc=$?` - steps run `bash -e` (two silent probe deaths in session 12).
    - Blocked on something only I can produce? Find a PUBLIC STAND-IN with the same shape (v13).
    - After ANY `build --pull`, re-run the real agent path with my key (v10). Bump versions first.
    - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-K, exit 0,

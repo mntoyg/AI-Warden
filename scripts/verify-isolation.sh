@@ -25,6 +25,7 @@
 #                                 E6 an existing report file swallowing a new breach's report
 #                                 E7 a SIGUSR1 the agent sends itself, reported as a breach
 #                                 E9 a canary read lost in an inotify queue overflow
+#                                 E10 a sentinel-only breach on a 0755 workspace left no record
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
@@ -566,6 +567,47 @@ echo "E9 NOT KILLED"'
         good "phase E9: queue overflowed while the canary was read - the monitor tripped on the lost events (99)"
     else
         bad  "phase E9: rc=${e9_rc} events-lost-line=${e9_lost} - a canary read during a queue overflow went unseen"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
+fi
+
+# --- E10: a breach only the sentinel saw must still leave a record ------------
+# On a 0755 Linux workspace the root sentinel (CAP_KILL only, no DAC override)
+# cannot write its report, so when the inline monitor is dead - killed by the
+# agent, or by the sentinel winning the race - no report existed and the CLI
+# called a sentinel-confirmed breach a "possibly forged termination" (demo
+# rehearsals 36368314520 / 36368859278; measured 6/6 in 36369383799). The CLI
+# now writes the record itself from the sentinel's log. Phase D uses 0777,
+# which hid this. Off runc the sentinel cannot arm at all (phase K).
+if [ "$RUN_BREACH" = "1" ] && { [ -z "${WARDEN_RUNTIME:-}" ] || [ "${WARDEN_RUNTIME}" = "runc" ]; }; then
+    printf '\n'
+    info "E10: a breach only the sentinel saw (0755 workspace) must still leave a record, never 'possibly forged'"
+    E10_WS="${PROJECT_ROOT}/workspaces/.verify-e10-$$"
+    mkdir -p "$E10_WS"; chmod 0755 "$E10_WS" 2>/dev/null || true
+    e10_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$E10_WS" bash -- -lc '
+        pkill -9 -f "canary_mon[i]tor" 2>/dev/null; sleep 1
+        exec 3</workspace/.secrets/credentials; sleep 20; echo "[drill] E10 NOT KILLED"' 2>&1)"
+    e10_rc=$?
+    e10_reports="$(find "$E10_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
+    e10_witness="$(find "$E10_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT.sentinel-log*.json' 2>/dev/null | head -1)"
+    e10_witness_ok=0
+    if [ -n "$e10_witness" ] && grep -q '"schema": "ai-warden/breach-witness/1"' "$e10_witness" \
+       && grep -q '/workspace/.secrets/credentials' "$e10_witness"; then e10_witness_ok=1; fi
+    rm -rf "$E10_WS" 2>/dev/null || true
+    if ! printf '%s\n' "$e10_out" | grep -q "Confirmed by the sentinel (outside the agent's reach): /workspace/.secrets/credentials"; then
+        bad  "phase E10: the sentinel did not confirm the read, drill proves nothing (rc=${e10_rc})"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    elif [ "$e10_rc" -eq 99 ] && [ "$e10_reports" -ge 1 ] \
+         && ! printf '%s\n' "$e10_out" | grep -q 'possibly forged' \
+         && ! printf '%s\n' "$e10_out" | grep -qx '\[drill\] E10 NOT KILLED'; then
+        if [ -n "$e10_witness" ] && [ "$e10_witness_ok" -ne 1 ]; then
+            bad  "phase E10: the CLI's sentinel-log record is malformed: ${e10_witness##*/}"
+            PHASE_FAILURES=$((PHASE_FAILURES + 1))
+        else
+            good "phase E10: sentinel-only breach contained (99) and recorded (${e10_reports} report(s)$([ -n "$e10_witness" ] && echo ', CLI record from the sentinel log')), not called forged"
+        fi
+    else
+        bad  "phase E10: rc=${e10_rc} reports=${e10_reports} - $(printf '%s' "$e10_out" | grep -E 'NO incident report|possibly forged|NOT KILLED' | tr '\n' ' ' | cut -c1-200)"
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     fi
 fi

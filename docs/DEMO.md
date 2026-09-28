@@ -35,9 +35,11 @@ panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่�
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
 | 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.156.1` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.0.5 และ v1.0.6) |
-| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–G ผ่าน, **exit 0** |
-| 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` |
-| 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` |
+| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–K ผ่าน (v1.2.5), **exit 0**, `enforced=4/7` บน Docker Desktop |
+| 3b | audit trail ของ proxy ยังมีชีวิต | `./scripts/warden-cli.sh status` | บรรทัด audit trail บอก `live` — ถ้า `DEAD` (เกิดแล้ว 2 ครั้งหลังปิด Docker Desktop ไม่สะอาด) รัน `./scripts/warden-cli.sh up` แล้วเช็คใหม่ |
+| 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` — บอกแค่ว่ามี key **ไม่ได้บอกว่ามีเครดิต** ข้อ 5 เป็นตัวพิสูจน์ |
+| 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` — ถ้าเห็น `Quota exceeded` คือเครดิต OpenAI หมด ไม่ใช่ sandbox เสีย |
+| 6 | ซ้อมแบบโต้ตอบ (ยังไม่เคยรันเลย) | `./scripts/demo.sh --agent codex` ใน Windows Terminal | หยุดระหว่างองก์ได้, องก์ 4 ส่งเทอร์มินัลให้ codex ได้จริง และคำสั่ง honeypot ขององก์ 4 ข้อ 3 จบด้วย exit 99 |
 
 ข้อ 2: `build --pull` ดึง codex/claude รุ่นใหม่ล่าสุด และ codex เปลี่ยนเวอร์ชันบ่อย (0.154.0 → 0.156.1
 ในหนึ่งสัปดาห์) วิธี login และการปิด sandbox ถูกทดสอบกับเวอร์ชันในตารางนี้เท่านั้น — build ใหม่ =
@@ -227,6 +229,11 @@ login และตอบผ่าน sandbox ได้จริง (`codex exec`
 - **SNI domain fronting เป็นช่องที่รู้อยู่** — agent สามารถไปถึงเว็บที่ไม่อยู่ใน
   allowlist ได้ถ้ามันแชร์ CDN กับเว็บที่อยู่ใน allowlist การปิดต้องใช้ proxy ที่
   peek-and-splice ได้ ซึ่ง Squid ของ Debian ไม่มี `ssl_bump` ดู §4.2
+- **DNS exfiltration ผ่าน proxy (v1.2.5 ยังมี — แก้แล้ว รอออก v1.2.6)** — squid ของ v1.2.5 resolve
+  ทุกชื่อโดเมนที่ agent ส่งมาใน CONNECT ก่อนแล้วค่อยตอบ 403 ข้อมูลที่ซ่อนใน label ของชื่อโดเมน
+  (`<ข้อมูล>.attacker.com`) จึงไปถึง nameserver ของผู้โจมตีได้แม้คำขอจะถูกปฏิเสธ พบและวัดใน session 12
+  (ยืนยันบน Squid 5.7 ของ image จริง) ตัวแก้คือสลับลำดับกฎให้ปฏิเสธชื่อนอก allowlist ก่อน resolve
+  พร้อม drill ใหม่ phase L — ไม่ได้ใส่ในเวอร์ชันที่อัด เพราะต้อง rebuild proxy image ช่วง freeze ดู §4.2
 - **attribution ของ sentinel ไม่สมบูรณ์ — และรายงานบอกเอง** — มันถือแค่ `CAP_KILL`
   จึงอ่าน `/proc/<pid>/fd` และ `/proc/<pid>/exe` ไม่ได้ และมันมักเป็นตัวที่ชนะการแข่งเขียน
   report ตั้งแต่ v1.0.4 รายงานจึงมี `"attribution": "restricted"` พร้อมคำอธิบาย ส่วนผู้อ่าน
@@ -248,6 +255,7 @@ login และตอบผ่าน sandbox ได้จริง (`codex exec`
 | องก์ 2 fail ที่ `api.anthropic.com` | เน็ตไม่มี หรือ proxy ไม่ healthy | `./scripts/warden-cli.sh status` แล้ว `down` + `up` |
 | องก์ 3 ได้ exit `0` ไม่ใช่ `99` | tripwire ไม่ทำงาน — **หยุด อย่าอัด** | ดูค่า `enforced=` ใน banner แล้วรัน `./scripts/verify-isolation.sh` |
 | องก์ 3 ได้ exit `78` | posture check ปฏิเสธ container | อ่านบรรทัดที่ปฏิเสธ — container ถูก launch ด้วย flag ผิด |
+| องก์ 3 `FAIL no incident report` + CLI บอก `possibly forged termination` แต่มีบรรทัด `Confirmed by the sentinel` | race: sentinel ฆ่า inline monitor ก่อนมันเขียน report และ sentinel เขียนลง workspace ไม่ได้ (เจอบน Linux ที่ workspace เป็น 0755: 2 ใน ~8 เทค, session 12; บน Docker Desktop 9p sentinel เขียนได้) | การกักยังได้ผล (exit 99, sentinel ยืนยัน) — อัดเทคใหม่ ถ้าอยู่บน Linux ให้ `chmod 0777 workspaces/demo` ก่อน |
 | `"suspects": []` ใน report | reader อายุสั้น + attribution ของ sentinel ไม่ครบ | ปกติสำหรับ `cat` เปล่า ๆ — คำสั่งใน demo ถือ fd ค้างไว้แล้ว |
 | องก์ 4 `FAIL --agent codex needs OPENAI_API_KEY` | ไม่มี key ใน `.env` | ใส่ `OPENAI_API_KEY=...` ใน `.env` แล้วรัน `./scripts/demo.sh --agent codex` ใหม่ |
 | องก์ 4 `FAIL codex did not answer through the sandbox` | key หมดอายุ/ไม่มี credit, `api.openai.com` ไม่ผ่าน proxy หรือ codex ถูก build ใหม่เป็นรุ่นอื่น | ดู `./scripts/warden-cli.sh logs proxy`, เช็ค credit, เช็คข้อ 2 ของ pre-flight |

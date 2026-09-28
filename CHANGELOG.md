@@ -21,6 +21,14 @@
   `private_dst` อยู่ก่อน allowlist) แล้วค่อยตอบ 403 — ข้อมูลใน label ของชื่อโดเมนไปถึง nameserver ของผู้โจมตี
   ตอนนี้ชื่อนอก allowlist ถูกปฏิเสธด้วยชื่อก่อน ไม่ถูก resolve เลย; กัน DNS rebinding ได้เหมือนเดิม
   phase ใหม่ **L** (proxy image จริง + DNS ปลอมที่บันทึก query; FAIL บน config เดิม) ดู THREAT_MODEL §4.2
+- **breach ที่มีแต่ sentinel เห็นไม่มี record และถูกเรียกว่า "possibly forged":** บน workspace 0755 ของ Linux
+  sentinel (root ที่ไม่มี DAC override) เขียน report ไม่ได้ 6/6 ครั้ง เมื่อมันฆ่า inline monitor ก่อน จะไม่มี
+  report เลย และ CLI พาดหัวว่า "possibly forged termination" ทั้งที่มีบรรทัด "Confirmed by the sentinel"
+  (เจอจากการซ้อม demo บน runner) ตอนนี้ CLI ฝั่ง host เขียน `WARDEN_SECURITY_INCIDENT.sentinel-log.<ts>.json`
+  จาก log ของ sentinel (schema `ai-warden/breach-witness/1`, noclobber ไม่เขียนผ่าน symlink) และไม่พูดว่า forged
+  เมื่อ sentinel ยืนยัน drill ใหม่ **E10**
+- monitor ที่ probe ไดเรกทอรีไม่ได้ (`unknown`) เคยนับ path นั้นใน `enforced=N/M` ตอนนี้ขึ้น `UNVERIFIED`
+  และไม่นับ (sentinel บน workspace 0755: `enforced=0/1` แทน `1/1` ในการทดสอบ; path ยังถูก watch)
 - self-test **3b2**: resolver ของ Docker (127.0.0.11) ในกรงต้องไม่ตอบชื่อภายนอก (3b เดิมถามแค่ 1.1.1.1 ตรง ๆ
   และ skip ถ้าไม่มี `dig`) พร้อม positive control ว่า resolver ยังตอบชื่อ proxy
 
