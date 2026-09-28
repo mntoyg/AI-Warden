@@ -36,7 +36,7 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
      DNS exfiltration: phase L; inotify overflow: E9), already green on real images in temp-branch CI;
      v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex path, suite A-L on
      Docker Desktop, CI, tag v1.2.6 + superseded note. Delete origin branches kata-probe, verify-s12.
-   - Default task after that: HANDOFF Next steps (Kata: `.ai/kata-probe.yml`, phase-I hang).
+   - Then work `.ai/ROADMAP.md` phase by phase (HANDOFF wins if they disagree; fix the roadmap).
    - A platform or image this host lacks (runsc, KVM, real build): a TEMPORARY branch whose ci.yml push trigger
      includes it + a negative job that restores the old file (session 12). In workflow steps capture
      rc as `rc=0; cmd || rc=$?` - steps run `bash -e` (two silent probe deaths in session 12).
