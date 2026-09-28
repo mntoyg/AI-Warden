@@ -1,24 +1,16 @@
-# TEMPORARY (kata-probe branch, reused - the cloud session cannot delete
-# branches): rehearse the demo from main's v1.2.5 code on a clean runner.
+# TEMPORARY (kata-probe branch, reused): why act 3 sometimes ends with no
+# incident report on Linux (runs 36368314520 take 2, 36368859278 take 1).
 name: demo-rehearsal
 on:
   push:
     branches: [kata-probe]
 jobs:
-  rehearse:
+  act3-race:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-      - name: Build both images (as the user's box has them - v1.2.5)
-        run: ./scripts/warden-cli.sh build --pull > /tmp/build.log 2>&1 || { tail -40 /tmp/build.log; exit 1; }
-      - name: demo.sh --auto (acts 0-3, no agent key on the runner)
-        run: |
-          rc=0; NO_COLOR=1 bash ./scripts/demo.sh --auto > /tmp/demo.log 2>&1 || rc=$?
-          echo "demo rc=${rc}"
-          grep -nE 'PASS|FAIL|WARN|Act [0-9]|exit code|Confirmed by the sentinel|Incident report|DEMO COMPLETE|PRE-FLIGHT|enforced=' /tmp/demo.log | cut -c1-200
-          grep -q 'DEMO COMPLETE' /tmp/demo.log && [ "$rc" -eq 0 ] || { echo "::error::rehearsal did not complete"; tail -60 /tmp/demo.log; exit 1; }
-      - name: DEBUG (temp branch only) - keep every sentinel log, show the workspace
+      - name: Keep every sentinel log (temp branch only)
         run: |
           python3 - <<'PY'
           p = "scripts/warden-cli.sh"
@@ -28,18 +20,21 @@ jobs:
           s = s.replace(old, '    docker logs "${1}-sentinel" > "/tmp/sentinel-$(date +%s%N).log" 2>&1 || true\n' + old)
           open(p, "w").write(s)
           PY
-          grep -n -A2 '^stop_sentinel()' scripts/warden-cli.sh
-          ls -la workspaces/demo workspaces/demo/.secrets 2>&1 | head -30
-      - name: Second take right after the first (re-runs must be clean)
+          grep -n -A3 '^stop_sentinel()' scripts/warden-cli.sh
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build --pull > /tmp/build.log 2>&1 || { tail -40 /tmp/build.log; exit 1; }
+      - name: Act 3 six times each on a 0755 and a 0777 workspace
         run: |
-          rc=0; NO_COLOR=1 bash ./scripts/demo.sh --auto > /tmp/demo2.log 2>&1 || rc=$?
-          echo "second take rc=${rc}"; grep -E 'DEMO COMPLETE|FAIL' /tmp/demo2.log | cut -c1-200
-          [ "$rc" -eq 0 ] || { tail -40 /tmp/demo2.log; exit 1; }
-      - name: DEBUG - sentinel logs and workspace after take 2
-        if: always()
-        run: |
-          ls -la workspaces/demo | head -30
-          for f in /tmp/sentinel-*.log; do echo "=== $f"; grep -vE 'watchable|seeding' "$f" | cut -c1-220; done
-      - name: status afterwards (nothing left behind)
-        if: always()
-        run: NO_COLOR=1 ./scripts/warden-cli.sh status 2>&1 | tail -25
+          ./scripts/warden-cli.sh up > /dev/null
+          for mode in 0755 0777; do
+            for i in 1 2 3 4 5 6; do
+              ws="workspaces/r-$mode-$i"; mkdir -p "$ws"; chmod "$mode" "$ws"
+              rm -f /tmp/sentinel-*.log
+              rc=0; NO_COLOR=1 ./scripts/warden-cli.sh run "$ws" bash -- -c \
+                'exec 3< /workspace/.secrets/credentials; cat <&3 >/dev/null; sleep 25' > /tmp/run.log 2>&1 || rc=$?
+              reports="$(ls "$ws" | grep -c INCIDENT || true)"
+              inline_wrote="$(grep -c 'SIGKILL delivered' /tmp/run.log || true)"
+              s="$(cat /tmp/sentinel-*.log 2>/dev/null)"
+              echo "mode=$mode take=$i rc=$rc reports=$reports inline_reached_kill=$inline_wrote forged_msg=$(grep -c 'possibly forged' /tmp/run.log) sentinel: $(printf '%s\n' "$s" | grep -E 'could not|incident report|SIGKILL delivered' | sed 's/^\[canary [^]]*\] //' | paste -sd '|' | cut -c1-230)"
+            done
+          done
