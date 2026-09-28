@@ -20,7 +20,14 @@ jobs:
           grep -q 'DEMO COMPLETE' /tmp/demo.log && [ "$rc" -eq 0 ] || { echo "::error::rehearsal did not complete"; tail -60 /tmp/demo.log; exit 1; }
       - name: DEBUG (temp branch only) - keep every sentinel log, show the workspace
         run: |
-          sed -i 's|^    docker rm -f "${1}-sentinel" >/dev/null 2>\&1 \|\| true$|    docker logs "${1}-sentinel" > "/tmp/sentinel-$(date +%s%N).log" 2>\&1 \|\| true; docker rm -f "${1}-sentinel" >/dev/null 2>\&1 \|\| true|' scripts/warden-cli.sh
+          python3 - <<'PY'
+          p = "scripts/warden-cli.sh"
+          s = open(p).read()
+          old = '    docker rm -f "${1}-sentinel" >/dev/null 2>&1 || true\n}'
+          assert s.count(old) == 1, "stop_sentinel body not found"
+          s = s.replace(old, '    docker logs "${1}-sentinel" > "/tmp/sentinel-$(date +%s%N).log" 2>&1 || true\n' + old)
+          open(p, "w").write(s)
+          PY
           grep -n -A2 '^stop_sentinel()' scripts/warden-cli.sh
           ls -la workspaces/demo workspaces/demo/.secrets 2>&1 | head -30
       - name: Second take right after the first (re-runs must be clean)
