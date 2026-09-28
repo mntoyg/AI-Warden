@@ -1,0 +1,32 @@
+# TEMPORARY (verify-s12 branch only): the OLD squid.conf in the REAL proxy
+# image must make phase L fail - proves the drill has teeth on Debian squid.
+name: s12-negative
+on:
+  push:
+    branches: [verify-s12]
+jobs:
+  old-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Put back the pre-session-12 squid.conf (rule order before the fix)
+        run: |
+          git fetch -q --depth=1 origin main
+          git show origin/main:core/network/squid.conf > core/network/squid.conf
+          grep -n '^http_access' core/network/squid.conf
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build --pull
+      - name: Start the egress filter (old rules)
+        run: ./scripts/warden-cli.sh up
+      - name: Suite must FAIL phase L on the old rules
+        run: |
+          docker exec warden-egress-proxy squid -v | head -1
+          NO_COLOR=1 ./scripts/verify-isolation.sh > /tmp/suite.log 2>&1; rc=$?
+          grep -E 'phase L' /tmp/suite.log
+          echo "suite rc=${rc}"
+          if [ "$rc" -ne 0 ] && grep -q 'the proxy resolved the non-allowlisted name' /tmp/suite.log; then
+            echo "OK: phase L caught the DNS leak on the real image with the old rules"
+          else
+            echo "::error::phase L did not catch the old rule order"; tail -40 /tmp/suite.log; exit 1
+          fi
