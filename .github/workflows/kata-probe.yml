@@ -30,9 +30,11 @@ jobs:
             *.zst) sudo tar --zstd -xf /tmp/kata.tar -C / ;;
             *.xz)  sudo tar -xJf /tmp/kata.tar -C / ;;
           esac
-          sudo ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
-          ls /opt/kata/bin
-          test -x /opt/kata/bin/containerd-shim-kata-v2
+          find /opt/kata -name 'containerd-shim-kata*' -o -name 'configuration*.toml' | sort
+          shim="$(find /opt/kata -type f -name 'containerd-shim-kata-v2' | head -1)"
+          test -n "$shim" && test -x "$shim"
+          sudo ln -sf "$shim" /usr/local/bin/containerd-shim-kata-v2
+          echo "shim: $shim"
           sudo python3 - <<'EOF'
           import json, os
           p = "/etc/docker/daemon.json"
