@@ -200,6 +200,25 @@ else
     skip "dig not available; external DNS check skipped"
 fi
 
+# 3b2. Docker's own resolver must not answer external names either. 3b only
+# asks 1.1.1.1 directly; the sandbox's resolv.conf points at Docker's embedded
+# DNS (127.0.0.11), which forwards to the host's resolvers on a normal bridge
+# network - a DNS tunnel that never touches the proxy. Docker Engine 29.3 does
+# not forward for an `internal` network (SERVFAIL; bridge control resolved,
+# session 12), but that is engine behaviour, so it is measured here. Positive
+# control: the same resolver must still answer the proxy's name, or a dead
+# resolver would pass this vacuously.
+dns_proxy="${WARDEN_PROXY_HOST:-warden-egress-proxy}"
+if getent hosts example.com >/dev/null 2>&1; then
+    fail "the sandbox resolves external names (example.com) - DNS tunnelling via Docker's resolver is possible"
+elif grep -qw "$dns_proxy" /etc/hosts 2>/dev/null; then
+    pass "external names do not resolve (the proxy name is pinned in /etc/hosts; Docker's resolver not relied on)"
+elif getent hosts "$dns_proxy" >/dev/null 2>&1; then
+    pass "Docker's resolver answers the proxy's name but not external names - no DNS tunnel"
+else
+    fail "cannot tell whether external names resolve: the resolver did not answer the proxy's name (${dns_proxy}) either"
+fi
+
 # 3c. The proxy must be reachable.
 proxy_host="${WARDEN_PROXY_HOST:-warden-egress-proxy}"
 proxy_port="${WARDEN_PROXY_PORT:-3128}"

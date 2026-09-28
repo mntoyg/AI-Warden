@@ -6,7 +6,8 @@
 
 ## [Unreleased]
 
-**security (hardening): คิว inotify ล้นทำให้ canary ที่ถูกอ่านหายไปเงียบ ๆ** — ยังไม่ออก tag เพราะ freeze ก่อน demo 2026-09-29
+**security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก** — ยังไม่ออก tag
+เพราะ freeze ก่อน demo 2026-09-29 และยังไม่ได้รันบน image จริง (session คลาวด์ build image ไม่ได้)
 
 ### Security
 
@@ -16,6 +17,12 @@
   "มีการอ่าน" แต่บอกว่า "ตัดความเป็นไปได้ไม่ได้" CLI รายงานกรณีนี้จาก log ของ sentinel ด้วย
   drill ใหม่ **E9** (FAIL บนโค้ดเดิมใน harness: `E9 NOT KILLED`, rc 0) ดู THREAT_MODEL §4.6
   ยังไม่พบว่า agent ทำให้คิวของ monitor ที่ไม่ถูกหยุดล้นได้จริง (C flooder 2–8 ตัวที่ `--cpus 2` ไม่ทำให้ล้น)
+- **DNS exfiltration ผ่าน egress proxy:** squid resolve ทุกชื่อที่ agent CONNECT มา (เพราะ ACL `dst` ของ
+  `private_dst` อยู่ก่อน allowlist) แล้วค่อยตอบ 403 — ข้อมูลใน label ของชื่อโดเมนไปถึง nameserver ของผู้โจมตี
+  ตอนนี้ชื่อนอก allowlist ถูกปฏิเสธด้วยชื่อก่อน ไม่ถูก resolve เลย; กัน DNS rebinding ได้เหมือนเดิม
+  phase ใหม่ **L** (proxy image จริง + DNS ปลอมที่บันทึก query; FAIL บน config เดิม) ดู THREAT_MODEL §4.2
+- self-test **3b2**: resolver ของ Docker (127.0.0.11) ในกรงต้องไม่ตอบชื่อภายนอก (3b เดิมถามแค่ 1.1.1.1 ตรง ๆ
+  และ skip ถ้าไม่มี `dig`) พร้อม positive control ว่า resolver ยังตอบชื่อ proxy
 
 ## [1.2.5] — 2026-09-27
 

