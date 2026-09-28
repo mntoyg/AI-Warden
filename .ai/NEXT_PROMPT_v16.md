@@ -37,10 +37,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
      v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex path, suite A-L on
      Docker Desktop, CI, tag v1.2.6 + superseded note. Delete origin branches kata-probe, verify-s12.
    - Default task after that: HANDOFF Next steps (Kata: `.ai/kata-probe.yml`, phase-I hang).
-   - Real-image proof from a host that cannot build: a TEMPORARY branch whose ci.yml push trigger
+   - A platform or image this host lacks (runsc, KVM, real build): a TEMPORARY branch whose ci.yml push trigger
      includes it + a negative job that restores the old file (session 12). In workflow steps capture
      rc as `rc=0; cmd || rc=$?` - steps run `bash -e` (two silent probe deaths in session 12).
-   - A platform this host lacks (runsc, KVM, Linux ext4): a GitHub runner via a temporary branch.
    - Blocked on something only I can produce? Find a PUBLIC STAND-IN with the same shape (v13).
    - After ANY `build --pull`, re-run the real agent path with my key (v10). Bump versions first.
    - Done means RUN, on the PATH I WILL RUN: `./scripts/verify-isolation.sh` green A-K, exit 0,
