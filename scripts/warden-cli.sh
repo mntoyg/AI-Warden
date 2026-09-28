@@ -609,6 +609,57 @@ sentinel_breach_paths() {
     fi
 }
 
+# The sentinel's [SECURITY BREACH] lines, verbatim. Whatever the agent controls
+# in them (a suspect's argv) the sentinel has already sanitised and quoted.
+sentinel_breach_lines() {
+    local log
+    log="$(docker logs "${1}-sentinel" 2>&1 || true)"
+    printf '%s\n' "$log" | sed -n '/^\[canary [0-9TZ:.-]*\] \*\*\* \[SECURITY BREACH\] /p'
+}
+
+# A breach the sentinel confirmed but no monitor could record: on a 0755 Linux
+# workspace the root sentinel (CAP_KILL only, no DAC override) cannot write its
+# report, and when it kills the inline monitor first nothing was written at all
+# (measured 6/6, run 36369383799). The host can write there, and the sentinel's
+# log is the one source the agent cannot forge, so the CLI writes the record.
+# The agent is gone by now, but the workspace is still its directory: noclobber
+# (O_EXCL, which also refuses a planted symlink) and a fresh name.
+json_str() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '"%s"' "$s"
+}
+write_sentinel_record() {
+    local ws="$1" session="$2" paths="$3" lines="$4" file item first
+    file="${ws}/WARDEN_SECURITY_INCIDENT.sentinel-log.$(date -u +%Y%m%dT%H%M%SZ).$$.json"
+    [ -e "$file" ] || [ -L "$file" ] && return 1
+    {
+        printf '{\n  "schema": "ai-warden/breach-witness/1",\n'
+        printf '  "warden_version": %s,\n' "$(json_str "$WARDEN_VERSION")"
+        printf '  "written_by": "warden-cli on the host, from the sentinel container log (outside the agent'"'"'s reach)",\n'
+        printf '  "why": "no monitor inside the sandbox left an incident report this session",\n'
+        printf '  "session": %s,\n' "$(json_str "$session")"
+        printf '  "timestamp_utc": %s,\n' "$(json_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+        printf '  "canary_paths": ['
+        first=1
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            if [ "$first" = 1 ]; then first=0; else printf ', '; fi
+            json_str "$item"
+        done <<< "$paths"
+        printf '],\n  "sentinel_log": ['
+        first=1
+        while IFS= read -r item; do
+            [ -z "$item" ] && continue
+            if [ "$first" = 1 ]; then first=0; else printf ','; fi
+            printf '\n    '; json_str "$item"
+        done <<< "$lines"
+        printf '\n  ]\n}\n'
+    } 2>/dev/null | ( set -C; cat > "$file" ) 2>/dev/null || return 1
+    return 0
+}
+
 # Why the sentinel refused to arm, from its own log (empty = it did not refuse).
 # Same trust argument as above: the agent cannot write this log.
 sentinel_unarmed_reason() {
@@ -976,11 +1027,12 @@ cmd_run() {
     docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
     # Read the sentinel's own log before it is removed: the one breach record
     # the agent cannot forge (see sentinel_breach_paths).
-    local sentinel_ran=0 sentinel_seen="" sentinel_unarmed="" seen
+    local sentinel_ran=0 sentinel_seen="" sentinel_unarmed="" sentinel_lines="" seen
     if [ "$WARDEN_SENTINEL" = "1" ] && docker container inspect "${name}-sentinel" >/dev/null 2>&1; then
         sentinel_unarmed="$(sentinel_unarmed_reason "$name")"
         if [ -z "$sentinel_unarmed" ]; then sentinel_ran=1; fi
         sentinel_seen="$(sentinel_breach_paths "$name")"
+        if [ -n "$sentinel_seen" ]; then sentinel_lines="$(sentinel_breach_lines "$name")"; fi
     fi
     # Order matters: the sentinel must be gone before anything touches a
     # watched path, or shutdown housekeeping reads as tampering.
@@ -998,6 +1050,13 @@ cmd_run() {
     if [ "$rc" -eq 99 ]; then
         local new_reports report
         new_reports="$(LC_ALL=C comm -13 <(printf '%s\n' "$reports_before") <(incident_reports "$abs") | sed '/^$/d')"
+        if [ -z "$new_reports" ] && [ -n "$sentinel_seen" ] && [ "$WARDEN_WORKSPACE_MODE" != "ro" ]; then
+            if write_sentinel_record "$abs" "$name" "$sentinel_seen" "$sentinel_lines"; then
+                new_reports="$(LC_ALL=C comm -13 <(printf '%s\n' "$reports_before") <(incident_reports "$abs") | sed '/^$/d')"
+            else
+                warn "could not write the sentinel's breach record into ${abs}"
+            fi
+        fi
         if [ -n "$new_reports" ]; then
             printf '%s%s  SECURITY BREACH: the canary tripwire terminated this sandbox.%s\n' \
                 "$C_BOLD" "$C_RED" "$C_RESET" >&2
@@ -1009,6 +1068,10 @@ cmd_run() {
                 "$C_BOLD" "$C_RED" "$C_RESET" >&2
             printf '%s  The [canary] SECURITY BREACH lines above are the only record; without them, no monitor sent the signal.%s\n' \
                 "$C_RED" "$C_RESET" >&2
+        elif [ -n "$sentinel_seen" ]; then
+            # The sentinel's own log (read above) is the proof; only the file is missing.
+            printf '%s%s  SECURITY BREACH: the out-of-band sentinel confirmed a canary access and terminated this sandbox,\n  but no incident report file could be written into the workspace.%s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" >&2
         else
             # Monitors write their record BEFORE they signal PID 1, and PID 1 shares
             # the agent's uid - so the agent can send the tripwire's signal itself.

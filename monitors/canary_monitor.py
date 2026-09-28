@@ -564,7 +564,9 @@ class CanaryMonitor:
         self.wd_dirs: Dict[int, str] = {}
         self.dir_basenames: Dict[str, set] = {}
         self.deaf_dirs: Dict[str, bool] = {}
+        self.unprobed_dirs: set = set()
         self.degraded: List[str] = []
+        self.unverified: List[str] = []
         self._running = True
 
     # --- watch management -----------------------------------------------------
@@ -593,7 +595,15 @@ class CanaryMonitor:
                     "Windows/macOS (9p/virtiofs). See docs/THREAT_MODEL.md 4.5."
                 )
             else:
-                log(f"unknown    : {directory} ({fstype}) - could not probe (not writable?)")
+                # Watched, but NOT counted as enforced: without a probe nothing
+                # shows this filesystem delivers events. The sentinel hit this on
+                # every 0755 Linux workspace (no DAC override) and still counted
+                # the path in enforced=N/M (run 36369383799).
+                self.unprobed_dirs.add(directory)
+                alert(
+                    f"UNVERIFIED : {directory} ({fstype}) - could not probe (not writable?); "
+                    "canaries here are watched but NOT counted as enforced"
+                )
 
         for path in self.canaries:
             directory = os.path.dirname(path) or "/"
@@ -604,7 +614,10 @@ class CanaryMonitor:
                 try:
                     wd = self.inotify.add_watch(path, FILE_MASK | IN_EXCL_UNLINK)
                     self.wd_files[wd] = path
-                    armed += 1
+                    if directory in self.unprobed_dirs:
+                        self.unverified.append(path)
+                    else:
+                        armed += 1
                 except OSError as exc:
                     log(f"cannot watch {path}: {exc}")
             else:
@@ -655,6 +668,11 @@ class CanaryMonitor:
             alert(
                 f"{len(self.degraded)} canary path(s) are NOT enforced on this host: "
                 + ", ".join(self.degraded)
+            )
+        if self.unverified:
+            alert(
+                f"{len(self.unverified)} canary path(s) are watched but UNVERIFIED (not counted): "
+                + ", ".join(self.unverified)
             )
         if armed == 0:
             alert(
