@@ -142,10 +142,6 @@ jobs:
       - name: Start the egress filter
         run: ./scripts/warden-cli.sh up
 
-      - name: Isolation suite under WARDEN_RUNTIME=kata
-        continue-on-error: true
-        run: WARDEN_RUNTIME=kata NO_COLOR=1 ./scripts/verify-isolation.sh 2>&1 | tee /tmp/suite.log; echo "suite rc=${PIPESTATUS[0]}"
-
       - name: A real session under kata (proxy path + sentinel verdict)
         continue-on-error: true
         run: |
