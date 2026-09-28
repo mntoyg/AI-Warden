@@ -18,10 +18,21 @@ jobs:
           echo "demo rc=${rc}"
           grep -nE 'PASS|FAIL|WARN|Act [0-9]|exit code|Confirmed by the sentinel|Incident report|DEMO COMPLETE|PRE-FLIGHT|enforced=' /tmp/demo.log | cut -c1-200
           grep -q 'DEMO COMPLETE' /tmp/demo.log && [ "$rc" -eq 0 ] || { echo "::error::rehearsal did not complete"; tail -60 /tmp/demo.log; exit 1; }
+      - name: DEBUG (temp branch only) - keep every sentinel log, show the workspace
+        run: |
+          sed -i 's|^    docker rm -f "${1}-sentinel" >/dev/null 2>\&1 \|\| true$|    docker logs "${1}-sentinel" > "/tmp/sentinel-$(date +%s%N).log" 2>\&1 \|\| true; docker rm -f "${1}-sentinel" >/dev/null 2>\&1 \|\| true|' scripts/warden-cli.sh
+          grep -n -A2 '^stop_sentinel()' scripts/warden-cli.sh
+          ls -la workspaces/demo workspaces/demo/.secrets 2>&1 | head -30
       - name: Second take right after the first (re-runs must be clean)
         run: |
           rc=0; NO_COLOR=1 bash ./scripts/demo.sh --auto > /tmp/demo2.log 2>&1 || rc=$?
           echo "second take rc=${rc}"; grep -E 'DEMO COMPLETE|FAIL' /tmp/demo2.log | cut -c1-200
           [ "$rc" -eq 0 ] || { tail -40 /tmp/demo2.log; exit 1; }
+      - name: DEBUG - sentinel logs and workspace after take 2
+        if: always()
+        run: |
+          ls -la workspaces/demo | head -30
+          for f in /tmp/sentinel-*.log; do echo "=== $f"; grep -vE 'watchable|seeding' "$f" | cut -c1-220; done
       - name: status afterwards (nothing left behind)
+        if: always()
         run: NO_COLOR=1 ./scripts/warden-cli.sh status 2>&1 | tail -25
