@@ -31,14 +31,15 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       "there is a date" without giving it, ask for the date itself (session 12 needed 2 rounds).
 
 2) WORK
-   - FIRST, if `.ai/SESSION12.md` or my session-12 patches (`000*.patch`) exist: session 12 could not
-     push. `git am` the patches on a branch, merge SESSION12.md into HANDOFF, delete it. They hold two
-     UNSHIPPED security fixes (proxy DNS exfiltration: phase L; inotify overflow: E9) proven only
-     with stand-in images - after the demo: rebuild, real codex path, suite A-L, CI, tag v1.2.6.
-   - Default task after that: HANDOFF Next steps. Kata has a ready probe workflow
-     from session 12 (`kata-probe.yml`, given to the user as a file): put it on a TEMPORARY branch
-     `kata-probe` with its own `on: push: branches: [kata-probe]`, in a `git worktree`, read the
-     run, delete branch + worktree after. Do not extend `runsc*` handling to Kata by guess.
+   - FIRST, if `.ai/SESSION12.md` exists: merge it into HANDOFF, delete it, replace NEXT_PROMPT.md
+     with this file. Branch `claude/wizardly-edison-9pzqzk` holds two UNSHIPPED security fixes (proxy
+     DNS exfiltration: phase L; inotify overflow: E9), already green on real images in temp-branch CI;
+     v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex path, suite A-L on
+     Docker Desktop, CI, tag v1.2.6 + superseded note. Delete origin branches kata-probe, verify-s12.
+   - Default task after that: HANDOFF Next steps (Kata: `.ai/kata-probe.yml`, phase-I hang).
+   - Real-image proof from a host that cannot build: a TEMPORARY branch whose ci.yml push trigger
+     includes it + a negative job that restores the old file (session 12). In workflow steps capture
+     rc as `rc=0; cmd || rc=$?` - steps run `bash -e` (two silent probe deaths in session 12).
    - A platform this host lacks (runsc, KVM, Linux ext4): a GitHub runner via a temporary branch.
    - Blocked on something only I can produce? Find a PUBLIC STAND-IN with the same shape (v13).
    - After ANY `build --pull`, re-run the real agent path with my key (v10). Bump versions first.
