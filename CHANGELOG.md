@@ -4,6 +4,19 @@
 
 ---
 
+## [Unreleased]
+
+**security (hardening): คิว inotify ล้นทำให้ canary ที่ถูกอ่านหายไปเงียบ ๆ** — ยังไม่ออก tag เพราะ freeze ก่อน demo 2026-09-29
+
+### Security
+
+- monitor ข้าม `IN_Q_OVERFLOW` (wd -1) ไปเฉย ๆ: เมื่อคิว inotify เต็ม (16384) kernel ทิ้ง event ที่ตามมา รวมถึง
+  การเปิด canary แล้ว monitor ก็ยังบอกว่า armed (วัดด้วย monitor ที่ถูกหยุด + 24000 event ใน vault → ไม่มี breach)
+  ตอนนี้คิวล้น = breach (exit 99) พร้อมบรรทัด `events lost: inotify queue overflowed` และ record ที่ไม่อ้างว่า
+  "มีการอ่าน" แต่บอกว่า "ตัดความเป็นไปได้ไม่ได้" CLI รายงานกรณีนี้จาก log ของ sentinel ด้วย
+  drill ใหม่ **E9** (FAIL บนโค้ดเดิมใน harness: `E9 NOT KILLED`, rc 0) ดู THREAT_MODEL §4.6
+  ยังไม่พบว่า agent ทำให้คิวของ monitor ที่ไม่ถูกหยุดล้นได้จริง (C flooder 2–8 ตัวที่ `--cpus 2` ไม่ทำให้ล้น)
+
 ## [1.2.5] — 2026-09-27
 
 **fix: ใต้ gVisor agent ที่ใช้ process เยอะไม่ทำ sandbox ตายเงียบ ๆ อีก**

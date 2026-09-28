@@ -70,6 +70,7 @@ IN_CREATE = 0x00000100
 IN_DELETE = 0x00000200
 IN_DELETE_SELF = 0x00000400
 IN_MOVE_SELF = 0x00000800
+IN_Q_OVERFLOW = 0x00004000
 IN_IGNORED = 0x00008000
 IN_ONLYDIR = 0x01000000
 IN_EXCL_UNLINK = 0x04000000
@@ -106,7 +107,13 @@ EVENT_NAMES = {
     IN_DELETE: "DELETE",
     IN_DELETE_SELF: "DELETE_SELF",
     IN_MOVE_SELF: "MOVE_SELF",
+    IN_Q_OVERFLOW: "Q_OVERFLOW",
 }
+
+# What a trip records as the canary path when the kernel dropped events: which
+# canary was touched is exactly what was lost. No spaces - the CLI parses the
+# `file=` field of the sentinel's breach line up to the first space.
+EVENTS_LOST_PATH = "<events-lost>"
 
 INOTIFY_HEADER = struct.Struct("iIII")  # wd, mask, cookie, len
 
@@ -686,6 +693,20 @@ class CanaryMonitor:
                 continue
 
             for wd, mask, _cookie, name in self.inotify.read_events():
+                # A full queue (max_queued_events, 16384 by default) makes the
+                # kernel drop every later event and queue one IN_Q_OVERFLOW with
+                # wd -1, which matched no watch and was skipped - so a canary
+                # opened while the queue was full left no trace and the monitor
+                # stayed "armed" (measured: a paused monitor, 24000 create/unlink
+                # events in the vault, then a canary read -> no breach). Lost
+                # events may include a canary access, so this fails closed.
+                if mask & IN_Q_OVERFLOW:
+                    alert(
+                        f"[SECURITY BREACH] events lost: inotify queue overflowed mode={self.mode}"
+                    )
+                    self.trip(EVENTS_LOST_PATH, mask)
+                    return BREACH_EXIT_CODE
+
                 if mask & IN_IGNORED:
                     self.wd_files.pop(wd, None)
                     continue
@@ -713,7 +734,11 @@ class CanaryMonitor:
     # --- breach handling ------------------------------------------------------
     def trip(self, path: str, mask: int) -> None:
         event = describe_mask(mask)
-        alert("[SECURITY BREACH] Canary file accessed by Agent Process!")
+        if path == EVENTS_LOST_PATH:
+            # Not proof of a read - proof that one can no longer be ruled out.
+            alert("[SECURITY BREACH] Canary events were lost - a canary access cannot be ruled out!")
+        else:
+            alert("[SECURITY BREACH] Canary file accessed by Agent Process!")
         alert(f"[SECURITY BREACH] file={path} event={event} mode={self.mode}")
 
         suspects, denied_pids = attribute_breach(self.canaries, self.self_pid)

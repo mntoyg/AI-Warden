@@ -355,6 +355,32 @@ bind mount ของ Docker Desktop บน Windows/macOS ไม่ใช่ file
 บน Docker Desktop และ monitor จะรายงานตรง ๆ ว่า `enforced=4/7`
 ทั้ง inline monitor และ sentinel เฝ้า vault ได้ทั้งคู่แล้ว บน Linux จะได้ `7/7`
 
+### 4.6 คิว inotify ล้น = event หาย (ถือเป็น breach)
+
+inotify ของแต่ละ monitor มีคิวจำกัด (`/proc/sys/fs/inotify/max_queued_events`, ค่าปกติ 16384)
+เมื่อคิวเต็ม kernel **ทิ้ง event ที่ตามมาทั้งหมด** แล้วใส่ `IN_Q_OVERFLOW` ไว้หนึ่งอัน
+agent เขียนไดเรกทอรีที่ถูกเฝ้าได้ (vault และบน Linux คือ root ของ `/workspace`) จึงสร้าง event จำนวนมากได้
+
+ก่อน session 12 monitor ข้าม `IN_Q_OVERFLOW` ไปเงียบ ๆ: วัดแล้ว — หยุด monitor ชั่วคราว, สร้างไฟล์
+24000 event ใน vault, อ่าน canary แล้วปล่อย monitor → **ไม่มี breach, monitor ยังบอกว่า armed**
+ตอนนี้ monitor ถือว่าคิวล้นเป็น breach (fail closed) และบอกตรง ๆ ว่ารู้แค่ว่า event หาย:
+
+```
+*** [SECURITY BREACH] events lost: inotify queue overflowed mode=sentinel
+*** [SECURITY BREACH] Canary events were lost - a canary access cannot be ruled out!
+```
+
+CLI แสดงผลจาก log ของ sentinel ว่า `its inotify queue overflowed, so events were lost and a canary access
+cannot be ruled out` (ไม่ใช่ "sentinel recorded no breach") ทดสอบด้วย drill E9
+
+**ที่วัดได้จริง:** บนเครื่อง Linux 4 คอร์ (cloud container, overlayfs, session 12) (และเมื่อจำกัดให้ monitor กับผู้โจมตีใช้ 2 คอร์ร่วมกัน) flooder ภาษา C
+2–8 ตัวที่ `--cpus 2` **ไม่ทำให้คิวของ monitor ที่ไม่ถูกหยุดล้น** และ flood 5 วินาทีโดยไม่อ่าน canary ไม่ทำให้
+monitor ใหม่ trip ผิด ๆ agent หยุด inline monitor ได้ (uid เดียวกัน — แต่ก็ฆ่ามันได้อยู่แล้ว) ส่วน sentinel
+ถูกหยุดจาก agent ไม่ได้ บนเครื่องที่ CPU น้อยกว่า (VM ของ Docker Desktop) ยังไม่ได้วัด
+งานที่ไม่ได้มีเจตนาร้ายแทบไม่มีทางสร้าง 16384 event ในไดเรกทอรีเหล่านี้เร็วกว่าที่ monitor อ่านทัน
+แต่ถ้าเกิดขึ้น session จะจบด้วย exit 99 — เราเลือกแบบนี้เพราะ tripwire ที่บอกว่า armed ขณะที่ event หายไป
+แย่กว่าการหยุด session ผิดจังหวะ
+
 ---
 
 ## 5. Checklist ก่อนใช้งานจริง

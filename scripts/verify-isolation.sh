@@ -24,6 +24,7 @@
 #                                 E5 hiding from attribution behind a warden argv
 #                                 E6 an existing report file swallowing a new breach's report
 #                                 E7 a SIGUSR1 the agent sends itself, reported as a breach
+#                                 E9 a canary read lost in an inotify queue overflow
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
@@ -112,10 +113,11 @@ VERIFY_WS_MOUNT="$(host_path "$VERIFY_WS")"
 
 VERIFY_VAULT="warden-verify-vault-$$"
 docker volume create --label ai.warden.role=canary-vault "$VERIFY_VAULT" >/dev/null
+E9_VAULT="warden-verify-e9-vault-$$"
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
-        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e3 warden-verify-e5 \
+        warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e9 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt warden-verify-i0 warden-verify-h-busy >/dev/null 2>&1 || true
     # Phase F's passthrough check runs a real sandbox via warden-cli; sweep it and
@@ -123,7 +125,7 @@ cleanup() {
     local rtp_leftover
     rtp_leftover="$(docker ps -aq --filter 'name=verify-rtp' 2>/dev/null || true)"
     if [ -n "$rtp_leftover" ]; then docker rm -f "$rtp_leftover" >/dev/null 2>&1 || true; fi
-    docker volume rm -f "$VERIFY_VAULT" >/dev/null 2>&1 || true
+    docker volume rm -f "$VERIFY_VAULT" "$E9_VAULT" >/dev/null 2>&1 || true
     if [ "$KEEP" = "0" ]; then
         rm -rf "$VERIFY_WS" 2>/dev/null || true
     else
@@ -497,6 +499,67 @@ zzz"; cp /bin/sleep "$f"; exec 3</workspace/.secrets/credentials; exec "$f" 20'
         good "phase E2b: a newline in the reader's exe path was neutralised (?) - no forged log line"
     else
         bad  "phase E2b: rc=${e2b_rc} forged-line=${e2b_forged} reader-named-with-?=${e2b_named}"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    fi
+fi
+
+# --- E9: a full inotify queue must not swallow a canary read -----------------
+# When a monitor's queue holds max_queued_events (16384 by default) the kernel
+# drops every later event and queues one IN_Q_OVERFLOW. The monitor skipped
+# that, so a canary opened while the queue was full left no trace and the
+# tripwire stayed "armed". The drill makes the overflow deterministic: the
+# agent pauses the inline monitor (same uid), creates queue-limit + 2000 files
+# in the watched vault, holds the canary open, then resumes it. It models a
+# monitor that fell behind; the sentinel cannot be paused by the agent, and a
+# 2-CPU C flood did not outrun an unpaused monitor (measured, session 12).
+# Own vault: the flood leaves thousands of files behind.
+if [ "$RUN_BREACH" = "1" ]; then
+    printf '\n'
+    info "E9: a canary read while the monitor's inotify queue overflowed must still trip"
+    docker volume create --label ai.warden.role=canary-vault "$E9_VAULT" >/dev/null
+    E9_WS="${PROJECT_ROOT}/workspaces/.verify-e9-$$"
+    mkdir -p "$E9_WS"; chmod 0777 "$E9_WS" 2>/dev/null || true
+    E9_ERR="$(mktemp)"
+    e9_payload='m=""
+for d in /proc/[0-9]*; do
+    case "$(tr "\0" " " < "$d/cmdline" 2>/dev/null)" in *canary_monitor"."py*) m="${d#/proc/}" ;; esac
+done
+echo "e9 monitor pid=${m:-NONE}"
+if [ -n "$m" ] && kill -STOP "$m"; then echo "e9 monitor paused"; fi
+q="$(cat /proc/sys/fs/inotify/max_queued_events)"; n=$((q + 2000)); i=0
+while [ "$i" -lt "$n" ]; do : > "/workspace/.secrets/.e9-$i" || break; i=$((i + 1)); done
+echo "e9 created $i of $n (queue limit $q)"
+exec 3</workspace/.secrets/credentials && echo "e9 holding the canary open"
+[ -n "$m" ] && kill -CONT "$m"
+sleep 10
+echo "E9 NOT KILLED"'
+    e9_out="$(docker run --rm \
+        --network "$INTERNAL_NET" \
+        --user 1001:1001 --workdir /workspace \
+        --cap-drop=ALL --security-opt no-new-privileges:true \
+        --memory 1g --pids-limit 128 \
+        --tmpfs "/run/warden:rw,nosuid,size=16m,uid=1001,gid=1001" \
+        -e WARDEN_REQUIRE_PROXY=0 \
+        -v "${E9_VAULT}:/workspace/.secrets" \
+        -v "$(host_path "$E9_WS"):/workspace" \
+        --name warden-verify-e9 \
+        "$AGENT_IMAGE" \
+        bash -c "$e9_payload" 2>"$E9_ERR")"
+    e9_rc=$?
+    e9_lost=0; e9_flooded=0
+    if grep -q '\*\*\* \[SECURITY BREACH\] events lost: inotify queue overflowed mode=inline$' "$E9_ERR"; then e9_lost=1; fi
+    # Positive control: without a real overflow the drill proves nothing.
+    if printf '%s\n' "$e9_out" | grep -qE '^e9 created ([0-9]+) of \1 '; then e9_flooded=1; fi
+    rm -f "$E9_ERR" 2>/dev/null || true
+    rm -rf "$E9_WS" 2>/dev/null || true
+    docker volume rm -f "$E9_VAULT" >/dev/null 2>&1 || true
+    if [ "$e9_flooded" -ne 1 ] || ! printf '%s\n' "$e9_out" | grep -qx 'e9 monitor paused'; then
+        bad  "phase E9: the overflow was not staged, drill proves nothing - $(printf '%s' "$e9_out" | grep '^e9' | tr '\n' ' ')"
+        PHASE_FAILURES=$((PHASE_FAILURES + 1))
+    elif [ "$e9_rc" -eq 99 ] && [ "$e9_lost" -eq 1 ] && ! printf '%s\n' "$e9_out" | grep -qx 'E9 NOT KILLED'; then
+        good "phase E9: queue overflowed while the canary was read - the monitor tripped on the lost events (99)"
+    else
+        bad  "phase E9: rc=${e9_rc} events-lost-line=${e9_lost} - a canary read during a queue overflow went unseen"
         PHASE_FAILURES=$((PHASE_FAILURES + 1))
     fi
 fi

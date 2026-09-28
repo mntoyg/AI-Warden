@@ -588,14 +588,25 @@ stop_sentinel() {
 # "[canary]" lines only into its own stdout), so this is the one breach record it
 # cannot forge. Accept only whole lines the sentinel prints as a sentinel, for a
 # path it actually watches; the agent's argv reaches this log only repr()-quoted.
+#
+# A sentinel whose inotify queue overflowed lost events - possibly the canary
+# open itself - and trips on that. It names no path, so it is reported as the
+# SENTINEL_EVENTS_LOST line rather than dropped as "recorded no breach".
+SENTINEL_EVENTS_LOST="(events lost: the sentinel's inotify queue overflowed)"
 sentinel_breach_paths() {
-    local path
-    docker logs "${1}-sentinel" 2>&1 \
+    local path log
+    log="$(docker logs "${1}-sentinel" 2>&1 || true)"
+    printf '%s\n' "$log" \
         | sed -n 's/^\[canary [0-9TZ:.-]*\] \*\*\* \[SECURITY BREACH\] file=\([^ ]*\) event=[A-Z_|]* mode=sentinel$/\1/p' \
         | LC_ALL=C sort -u \
         | while IFS= read -r path; do
               case ":${SENTINEL_CANARIES}:" in *":${path}:"*) printf '%s\n' "$path" ;; esac
           done
+    # Captured with sed, not `grep -q`: under pipefail grep -q's early exit
+    # SIGPIPEs printf and reads as "not found" (session 10's E6 gotcha).
+    if [ -n "$(printf '%s\n' "$log" | sed -n '/^\[canary [0-9TZ:.-]*\] \*\*\* \[SECURITY BREACH\] events lost: inotify queue overflowed mode=sentinel$/p')" ]; then
+        printf '%s\n' "$SENTINEL_EVENTS_LOST"
+    fi
 }
 
 # Why the sentinel refused to arm, from its own log (empty = it did not refuse).
@@ -1008,6 +1019,11 @@ cmd_run() {
         fi
         if [ -n "$sentinel_seen" ]; then
             while IFS= read -r seen; do
+                if [ "$seen" = "$SENTINEL_EVENTS_LOST" ]; then
+                    printf '%s  Confirmed by the sentinel (outside the agent'"'"'s reach): its inotify queue overflowed, so\n  events were lost and a canary access cannot be ruled out.%s\n' \
+                        "$C_RED" "$C_RESET" >&2
+                    continue
+                fi
                 printf '%s  Confirmed by the sentinel (outside the agent'"'"'s reach): %s was opened.%s\n' \
                     "$C_RED" "$seen" "$C_RESET" >&2
             done <<< "$sentinel_seen"
