@@ -32,9 +32,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
 
 2) WORK
    - FIRST, if `.ai/SESSION12.md` exists: merge it into HANDOFF, delete it, replace NEXT_PROMPT.md
-     with this file. Branch `claude/wizardly-edison-9pzqzk` holds two UNSHIPPED security fixes (proxy
-     DNS exfiltration: phase L; inotify overflow: E9), already green on real images in temp-branch CI;
-     v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex path, suite A-L on
+     with this file. Branch `claude/wizardly-edison-9pzqzk` holds UNSHIPPED fixes (proxy DNS exfil: L;
+     inotify overflow: E9; sentinel-only breach record: E10; unverified dirs), green on real images in
+     temp-branch CI; v1.2.5 is confirmed leaky. After the demo: merge, bump, rebuild, real codex, A-L on
      Docker Desktop, CI, tag v1.2.6 + superseded note. Delete origin branches kata-probe, verify-s12.
    - Then work `.ai/ROADMAP.md` phase by phase (HANDOFF wins if they disagree; fix the roadmap).
    - A platform or image this host lacks (runsc, KVM, real build): a TEMPORARY branch whose ci.yml push trigger
