@@ -4,68 +4,77 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-09-27 (session 11)
-- **Latest release:** [v1.2.5](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.5) — under gVisor the CLI raises the host task cap 8x so RLIMIT_NPROC stops a fork bomb inside a surviving sandbox; on top of v1.2.4 — the sentinel proves it can see the agent before it arms (says `NOT armed` under gVisor instead of lying), gVisor sessions reach the proxy (`--add-host`), CI job `gVisor (runsc) drills`. v1.0.0–v1.2.4 carry a superseded/hardening note
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v15)
-- **🚩 MILESTONE — first live test: POSTPONED, no new date** (asked again 2026-09-27: none).
-  It is still a video recorded on THIS Windows Docker Desktop box with a real agent + live
-  breach, `enforced=4/7`, act 4 = codex (runc, not gVisor). No freeze without a date.
+- **Last updated:** 2026-10-07 (session 13, cloud Linux container)
+- **Latest release:** [v1.2.6](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.6) — security: the proxy no longer resolves non-allowlisted names (DNS exfiltration, phase L), an inotify queue overflow trips the tripwire (E9), a sentinel-only breach gets a host-written record (E10), unprobeable canary dirs are UNVERIFIED. Verified on real images by CI (ext4 + gVisor); **not yet run on Docker Desktop**. v1.0.0–v1.2.5 carry a superseded/hardening note
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v17)
+- **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
+  passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
+  Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
 
 ---
 
-## 1. Status (verified 2026-09-27, session 11)
+## 1. Status (verified 2026-10-07, session 13)
 
 | Thing | State |
 |---|---|
-| `main` | tag **`v1.2.5`** (`60b530c`) + this handoff commit, in sync with origin |
-| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning (v1.2.1's is a hardening note) · **`v1.2.5` (Latest, gVisor fix)** |
-| CI | **4 jobs** now: static · CVE scan · ext4 drills · **gVisor (runsc) drills**. Green on `4e9344e`, `21e76ad`, `b1bcecd` (36284692220) tag `v1.2.4` (36285330668), `60b530c` (36287609871) and tag **`v1.2.5`** (36288229108); releases published, older ones marked superseded, re-read |
-| Local suite (Docker Desktop / Windows) | on the **v1.2.5** image (rebuilt `--pull` 2026-09-27, also run on v1.2.4, agents unchanged: codex-cli 0.156.1, claude 2.1.197, aider 0.86.2): **A–K** all PASS, exit 0, 50 PASS lines + phase A, `enforced=4/7`; K 4/4 via a docker shim; J GPU side 7/7 |
-| CI suite, ext4 | all phases A–K · `enforced=7/7` · K passes on Linux too |
-| CI suite, **gVisor** | `WARDEN_RUNTIME=runsc`: all phases pass (A and B now really run under runsc; D = honest SKIP, sentinel `NOT armed`); real session reaches api.anthropic.com via the proxy; live breach → 99 + report; fork bomb stops at RLIMIT_NPROC (`forked 508, then: errno 11`, `python rc=0`) with the CLI's host task cap 4096 - the sandbox survives (v1.2.5) |
-| CVEs | CI's gate green on v1.2.4 (0 HIGH/CRITICAL OS, 0 under `/opt/warden`); not re-run locally this session |
-| Egress audit trail | was DEAD at session 11 start (173 NUL bytes after an unclean Docker Desktop stop - 2nd time); `up` healed it → `live`. `run` calls `up`, so a session heals it too |
-| Incident records | unchanged since v1.2.3 (never deferred to; `Confirmed by the sentinel`); plus: the CLI prints `the out-of-band sentinel did NOT arm (from its own log ...)` when it refused to arm |
-| Local model | unchanged: `aider-local` offline CPU/GPU, measured with the untuned Qwen 1.5B. **No trained model** - checked 2026-09-27: no `.gguf` in Downloads, D:, G:; lab `data/` holds only `example.jsonl` |
-| OpenAI key | **still OUT OF CREDIT** (user, 2026-09-27: not topped up). v1.2.4 codex path: login OK, `sandbox: danger-full-access`, sentinel `armed out-of-band`, reached OpenAI → `Quota exceeded` |
-| Demo readiness | Recording POSTPONED, no date. act 4 blocked on credit. Last full DEMO COMPLETE: v1.2.1. The interactive rehearsal has never been run |
+| `main` | tag **`v1.2.6`** = merge of PR #1 (session 12 branch + version bump) |
+| Tags | `v1.0.0`…`v1.2.5` carry a superseded warning (v1.2.1's is a hardening note) · **`v1.2.6` (Latest, security)** |
+| CI | 4 jobs: static · CVE scan · ext4 drills · gVisor (runsc) drills. Session 12 fixes green on real images on temp branches (36364368300: E9 + L; 36500312536: E10) with negative proofs (36365091898: old squid.conf FAILS L; 36500312493: old CLI FAILS E10). PR #1, main and tag `v1.2.6` runs: see session 13 log |
+| Local suite (Docker Desktop / Windows) | last run on **v1.2.5** (A–K PASS, `enforced=4/7`). **v1.2.6 never run there**: phase L, E9, E10 and self-test 3b2 have never met Docker Desktop (3b2 = its DNS). First job on the Windows box |
+| CI suite, ext4 / gVisor | ext4: all phases A–L, `enforced=7/7`. gVisor: as v1.2.5 (D = honest SKIP, sentinel `NOT armed`) |
+| Kata | measured on a runner (session 12, Kata 4.2.0): sessions run, sentinel honestly `NOT armed`, breach → 99; the full suite HANGS in phase I (aider-local) — open. Workflow kept at `.ai/kata-probe.yml` |
+| Egress audit trail | unchecked since session 11 (cloud sessions have no Docker Desktop). `up` heals it |
+| Local model | unchanged: no trained GGUF (last checked 2026-09-27) |
+| OpenAI key | out of credit at last check (2026-09-27); session 12 heard it would be topped up for the demo — unknown now |
+| Temporary branches | `kata-probe`, `verify-s12`, `claude/wizardly-edison-9pzqzk` still on origin (merged or probe-only) |
+| Cloud sessions | `dockerd` starts as root; Docker Hub pulls work; deb.debian.org is blocked (session 12) → no image builds; push + API work in session 13 |
 
 ---
 ## 2. Next steps — priority order
 
 Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
+`.ai/ROADMAP.md` (Thai, session 12) gives the phase view; this list wins where they differ.
 
-1. **Local model: the user trains a real one on Colab; then run it here.** The AI Warden side
-   is DONE: offline `aider-local` (v1.1.0) + GPU (v1.2.0) + aider gets local metadata, no GitHub
-   fetch (v1.2.1), and the resource envelope of the default base model is MEASURED (Status row).
-   Checked 2026-09-27: no `.gguf` in Downloads, D:, G:; lab `data/` has only `example.jsonl`.
-   Left: (a) the user runs the lab notebook on Colab T4 with their own data and puts the GGUF +
-   manifest OUTSIDE any workspace; (b) then `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it>
-   warden-cli.sh run <ws> aider-local` with a real task, and compare its answers with the untuned
-   base (`outputs/qwen-base/` in the lab) - quality is the only unknown left. Start time is NOT worth
-   optimising (measured session 10: sha256 of 1.9 GB = 8 s; model load = 31 s from a named volume
-   AND from the 9p bind mount - ~12 s I/O + ~19 s llama.cpp CPU work; `--no-mmap` was far worse;
-   the 63-65 s loads were a cold cache). Do not build a model store.
-2. **Demo recording — no date (asked 2026-09-27: still none; OpenAI credit still empty). Ask again each session**
-   (with the AskUserQuestion tool). With a date: no rebuild in the days before it; the
-   interactive `./scripts/demo.sh --agent codex` rehearsal is the user's step (Git Bash, not
-   `bash` in PowerShell); `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
-   Since v1.2.1 the take shows `Confirmed by the sentinel (outside the agent's reach)` - say it
-   out loud (DEMO.md act 3). A second, labelled report file is normal when both monitors fire.
-3. **(idea, decide first) A detect-only witness under gVisor.** Measured (P9): a **runc** sentinel
-   beside a runsc agent HEARS canary reads on the shared vault (OPEN + ACCESS) but sees only gVisor's
-   Sentry as PID 1 and cannot signal it (`Permission denied`), so it could restore the unforgeable
-   `Confirmed by the sentinel` record under gVisor, not containment. Costs: the sentinel leaves the
-   gVisor boundary (it runs no agent code; `--network none`, CAP_KILL only). Ask the user before building.
-4. **(low) Other VM runtimes (Kata) are unmeasured.** The CLI's gVisor handling keys on `runsc*` only
-   (host task cap) or on "not runc" (`--add-host`); the sentinel self-proof is generic. Measure on a
-   runner the same way (temporary branch) before claiming Kata works - do not extend `runsc*` by guess.
-5. **(low) udisks two-level drive root `/media/<user>/<label>` in the mount guard.** Needs a
-   heuristic (is it a mountpoint?), not a path pattern — decide before coding.
+1. **Run v1.2.6 on the Windows box** (it shipped from the cloud on CI evidence only).
+   `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex
+   path with a honeypot read (expect 99; `Quota exceeded` = credit, ask), then
+   `./scripts/verify-isolation.sh` A–L on Docker Desktop: exit 0, `enforced=4/7`, and **3b2, L,
+   E9, E10 pass** - none of them has met Docker Desktop (3b2 asks its embedded DNS). Then re-quote
+   `docs/VERIFICATION.md` from that one run and add a line to the v1.2.6 release. If anything
+   fails there, it is a v1.2.7 fix, not a note.
+2. **(decide first) The CLI trusts a report file that appeared during the session.** An agent can
+   write `WARDEN_SECURITY_INCIDENT.json` (and `/run/warden/breach.flag`) and `kill -USR1 1`: exit
+   99 and the headline "the canary tripwire terminated this sandbox". Only a false positive can be
+   forged, but the headline claims authorship the CLI cannot verify. Proposed: that headline only
+   when the sentinel confirms; otherwise "unconfirmed (written inside the agent's reach)". It
+   changes demo act-3 wording and the message for home-canary breaches (inline-only evidence) -
+   ask with the evidence, then drill first (FAIL on old code), E7 must still pass.
+3. **Kata (low):** read P1–P4 (DNS, `--pid`, cross-container inotify, pids) from run
+   36366900384 or rerun `.ai/kata-probe.yml` with `docker build -q`; find the phase-I aider-local
+   hang under Kata (a docker call with no timeout?); then decide whether THREAT_MODEL §4.1 lists
+   Kata as supported-with-limits. In workflow steps capture rc as `rc=0; cmd || rc=$?`.
+4. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
+   in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
+   step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
+5. **Local model:** waits on the user's Colab GGUF (lab notebook, GGUF + manifest outside any
+   workspace), then `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws>
+   aider-local` with a real task vs the untuned base in `outputs/qwen-base/`. Do not build a model store.
+6. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
+   cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
+   in the mount guard (needs an is-it-a-mountpoint heuristic); SNI peek-and-splice (needs an
+   OpenSSL squid build).
+7. **Housekeeping:** delete origin branches `kata-probe`, `verify-s12`,
+   `claude/wizardly-edison-9pzqzk` once the user agrees (session 12's git proxy refused the delete).
 
 ### Decided this session (do not re-raise without new evidence)
 
+- **v1.2.6 shipped from a cloud session on CI evidence** (user call 2026-10-07): v1.2.5's DNS
+  channel was confirmed on its real image and the repo is public, so waiting for the Windows box
+  was worse than shipping with "not yet run on Docker Desktop" written in the release. The Windows
+  run is Next steps #1, not optional.
+- **Session 12's fixes for the sentinel-only breach (E10) and UNVERIFIED dirs were the user's
+  choice** (2026-09-29, from the options in ROADMAP phase 2). Phase 2 #1 is still undecided.
 - **gVisor is verified on a GitHub runner, not on this box** (user call 2026-09-27, over installing
   dockerd + runsc into the WSL kali distro). Under runsc the sentinel cannot share the agent's PID
   namespace, so it refuses to arm and says so; gVisor trades the sentinel for the kernel boundary.
@@ -214,6 +223,13 @@ would I know if this silently did nothing?" — then run that.
 | Heredoc-fed Python ate a backslash for the 5th time | `tr '\n' ' '` written inside a `python - <<'EOF'` non-raw string became a real newline in a workflow file (session 11). No exceptions: write `chr(10)`, use `paste -sd ' '`, or the Edit tool. |
 | Two measurements back to back share state | Session 11's CI step ran the fork bomb at pids 512 and, right after the crashed sandbox, at 4096 - the second "died" too and became a false OPEN QUESTION. A clean run of 4096 alone stopped at 508 with EAGAIN three times. One measurement per clean session/container, or a fresh workspace each. |
 
+| A cloud session is not the Windows box | Check `uname -a; docker info` first and prove push access (`git push --dry-run`) before planning. Session 12 wrote a whole Kata workflow, then hit 403; session 13's dry-run passed in seconds |
+| squid `dst` ACLs resolve the name | Any `dst` rule evaluated before the allowlist makes squid resolve attacker-chosen names (DNS exfiltration). Keep `deny !allowed_domains` ahead of every DNS-needing ACL; phase L guards it |
+| inotify `IN_Q_OVERFLOW` has wd -1 | It matches no watch, so a loop keyed on wd skips it silently. The monitor trips on it since v1.2.6 (E9) |
+| `mktemp -d` is 0700 | A container user other than root cannot read files in it; chmod before mounting (phase L's fake DNS died silently this way in session 12's harness) |
+| GitHub Actions steps run `bash -e` | `cmd; rc=$?` never reaches `rc=$?` when cmd fails - the step dies silently (twice in session 12). Use `rc=0; cmd || rc=$?` |
+| Temp-branch CI is the real-image test bed | A session that cannot build images can still prove a fix on the real images: a branch whose ci.yml push trigger includes it, plus a negative job that restores the old file (session 12, phase L / E9 / E10) |
+| A root sentinel cannot write to a 0755 Linux workspace | No `CAP_DAC_OVERRIDE`: 6/6 writes failed (run 36369383799). When it also kills the inline monitor first, no report existed until v1.2.6's host-written record (E10). Docker Desktop's 9p mount is writable by all, so the Windows box never showed it |
 ---
 
 ## 6. Conventions
@@ -227,6 +243,36 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-10-07 — session 13 · v1.2.6 shipped from a cloud session
+- **Did:** the user pasted a prompt for another project (Forge); attaching that repo was denied,
+  so asked once which project, the demo outcome, how to ship and the budget (weekly 59%, stop
+  70%). Found session 12's unshipped security fixes on `claude/wizardly-edison-9pzqzk` and
+  `.ai/SESSION12.md` (the HANDOFF update it could not write). Merged the branch, bumped 1.2.5 →
+  1.2.6 (CLI, entrypoint, monitor, CHANGELOG, DEMO.md), ran `bash -n`, `py_compile` and
+  shellcheck as CI does (dockerd in the container), opened PR #1, merged it on green CI, tagged
+  v1.2.6, released it with the "not run on Docker Desktop" line and marked v1.2.5 superseded.
+  Folded SESSION12.md into this file (Status, Next steps, Decided, Gotchas, its log below),
+  deleted it, NEXT_PROMPT v17.
+- **Learned:** a handoff that lives on an unmerged branch is invisible to a session that starts
+  from `main` - only `git branch -a` + a log of each remote branch found it. Read remote
+  branches in the reality check.
+- **Prompt should have said:** "list origin branches newer than main and read their `.ai/`
+  files" (v17 START b), and "a date in the past is a question" was already v10 - it worked.
+
+### 2026-09-28/29 — session 12 · cloud container · fixes verified on real images (written up in session 13)
+- **Did:** found it was in a cloud container (no Docker Desktop; image builds blocked by
+  deb.debian.org 403). Audited the tripwire and the proxy: (1) an inotify queue overflow silently
+  lost a canary read - fixed fail-closed, drill E9; (2) **squid resolved every CONNECT hostname
+  before refusing it - DNS exfiltration through the proxy** - fixed by rule order, phase L, plus
+  self-test 3b2. After write access was granted: both verified on the real images by temp-branch CI
+  with negative jobs (v1.2.5 confirmed leaky). Measured Kata 4.2.0 (works, sentinel honestly NOT
+  armed, suite hangs in phase I). A runner rehearsal of `demo.sh --auto` showed act 3 ending with
+  no report on a 0755 workspace; the user chose the fixes (E10, UNVERIFIED dirs). The demo date
+  2026-09-29 was set, then passed unrecorded.
+- **Learned:** the egress boundary had a silent channel because every check asked "was the request
+  refused?" and none asked "what did the refusal leak?"; offline stand-in images are enough to prove
+  a drill both ways when the real image cannot be built.
 
 ### 2026-09-27 — session 11 · v1.2.4 (sentinel self-proof; gVisor run for real)
 - **Did:** reality check: Docker down (started), HANDOFF carried three stale Status tables (fixed
@@ -584,6 +630,14 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v17 · 2026-10-07** — session 13. (a) START b reads **origin branches newer than main** and their
+  `.ai/` files (session 12's handoff sat unmerged on a branch for 8 days); (b) step 0 keeps "where am
+  I + prove push" but adds "a cloud session can still ship: PR + CI on real images + tag" (session 13
+  shipped v1.2.6 that way); (c) budget: the user's weekly number from the question tool is the stop
+  line (59% → 70% this session); (d) the demo freeze text is gone (date passed, no new one).
+- **v16 · 2026-09-28** — session 12. Step 0 (where am I + prove push access), budget question when
+  `get_usage` is missing, demo date/freeze, Kata probe hand-off, "if push is impossible hand over
+  patches". Lived in `.ai/NEXT_PROMPT_v16.md` on a branch until session 13 merged it.
 - **v15 · 2026-09-27** — session 11. (a) **END triggers on the user's budget rule too**: the user set
   "use 10% of the weekly limit" (20% → stop at 30%) - START records the weekly % and the stop line,
   END fires at ~70% context OR that line minus the END cost, whichever first; (b) **a platform this
