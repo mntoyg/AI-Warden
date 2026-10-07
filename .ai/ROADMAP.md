@@ -6,7 +6,9 @@
 
 ---
 
-## Phase 0 — Demo ครั้งแรก (2026-09-29) · FREEZE
+## Phase 0 — Demo ครั้งแรก · เลื่อน ไม่มีวันใหม่
+
+**2026-10-07 (session 13):** วันที่ 2026-09-29 ผ่านไปโดยยังไม่ได้อัด ไม่มีวันใหม่ จึงไม่ freeze แล้ว ตารางด้านล่างยังใช้ได้เมื่อได้วันใหม่ (ใช้ v1.2.6)
 
 **เป้าหมาย:** อัดวิดีโอ 4 องก์บนเครื่อง Windows + Docker Desktop ด้วย **v1.2.5** (ไม่ rebuild)
 
@@ -23,7 +25,9 @@
 
 ---
 
-## Phase 1 — ออก v1.2.6 (security) · หลัง demo ทันที
+## Phase 1 — ออก v1.2.6 (security)
+
+**ออกแล้ว 2026-10-07 (session 13) จาก session คลาวด์:** PR #1 merge, tag `v1.2.6`, release + superseded note บน v1.2.5 ตรวจด้วย CI บน image จริง ที่เหลือคือขั้นบนเครื่อง Windows (`build --pull`, path codex จริง, suite A–L บน Docker Desktop, quote VERIFICATION.md) = HANDOFF Next steps #1
 
 **ทำไม:** v1.2.5 มีช่อง DNS exfiltration ผ่าน proxy (ยืนยันบน Squid 5.7 จริง) และ tripwire เงียบเมื่อคิว
 inotify ล้น ตัวแก้อยู่บน branch `claude/wizardly-edison-9pzqzk` และผ่าน CI บน image จริงแล้ว
