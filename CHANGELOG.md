@@ -6,8 +6,12 @@
 
 ## [Unreleased]
 
-**security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก** — ยังไม่ออก tag
-เพราะ freeze ก่อน demo 2026-09-29 และยังไม่ได้รันบน image จริง (session คลาวด์ build image ไม่ได้)
+## [1.2.6] — 2026-10-07
+
+**security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก · breach ที่มีแต่ sentinel เห็นมี record**
+
+ต้อง rebuild ทั้งสอง image (`./scripts/warden-cli.sh build --pull`): ตัวแก้อยู่ใน proxy image (`squid.conf`) และ agent image (monitor)
+ตรวจบน image จริงด้วย CI (ext4 + gVisor) — **ยังไม่ได้รัน suite บน Docker Desktop** (ปล่อยจาก session คลาวด์ เพราะ v1.2.5 รั่วจริงและ repo เป็น public)
 
 ### Security
 
