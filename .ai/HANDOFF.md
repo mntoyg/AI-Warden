@@ -5,7 +5,7 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-10-07 (session 13, cloud Linux container)
-- **Latest release:** [v1.2.6](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.6) — security: the proxy no longer resolves non-allowlisted names (DNS exfiltration, phase L), an inotify queue overflow trips the tripwire (E9), a sentinel-only breach gets a host-written record (E10), unprobeable canary dirs are UNVERIFIED. Verified on real images by CI (ext4 + gVisor); **not yet run on Docker Desktop**. v1.0.0–v1.2.5 carry a superseded/hardening note
+- **Latest release:** v1.2.5 on GitHub. **v1.2.6 is merged on `main` (`9d265d0`) but NOT tagged yet**: the cloud session's git proxy refused the tag push (HTTP 403); the user creates tag + release in the GitHub UI (notes drafted in session 13). v1.2.6 = security: the proxy no longer resolves non-allowlisted names (DNS exfiltration, phase L), an inotify queue overflow trips the tripwire (E9), a sentinel-only breach gets a host-written record (E10), unprobeable canary dirs are UNVERIFIED. Verified on real images by CI (ext4 + gVisor); **not yet run on Docker Desktop**. v1.0.0–v1.2.5 carry a superseded/hardening note
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v17)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
@@ -17,9 +17,9 @@
 
 | Thing | State |
 |---|---|
-| `main` | tag **`v1.2.6`** = merge of PR #1 (session 12 branch + version bump) |
-| Tags | `v1.0.0`…`v1.2.5` carry a superseded warning (v1.2.1's is a hardening note) · **`v1.2.6` (Latest, security)** |
-| CI | 4 jobs: static · CVE scan · ext4 drills · gVisor (runsc) drills. Session 12 fixes green on real images on temp branches (36364368300: E9 + L; 36500312536: E10) with negative proofs (36365091898: old squid.conf FAILS L; 36500312493: old CLI FAILS E10). PR #1, main and tag `v1.2.6` runs: see session 13 log |
+| `main` | `9d265d0` = merge of PR #1 (session 12 branch + version bump to 1.2.6) + this handoff PR. **Tag `v1.2.6` missing on origin** (git proxy 403 on tag push) |
+| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning · `v1.2.5` still Latest and still WITHOUT its superseded note - add it when v1.2.6 is released (text drafted in session 13) |
+| CI | 4 jobs: static · CVE scan · ext4 drills · gVisor (runsc) drills. Session 12 fixes green on real images on temp branches (36364368300: E9 + L; 36500312536: E10) with negative proofs (36365091898: old squid.conf FAILS L; 36500312493: old CLI FAILS E10). PR #1: run 37701110789 (`71483b4`) and 37701337562 (`1252a01`), all 4 jobs green |
 | Local suite (Docker Desktop / Windows) | last run on **v1.2.5** (A–K PASS, `enforced=4/7`). **v1.2.6 never run there**: phase L, E9, E10 and self-test 3b2 have never met Docker Desktop (3b2 = its DNS). First job on the Windows box |
 | CI suite, ext4 / gVisor | ext4: all phases A–L, `enforced=7/7`. gVisor: as v1.2.5 (D = honest SKIP, sentinel `NOT armed`) |
 | Kata | measured on a runner (session 12, Kata 4.2.0): sessions run, sentinel honestly `NOT armed`, breach → 99; the full suite HANGS in phase I (aider-local) — open. Workflow kept at `.ai/kata-probe.yml` |
@@ -36,6 +36,9 @@ Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 `.ai/ROADMAP.md` (Thai, session 12) gives the phase view; this list wins where they differ.
 
+0. **If tag `v1.2.6` is still missing on origin, create it first** (`git ls-remote --tags origin`):
+   on the Windows box `git tag -a v1.2.6 9d265d0 -m ...; git push origin v1.2.6`, then the release
+   and v1.2.5's superseded note; wait for CI on the tag. A security fix is not shipped until tagged.
 1. **Run v1.2.6 on the Windows box** (it shipped from the cloud on CI evidence only).
    `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex
    path with a honeypot read (expect 99; `Quota exceeded` = credit, ask), then
@@ -69,7 +72,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 
 ### Decided this session (do not re-raise without new evidence)
 
-- **v1.2.6 shipped from a cloud session on CI evidence** (user call 2026-10-07): v1.2.5's DNS
+- **v1.2.6 ships from a cloud session on CI evidence** (user call 2026-10-07): v1.2.5's DNS
   channel was confirmed on its real image and the repo is public, so waiting for the Windows box
   was worse than shipping with "not yet run on Docker Desktop" written in the release. The Windows
   run is Next steps #1, not optional.
@@ -250,8 +253,10 @@ would I know if this silently did nothing?" — then run that.
   70%). Found session 12's unshipped security fixes on `claude/wizardly-edison-9pzqzk` and
   `.ai/SESSION12.md` (the HANDOFF update it could not write). Merged the branch, bumped 1.2.5 →
   1.2.6 (CLI, entrypoint, monitor, CHANGELOG, DEMO.md), ran `bash -n`, `py_compile` and
-  shellcheck as CI does (dockerd in the container), opened PR #1, merged it on green CI, tagged
-  v1.2.6, released it with the "not run on Docker Desktop" line and marked v1.2.5 superseded.
+  shellcheck as CI does (dockerd in the container), opened PR #1, merged it on green CI (runs
+  37701110789, 37701337562). The tag push got HTTP 403 from the session's git proxy, so tag,
+  release (notes with the "not run on Docker Desktop" warning) and v1.2.5's superseded note
+  are the user's step in the GitHub UI.
   Folded SESSION12.md into this file (Status, Next steps, Decided, Gotchas, its log below),
   deleted it, NEXT_PROMPT v17.
 - **Learned:** a handoff that lives on an unmerged branch is invisible to a session that starts
@@ -632,8 +637,8 @@ it and say why.
   it was down at session start and the prompt's warning saved time, so it stays.
 - **v17 · 2026-10-07** — session 13. (a) START b reads **origin branches newer than main** and their
   `.ai/` files (session 12's handoff sat unmerged on a branch for 8 days); (b) step 0 keeps "where am
-  I + prove push" but adds "a cloud session can still ship: PR + CI on real images + tag" (session 13
-  shipped v1.2.6 that way); (c) budget: the user's weekly number from the question tool is the stop
+  I + prove push" but adds "a cloud session can still merge: PR + CI on real images; the tag push is refused (403), so tag + release go to the user" (session 13
+  merged v1.2.6 that way); (c) budget: the user's weekly number from the question tool is the stop
   line (59% → 70% this session); (d) the demo freeze text is gone (date passed, no new one).
 - **v16 · 2026-09-28** — session 12. Step 0 (where am I + prove push access), budget question when
   `get_usage` is missing, demo date/freeze, Kata probe hand-off, "if push is impossible hand over

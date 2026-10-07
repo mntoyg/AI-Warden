@@ -16,8 +16,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
    - `uname -a; docker info`. Cloud Linux (sessions 12, 13): no Docker Desktop, no .env, no GGUF,
      no GPU; `dockerd &` works as root, Docker Hub pulls work, deb.debian.org is blocked -> no
      image builds. Prove write access: `git push --dry-run origin <branch>`; if denied, say so at once.
-   - A cloud session CAN still ship (session 13 shipped v1.2.6): branch -> PR -> CI builds the real
-     images (ext4 + gVisor) -> merge on green -> tag -> release that states what was NOT run here.
+   - A cloud session CAN still merge (session 13, v1.2.6): branch -> PR -> CI builds the real images
+     (ext4 + gVisor) -> merge on green. Its git proxy REFUSED the tag push (403): in the cloud, hand
+     tag + release to me with drafted notes; never route around it. On Windows: tag + release.
 
 1) START - before any work
    a. Read .ai/HANDOFF.md fully - a claim to verify; re-run any Next-steps repro first (v7).
@@ -34,6 +35,7 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       in 3-5 lines and ask with the AskUserQuestion TOOL, in ONE call, only what blocks work.
 
 2) WORK
+   - FIRST: if `git ls-remote --tags origin v1.2.6` is empty, tag 9d265d0 + release (HANDOFF #0).
    - Default task: HANDOFF Next steps #1 - on the Windows box, run v1.2.6 for real (build --pull,
      real codex + honeypot, suite A-L with 3b2/L/E9/E10 on Docker Desktop, re-quote VERIFICATION.md).
      In a cloud session: the next item a runner can prove (Kata #3), or a decision for me (#2).
@@ -78,4 +80,4 @@ Reality-check first, done-means-run on the real CLI path, assertion-first drills
 v16 added "where am I + prove push" after session 12 lost hours to a cloud container with no
 write access. v17 adds the two things session 13 needed: read every remote branch (the last
 handoff was stranded on one), and the cloud ship path (PR + real-image CI + tag) that got
-v1.2.6 out while the Windows box was away.
+v1.2.6 merged while the Windows box was away (the tag push itself was refused - 403).
