@@ -27,7 +27,7 @@
 
 ## Phase 1 — ออก v1.2.6 (security)
 
-**ออกแล้ว 2026-10-07 (session 13) จาก session คลาวด์:** PR #1 merge, tag `v1.2.6`, release + superseded note บน v1.2.5 ตรวจด้วย CI บน image จริง ที่เหลือคือขั้นบนเครื่อง Windows (`build --pull`, path codex จริง, suite A–L บน Docker Desktop, quote VERIFICATION.md) = HANDOFF Next steps #1
+**2026-10-07 (session 13):** PR #1 merge เข้า main แล้ว (`9d265d0`) CI บน image จริงเขียว แต่ git proxy ของ session คลาวด์ปฏิเสธการ push tag (403) จึงยังไม่มี tag `v1.2.6`, release และ superseded note บน v1.2.5 — ผู้ใช้สร้างใน GitHub UI ที่เหลือคือขั้นบนเครื่อง Windows (`build --pull`, path codex จริง, suite A–L บน Docker Desktop, quote VERIFICATION.md) = HANDOFF Next steps #1
 
 **ทำไม:** v1.2.5 มีช่อง DNS exfiltration ผ่าน proxy (ยืนยันบน Squid 5.7 จริง) และ tripwire เงียบเมื่อคิว
 inotify ล้น ตัวแก้อยู่บน branch `claude/wizardly-edison-9pzqzk` และผ่าน CI บน image จริงแล้ว
