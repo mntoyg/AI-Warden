@@ -35,7 +35,7 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       in 3-5 lines and ask with the AskUserQuestion TOOL, in ONE call, only what blocks work.
 
 2) WORK
-   - FIRST: `git ls-remote --tags origin` - v1.2.6 (9d265d0) and v1.2.7 (PR #3 merge) untagged? HANDOFF #0.
+   - FIRST: `git ls-remote --tags origin` - v1.2.6 (9d265d0) and v1.2.7 (7a577d8) untagged? HANDOFF #0.
    - Default task: HANDOFF #1 - on the Windows box run v1.2.7 for real (build --pull, real codex +
      honeypot, suite A-L incl. 3b2/L/E9-E12 on Docker Desktop, re-quote VERIFICATION.md). Cloud: #2/#3.
    - `.ai/ROADMAP.md` is the phase view; HANDOFF wins where they differ (fix the roadmap).

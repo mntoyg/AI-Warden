@@ -5,7 +5,7 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-10-08 (session 13 cont., cloud Linux container)
-- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
+- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (`7a577d8`, PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v18)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
@@ -39,7 +39,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 0. **Tag v1.2.6 and v1.2.7, then release both** (`git ls-remote --tags origin`). v1.2.6 = `9d265d0`
    (release notes drafted in session 13: `release-v1.2.6.md`, plus a superseded note for v1.2.5);
    v1.2.7 = the merge commit of PR #3 (notes: CHANGELOG 1.2.7). On the Windows box:
-   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 <merge> -m ...; git push origin v1.2.6 v1.2.7`,
+   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 7a577d8 -m ...; git push origin v1.2.6 v1.2.7`,
    wait for CI on both tags, publish, mark v1.2.5 and v1.2.6 superseded. Security fixes are not shipped until tagged.
 1. **Run v1.2.7 on the Windows box** (both releases shipped on CI evidence only).
    `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex path with a
