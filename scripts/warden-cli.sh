@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.6"
+readonly WARDEN_VERSION="1.2.7"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -982,7 +982,16 @@ cmd_run() {
         fi
     fi
 
-    if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
+    # Without -i, runc hands the agent /dev/null on stdin, but a Kata container
+    # gets a pipe that never reaches EOF: aider's first-run "what's new?" prompt
+    # then waited forever (CI kata-probe, anon_pipe_read, 2026-10-08). Feeding
+    # `docker run -i` /dev/null did not help - Kata did not pass the EOF on (a
+    # read still timed out, E12) - so the entrypoint closes it from inside.
+    if [ -t 0 ] && [ -t 1 ]; then
+        args+=(-it)
+    else
+        args+=(-e WARDEN_STDIN=closed)
+    fi
 
     local -a agent_cmd=()
     local line
@@ -1057,8 +1066,18 @@ cmd_run() {
                 warn "could not write the sentinel's breach record into ${abs}"
             fi
         fi
-        if [ -n "$new_reports" ]; then
+        if [ -n "$new_reports" ] && [ -n "$sentinel_seen" ]; then
             printf '%s%s  SECURITY BREACH: the canary tripwire terminated this sandbox.%s\n' \
+                "$C_BOLD" "$C_RED" "$C_RESET" >&2
+            while IFS= read -r report; do
+                printf '%s  Incident report: %s%s\n' "$C_RED" "$report" "$C_RESET" >&2
+            done <<< "$new_reports"
+        elif [ -n "$new_reports" ]; then
+            # A report file lives in the workspace, which the agent can write, and
+            # the agent can signal PID 1 itself: only the sentinel's log can say the
+            # tripwire wrote it. A home canary (~/.aws, ~/.ssh) is seen by the
+            # in-sandbox monitor alone, so a real breach there lands here too.
+            printf '%s%s  SECURITY BREACH (unconfirmed): an incident report appeared, but it was written inside the\n  agent'"'"'s reach and the out-of-band sentinel did not confirm a canary access.%s\n' \
                 "$C_BOLD" "$C_RED" "$C_RESET" >&2
             while IFS= read -r report; do
                 printf '%s  Incident report: %s%s\n' "$C_RED" "$report" "$C_RESET" >&2

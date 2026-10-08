@@ -164,6 +164,10 @@ container ที่ `--pid container:<A>` หายไปทันทีเม�
   จะได้ log ว่า "from the canary tripwire" และ CLI ชี้ไปที่ incident report ที่ไม่มีอยู่จริง ตอนนี้ยังจบ
   ด้วย exit 99 (fail closed) แต่ entrypoint บอกว่า `no breach record found` และ CLI บอกว่า `NO incident
   report ... possibly forged` เพราะ monitor เขียน record **ก่อน** ส่งสัญญาณเสมอ (drill E7)
+- **report ปลอม + สัญญาณที่ส่งเอง:** agent เขียน `WARDEN_SECURITY_INCIDENT.json` เองแล้ว `kill -USR1 1` ได้
+  ก่อน v1.2.7 CLI พาดหัวว่า `the canary tripwire terminated this sandbox` ตอนนี้พาดหัวนั้นต้องมี sentinel ยืนยัน
+  นอกนั้นขึ้น `SECURITY BREACH (unconfirmed)` (ยัง exit 99) ข้อจำกัด: breach จริงที่ canary ใน home
+  (`~/.aws`, `~/.ssh`) และทุก breach ใต้ gVisor/Kata ก็ขึ้น unconfirmed เพราะไม่มีอะไรนอกมือ agent เห็น (drill E11)
 - **เนื้อหา** ของ report ใด ๆ ใน workspace ยังปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report ได้)
   record เดียวที่ agent แตะไม่ได้คือ **log ของ container sentinel** (agent ไม่มี Docker socket และไม่ได้แชร์
   stdout กับมัน) ตั้งแต่ v1.2.1 sentinel ไม่ใช้ `--rm` แล้ว CLI อ่าน log นั้นก่อนลบ และพิมพ์
@@ -267,6 +271,21 @@ verify-isolation.sh พิสูจน์: fail-closed + ส่ง runtime ผ�
 tripwire (uid เดียวกัน) แล้วอ่าน canary จะไม่ถูกกัก ทุกจุดบอกเรื่องนี้ตรง ๆ (sandbox, CLI จาก log ของ sentinel เอง)
 ไม่มีการอ้างว่ามีสองชั้น sentinel แบบ runc ที่อยู่ข้าง agent แบบ runsc ได้ยินการอ่าน canary จริง (วัดแล้ว) แต่เห็น
 แค่ process ของ gVisor Sentry และส่งสัญญาณหามันไม่ได้ (`Permission denied`) จึงเป็นได้แค่พยาน ไม่ใช่ตัวกัก
+
+**รองรับ Kata Containers แบบมีข้อจำกัด (ตั้งแต่ v1.2.7, CI job `Kata Containers drills`)** — วัดครั้งแรกบน Kata 4.2.0 (qemu + KVM บน runner ของ GitHub, session 12–13)
+workflow ชั่วคราวติดตั้ง Kata แบบ static แล้วรัน CLI จริงด้วย `WARDEN_RUNTIME=kata` ผลที่วัดได้:
+
+| เรื่อง | ใต้ Kata | ผลต่อ AI Warden |
+|---|---|---|
+| session จริงผ่าน CLI | ใช้ได้, ไปถึง api.anthropic.com ผ่าน proxy (`--add-host` เหมือน gVisor), inline tripwire `enforced=7/7`, breach → exit 99 | ใช้ได้ |
+| `--pid container:<agent>` | sentinel แบบ Kata ได้ VM และ PID namespace ของตัวเอง; **container แบบ runc ที่ขอแชร์ PID namespace กับ container ของ Kata ได้ PID namespace ของโฮสต์** (เห็น dockerd, qemu ฯลฯ) | **sentinel กักไม่ได้** — มันตรวจเจอว่าตัวเองเป็น PID 1 ของ namespace ตัวเองและบอก `NOT armed` (self-proof ตั้งแต่ v1.2.4 ใช้ได้กับ Kata โดยไม่ต้องแก้) ห้ามสร้าง witness แบบ runc ด้วย `--pid container:` ใต้ Kata |
+| inotify ข้าม container | watcher ใน Kata ไม่ได้ยินการเปิดไฟล์จาก container อื่นเลย (0 event); watcher แบบ **runc** บนโฮสต์ได้ยินการอ่านของ agent ใน Kata (OPEN + ACCESS ผ่าน virtiofsd) | inline tripwire (VM เดียวกับ agent) ใช้ได้; witness แบบตรวจจับอย่างเดียวฝั่ง runc เป็นไปได้เหมือน gVisor |
+| `--pids-limit` / fork | `--pids-limit 512` **ไม่บังคับอะไรใน guest** (fork ได้ครบ 700); `--ulimit nproc=512` บังคับจริง (fork 511 แล้ว EAGAIN) | CLI ตั้ง nproc 512 ทุก session อยู่แล้ว จึงยังหยุด fork bomb ได้ |
+| stdin เมื่อไม่มี `-i` | runc ให้ `/dev/null` (EOF) แต่ Kata ให้ **pipe ที่ไม่มีวันปิด** — aider ค้างตลอดกาลที่คำถาม first-run (`anon_pipe_read`) ทำให้ suite ค้างใน phase I | ตั้งแต่ v1.2.7 session ที่ไม่ได้อยู่บน TTY ได้ `</dev/null` จาก entrypoint ในกรง (`docker run -i` + `/dev/null` ไม่ได้ผล: Kata ไม่ส่ง EOF ต่อ) — drill E12 |
+
+**สิ่งที่ต้องยอมรับถ้าเลือก Kata:** เหมือน gVisor — ได้ขอบเขต VM แต่ **เสีย sentinel** (agent ที่ฆ่า inline tripwire แล้วอ่าน canary
+จะไม่ถูกกัก) ชุดทดสอบทั้งชุดผ่านใต้ Kata ครั้งแรกหลังแก้ stdin (kata-probe run 37711877983: `All phases passed`) และ CI รันทุก PR
+(ผู้ใช้ตัดสินใจ 2026-10-08)
 
 ### 4.2 การรั่วผ่านช่องทางที่อนุญาต
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา

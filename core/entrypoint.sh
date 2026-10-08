@@ -14,7 +14,7 @@
 # =============================================================================
 set -uo pipefail
 
-readonly WARDEN_VERSION="1.2.6"
+readonly WARDEN_VERSION="1.2.7"
 readonly RUN_DIR="/run/warden"
 readonly BREACH_FLAG="${RUN_DIR}/breach.flag"
 readonly MONITOR_PID_FILE="${RUN_DIR}/canary_monitor.pid"
@@ -518,7 +518,14 @@ log "-----------------------------------------------------------------"
 
 # Foreground execution: the agent keeps the controlling terminal, so
 # interactive TUIs and Ctrl-C behave exactly as they do on the host.
-"$@"
+# A non-interactive warden-cli session (WARDEN_STDIN=closed) gets EOF on stdin
+# here, inside the sandbox: under Kata the stdin docker provides is a pipe that
+# never closes, so an agent asking anything waited forever (drill E12).
+if [ "${WARDEN_STDIN:-}" = "closed" ]; then
+    "$@" < /dev/null
+else
+    "$@"
+fi
 rc=$?
 
 log "-----------------------------------------------------------------"

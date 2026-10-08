@@ -26,6 +26,8 @@
 #                                 E7 a SIGUSR1 the agent sends itself, reported as a breach
 #                                 E9 a canary read lost in an inotify queue overflow
 #                                 E10 a sentinel-only breach on a 0755 workspace left no record
+#                                 E11 a report the agent forged, headlined as the tripwire's
+#                                 E12 a non-interactive session's stdin that never reaches EOF
 #    F. Runtime fail-closed    - WARDEN_RUNTIME (gVisor/Kata) must be honoured or
 #                               refused, never silently downgraded to runc. The
 #                               gVisor happy-path is skipped where runsc is absent.
@@ -832,6 +834,63 @@ if [ "$e7_rc" -eq 99 ] && [ "$e7_reports" = "0" ] \
     good "phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach"
 else
     bad  "phase E7: rc=${e7_rc} reports=${e7_reports} - $(printf '%s' "$e7_out" | grep -E 'SIGUSR1|tripwire|incident report' | tr '\n' ' ' | cut -c1-240)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# --- E11: a report the agent wrote itself is not the tripwire's ----------------
+# The agent can write WARDEN_SECURITY_INCIDENT.json into its own workspace and
+# then signal PID 1. Exit 99 stays (fail closed) and the report is still listed,
+# but the CLI may only say "the canary tripwire terminated this sandbox" when the
+# sentinel - outside the agent's reach - confirms it. Here it saw nothing.
+printf '\n'
+info "E11: a report the agent forged must be headlined as unconfirmed, not as the tripwire's"
+E11_WS="${PROJECT_ROOT}/workspaces/.verify-e11-$$"
+mkdir -p "$E11_WS"; chmod 0777 "$E11_WS" 2>/dev/null || true
+e11_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$E11_WS" bash -- -c \
+    'printf "{\"forged\": true}\n" > /workspace/WARDEN_SECURITY_INCIDENT.json; kill -USR1 1; sleep 3' 2>&1)"
+e11_rc=$?
+e11_reports="$(find "$E11_WS" -maxdepth 1 -name 'WARDEN_SECURITY_INCIDENT*.json' 2>/dev/null | wc -l | tr -d ' ')"
+rmdir "${E11_WS}/.secrets" 2>/dev/null || true
+rm -rf "$E11_WS" 2>/dev/null || true
+# As in E7: the sentinel's silence counts only if it was armed (runc), or said
+# it did not arm (gVisor/Kata) - then nothing can confirm, which is the point.
+e11_sentinel=0
+if printf '%s' "$e11_out" | grep -q "The sentinel (outside the agent's reach) recorded no breach"; then
+    e11_sentinel=1
+elif [ -n "${WARDEN_RUNTIME:-}" ] && [ "${WARDEN_RUNTIME}" != "runc" ] \
+     && printf '%s' "$e11_out" | grep -q 'out-of-band sentinel did NOT arm'; then
+    e11_sentinel=1
+fi
+if [ "$e11_rc" -eq 99 ] && [ "$e11_reports" = "1" ] \
+   && [ "$e11_sentinel" = "1" ] \
+   && printf '%s' "$e11_out" | grep -q 'SECURITY BREACH (unconfirmed)' \
+   && printf '%s' "$e11_out" | grep -q 'Incident report: .*WARDEN_SECURITY_INCIDENT.json' \
+   && ! printf '%s' "$e11_out" | grep -q 'Confirmed by the sentinel' \
+   && ! printf '%s' "$e11_out" | grep -q 'the canary tripwire terminated this sandbox'; then
+    good "phase E11: a report written inside the agent's reach, with no sentinel confirmation, is headlined as unconfirmed (99, report listed)"
+else
+    bad  "phase E11: rc=${e11_rc} reports=${e11_reports} sentinel=${e11_sentinel} - $(printf '%s' "$e11_out" | grep -E 'SECURITY BREACH|sentinel|Incident report' | tr '\n' ' ' | cut -c1-240)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+fi
+
+# --- E12: a non-interactive session's stdin reaches EOF at once ----------------
+# Without -i, runc gives the agent /dev/null on stdin, but a Kata container got
+# a pipe that never closes: aider waited forever on its first-run prompt and
+# phase I hung >30 min under WARDEN_RUNTIME=kata. runc cannot show the bug; the
+# drill has teeth under kata (kata-probe run, old CLI: read timed out).
+printf '\n'
+info "E12: a non-interactive session must see EOF on stdin at once, not a pipe that never closes"
+E12_WS="${PROJECT_ROOT}/workspaces/.verify-e12-$$"
+mkdir -p "$E12_WS"; chmod 0777 "$E12_WS" 2>/dev/null || true
+e12_out="$(NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$E12_WS" bash -- -c \
+    'if read -r -t 15 line; then echo "stdin: got data"; else echo "stdin: rc=$?"; fi' < /dev/null 2>&1)"
+e12_rc=$?
+rmdir "${E12_WS}/.secrets" 2>/dev/null || true
+rm -rf "$E12_WS" 2>/dev/null || true
+if [ "$e12_rc" -eq 0 ] && printf '%s\n' "$e12_out" | grep -qx 'stdin: rc=1'; then
+    good "phase E12: a non-interactive session read EOF on stdin at once (read rc=1, not a timeout)"
+else
+    bad  "phase E12: rc=${e12_rc} - $(printf '%s\n' "$e12_out" | grep -E '^stdin:' | tr '\n' ' ') (rc>128 = the read timed out on a pipe that never closes)"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
 

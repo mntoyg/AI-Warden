@@ -49,6 +49,8 @@ inotify ล้น ตัวแก้อยู่บน branch `claude/wizardly-e
 
 **#2 และ #3 เสร็จบน branch แล้ว (2026-09-29, ผู้ใช้เลือกทางแก้):** commit 7a5f491; CI บน image จริง run 36500312536 เขียวทั้ง 4 job (รวม E10); negative run 36500312493: CLI เดิม -> `FAIL phase E10: rc=99 reports=0`. ออกพร้อม v1.2.6 (Phase 1). #1 ยังต้องตัดสินใจ
 
+**#1 เสร็จบน branch แล้ว (2026-10-08, session 13, ผู้ใช้เลือกทางแก้):** drill E11 ออกใน v1.2.7
+
 ### รายการเดิม
 
 สองข้อนี้เป็นรูปแบบบั๊กประจำ ("บอกว่าทำงานทั้งที่ไม่ได้ทำ") แต่การแก้จะเปลี่ยนข้อความที่ผู้ใช้เห็น
@@ -74,6 +76,8 @@ inotify ล้น ตัวแก้อยู่บน branch `claude/wizardly-e
 ---
 
 ## Phase 3 — Kata Containers
+
+**เสร็จ 2026-10-08 (session 13):** หาสาเหตุ phase I ค้างเจอ (stdin เป็น pipe ที่ไม่มีวันปิด, แก้ใน entrypoint, drill E12) ชุดทดสอบทั้งชุดผ่านใต้ Kata และผู้ใช้เลือกประกาศรองรับแบบมีข้อจำกัด + CI job `Kata Containers drills` (v1.2.7)
 
 **สถานะ:** วัดแล้วบางส่วน (Kata 4.2.0 บน runner, `.ai/kata-probe.yml`): session ใช้ได้, sentinel บอก
 `NOT armed` อย่างซื่อตรง, breach → 99 ที่ยังเหลือ:

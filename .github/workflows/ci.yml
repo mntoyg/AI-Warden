@@ -384,3 +384,138 @@ jobs:
           left="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' | wc -l)"
           echo "leftover canary vaults: ${left}"
           test "$left" -eq 0
+
+  # Kata Containers: a VM per container (qemu + KVM on the runner). Measured in
+  # session 13 (Kata 4.2.0): sessions work and the tripwire inside the VM is
+  # enforced, but the sentinel gets its own VM and PID namespace, so it says
+  # NOT armed (as under gVisor). This job keeps that honest and guards the
+  # stdin fix (E12): before v1.2.7 a non-interactive session hung forever
+  # under Kata because its stdin was a pipe that never closes.
+  kata:
+    name: Kata Containers drills
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: KVM present
+        run: |
+          ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: Install Kata (static release) and register it with Docker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          url="$(curl -fsSL --retry 5 -H "Authorization: Bearer ${GH_TOKEN}" \
+              https://api.github.com/repos/kata-containers/kata-containers/releases/latest \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin); print("kata release:", r["tag_name"], file=sys.stderr); print([a["browser_download_url"] for a in r["assets"] if a["name"].startswith("kata-static-") and "amd64" in a["name"] and a["name"].endswith((".tar.zst",".tar.xz"))][0])')"
+          echo "asset: $url"
+          curl -fsSL --retry 5 -o /tmp/kata.tar "$url"
+          case "$url" in
+            *.zst) sudo tar --zstd -xf /tmp/kata.tar -C / ;;
+            *.xz)  sudo tar -xJf /tmp/kata.tar -C / ;;
+          esac
+          shim="$(find /opt/kata -type f -name 'containerd-shim-kata-v2' | head -1)"
+          test -n "$shim" && test -x "$shim"
+          sudo ln -sf "$shim" /usr/local/bin/containerd-shim-kata-v2
+          sudo python3 - <<'EOF'
+          import json, os
+          p = "/etc/docker/daemon.json"
+          d = json.load(open(p)) if os.path.exists(p) else {}
+          d.setdefault("runtimes", {})["kata"] = {"runtimeType": "io.containerd.kata.v2"}
+          json.dump(d, open(p, "w"), indent=2)
+          EOF
+          sudo systemctl restart docker
+          docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'
+
+      - name: kata must really be what runs (the guest kernel is not the host's)
+        run: |
+          host="$(uname -r)"
+          guest="$(docker run --rm --runtime kata alpine uname -r)"
+          echo "host kernel: ${host} / guest kernel: ${guest}"
+          test -n "$guest" && test "$guest" != "$host"
+
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build --pull
+
+      - name: Start the egress filter
+        run: ./scripts/warden-cli.sh up
+
+      - name: Isolation suite under WARDEN_RUNTIME=kata
+        run: WARDEN_RUNTIME=kata NO_COLOR=1 ./scripts/verify-isolation.sh
+
+      - name: A real session under kata reaches the proxy and says the sentinel is NOT armed
+        run: |
+          set +e   # Actions runs bash -e; the rc and the log are the evidence here
+          mkdir -p workspaces/kt && chmod 0777 workspaces/kt
+          WARDEN_RUNTIME=kata NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/kt bash -- -lc \
+            'curl -sS -o /dev/null -w "proxy path: HTTP %{http_code}\n" -m 30 https://api.anthropic.com/v1/models' \
+            > /tmp/kt-ok.log 2>&1
+          echo "rc=$?"; cat /tmp/kt-ok.log
+          f=0
+          grep -q 'proxy path: HTTP [1-5][0-9][0-9]' /tmp/kt-ok.log || { echo "::error::the kata sandbox did not reach api.anthropic.com through the proxy"; f=1; }
+          grep -q 'canary sentinel    : NOT armed' /tmp/kt-ok.log || { echo "::error::the sandbox did not say the sentinel is NOT armed under kata"; f=1; }
+          if grep -q 'armed out-of-band' /tmp/kt-ok.log; then echo "::error::'armed out-of-band' under kata, where the sentinel cannot see the agent"; f=1; fi
+          exit "$f"
+
+      - name: A live breach under kata is contained by the in-sandbox tripwire (exit 99)
+        run: |
+          set +e   # a contained breach exits 99 on purpose
+          mkdir -p workspaces/ktb && chmod 0777 workspaces/ktb
+          WARDEN_RUNTIME=kata NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/ktb bash -- -lc \
+            'cat /workspace/.secrets/credentials > /dev/null; sleep 20; echo "[drill] NOT KILLED"' \
+            > /tmp/kt-breach.log 2>&1
+          rc=$?
+          cat /tmp/kt-breach.log
+          # -x: the command line itself is echoed in the log ("launching agent: ...")
+          if [ "$rc" -ne 99 ] || grep -qx '\[drill\] NOT KILLED' /tmp/kt-breach.log; then
+            echo "::error::a canary read under kata was not contained (rc=${rc})"
+            exit 1
+          fi
+          ls workspaces/ktb/WARDEN_SECURITY_INCIDENT*.json
+          echo "breach under kata: exit 99, report written"
+
+      # Under Kata --pids-limit bounds the VM on the host, not processes in the
+      # guest (session 13: 700 forks with --pids-limit 512). RLIMIT_NPROC, which
+      # the CLI sets on every session, is what stops a fork bomb in the guest.
+      - name: A fork bomb under kata stops at RLIMIT_NPROC and the session survives
+        run: |
+          set +e
+          mkdir -p workspaces/ktf && chmod 0777 workspaces/ktf
+          cat > workspaces/ktf/forks.py <<'PY'
+          import os, time
+          n = 0
+          for i in range(2000):
+              try:
+                  pid = os.fork()
+              except OSError as e:
+                  print(f"forked {n}, then: errno {e.errno} {e.strerror}", flush=True)
+                  break
+              if pid == 0:
+                  time.sleep(15)
+                  os._exit(0)
+              n += 1
+          else:
+              print(f"forked {n} - no limit hit", flush=True)
+          PY
+          bomb='python3 /workspace/forks.py; echo "python rc=$?"'
+          WARDEN_RUNTIME=kata NO_COLOR=1 ./scripts/warden-cli.sh run ./workspaces/ktf bash -- -lc "$bomb" > /tmp/kt-fork.log 2>&1
+          rc=$?
+          echo "fork bomb under kata: rc=${rc} $(grep -hE '^forked|^python rc' /tmp/kt-fork.log | paste -sd ' ')"
+          if grep -q 'no limit hit' /tmp/kt-fork.log; then echo "::error::2000 forks hit no limit under kata"; exit 1; fi
+          if [ "$rc" -ne 0 ] || ! grep -qE '^forked [0-9]+, then: errno 11' /tmp/kt-fork.log \
+             || ! grep -qx 'python rc=0' /tmp/kt-fork.log; then
+            echo "::error::the fork bomb was not stopped by RLIMIT_NPROC inside a surviving sandbox (rc=${rc})"
+            tail -15 /tmp/kt-fork.log; exit 1
+          fi
+          echo "stopped at RLIMIT_NPROC with EAGAIN; the sandbox survived"
+
+      - name: Nothing may be left behind
+        if: always()
+        run: |
+          ./scripts/warden-cli.sh down || true
+          left="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' | wc -l)"
+          echo "leftover canary vaults: ${left}"
+          test "$left" -eq 0

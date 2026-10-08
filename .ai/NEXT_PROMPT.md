@@ -1,4 +1,4 @@
-# AI Warden — next-session prompt · v17 · 2026-10-07
+# AI Warden — next-session prompt · v18 · 2026-10-08
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
@@ -35,10 +35,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       in 3-5 lines and ask with the AskUserQuestion TOOL, in ONE call, only what blocks work.
 
 2) WORK
-   - FIRST: if `git ls-remote --tags origin v1.2.6` is empty, tag 9d265d0 + release (HANDOFF #0).
-   - Default task: HANDOFF Next steps #1 - on the Windows box, run v1.2.6 for real (build --pull,
-     real codex + honeypot, suite A-L with 3b2/L/E9/E10 on Docker Desktop, re-quote VERIFICATION.md).
-     In a cloud session: the next item a runner can prove (Kata #3), or a decision for me (#2).
+   - FIRST: `git ls-remote --tags origin` - v1.2.6 (9d265d0) and v1.2.7 (PR #3 merge) untagged? HANDOFF #0.
+   - Default task: HANDOFF #1 - on the Windows box run v1.2.7 for real (build --pull, real codex +
+     honeypot, suite A-L incl. 3b2/L/E9-E12 on Docker Desktop, re-quote VERIFICATION.md). Cloud: #2/#3.
    - `.ai/ROADMAP.md` is the phase view; HANDOFF wins where they differ (fix the roadmap).
    - A platform or image this host lacks (runsc, KVM, real build): a TEMPORARY branch whose ci.yml
      push trigger includes it + a negative job that restores the old file (session 12). In workflow
@@ -50,6 +49,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
    - New drill/assertion: write it FIRST, watch it FAIL on the OLD code, fix, run green - ONLY that
      phase (scratch harness regenerated after every suite edit - v14). Prove a check both ways.
    - A drill side this host cannot run: a PATH shim, proven live with `command -v` first.
+   - A RUNTIME-SPECIFIC fix is proven ON that runtime, old vs new (v18: the first stdin fix was green on
+     runc and did nothing under Kata - E12 caught it). Runner evidence goes at the END of a job or in
+     its own job (the API gives a tail only); stop a hung session by polling + `docker rm -f`, never `timeout`.
    - EVERY RECORD THE AGENT CAN WRITE IS FORGEABLE; only the sentinel's container log is not.
      Also ask what a REFUSAL leaks, not only whether it refused (session 12: squid's DNS channel).
    - JUDGE BY MEASUREMENT, NEVER BY A LABEL. SILENCE IS NOT EVIDENCE: positive control first.
@@ -80,4 +82,5 @@ Reality-check first, done-means-run on the real CLI path, assertion-first drills
 v16 added "where am I + prove push" after session 12 lost hours to a cloud container with no
 write access. v17 adds the two things session 13 needed: read every remote branch (the last
 handoff was stranded on one), and the cloud ship path (PR + real-image CI + tag) that got
-v1.2.6 merged while the Windows box was away (the tag push itself was refused - 403).
+v1.2.6 merged while the Windows box was away (the tag push itself was refused - 403). v18 adds the rule
+session 13 learned the hard way: a fix for one runtime is proven on that runtime, old vs new.

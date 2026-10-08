@@ -520,6 +520,8 @@ AI Warden ยกระดับความปลอดภัยได้จร�
    ถ้า daemon ไม่มี runtime นั้น (ไม่ตกไป runc เงียบ ๆ) และรัน Docker แบบ rootless ด้วย
    > ทดสอบบน gVisor จริงใน CI แล้ว (v1.2.4): ใช้งานได้ แต่ **sentinel กักไม่ได้ใต้ gVisor** (runtime ไม่ให้แชร์
    > PID namespace) — มันบอก `NOT armed` แทนที่จะอ้างว่ามีสองชั้น ดู `docs/THREAT_MODEL.md` §4.1
+   > Kata Containers (`WARDEN_RUNTIME=kata`) รองรับแบบเดียวกันตั้งแต่ v1.2.7 และรันใน CI ทุก PR:
+   > ได้ขอบเขต VM, เสีย sentinel เหมือนกัน
 
 2. **การรั่วผ่านช่องทางที่อนุญาต** — ถ้า agent มีสิทธิ์คุยกับ `api.anthropic.com` ได้
    มันก็ส่งซอร์สโค้ดของคุณไปในนั้นได้ allowlist ควบคุมได้แค่ "คุยกับใคร" ไม่ใช่ "คุยว่าอะไร"

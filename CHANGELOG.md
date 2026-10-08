@@ -6,6 +6,39 @@
 
 ## [Unreleased]
 
+## [1.2.7] — 2026-10-08
+
+**security/fix: พาดหัว breach ตามหลักฐาน (E11) · session ที่ไม่ใช่ interactive ไม่ค้างใต้ Kata อีก (E12)**
+
+ต้อง rebuild agent image (`./scripts/warden-cli.sh build --pull`): ตัวแก้ stdin อยู่ใน entrypoint
+
+### Security
+
+- **CLI พาดหัว report ที่ agent ปลอมเองว่าเป็นของ tripwire:** agent เขียน `WARDEN_SECURITY_INCIDENT.json` ลง workspace เองแล้ว
+  `kill -USR1 1` ได้ CLI เคยพาดหัว `SECURITY BREACH: the canary tripwire terminated this sandbox` ทั้งที่ sentinel (นอกมือ agent)
+  ไม่เห็นอะไรเลย ปลอมได้แค่ผลบวกลวง แต่พาดหัวอ้างผู้เขียนที่ CLI ตรวจสอบไม่ได้ ตอนนี้พาดหัวนั้นขึ้นเฉพาะเมื่อ sentinel ยืนยัน
+  นอกนั้นขึ้น `SECURITY BREACH (unconfirmed)` (ยัง exit 99 ยังแสดง report และยังบอกให้ rotate key) ข้อแลกเปลี่ยน: breach จริงที่
+  canary ใน home (`~/.aws`, `~/.ssh`) ซึ่งมีแต่ inline monitor เห็น และทุก breach ใต้ gVisor/Kata (sentinel ไม่ arm) จะขึ้น unconfirmed ด้วย
+  drill ใหม่ **E11** (ผู้ใช้เลือกทางแก้ 2026-10-08)
+
+### Fixed
+
+- **ใต้ Kata session ที่ไม่ใช่ interactive ค้างตลอดกาลเมื่อ agent ถามอะไรก็ตาม:** ถ้าไม่มี `-i` runc ให้ `/dev/null` เป็น stdin
+  (EOF) แต่ Kata ให้ pipe ที่ไม่มีวันปิด — aider ค้างที่คำถาม first-run (`anon_pipe_read`, วัดบน runner) ทำให้ชุดทดสอบใต้ Kata
+  ค้างใน phase I ทุกครั้ง ตอนนี้เมื่อไม่ได้อยู่บน TTY CLI ส่ง `WARDEN_STDIN=closed` และ entrypoint รัน agent ด้วย
+  `</dev/null` จากในกรง: agent ได้ EOF ทันทีทุก runtime เหมือนที่ runc ให้มาตลอด (session แบบ `-it` ไม่เปลี่ยน)
+  ลองแบบ `docker run -i ... </dev/null` ก่อนแล้ว **ไม่ได้ผล** — Kata ไม่ส่ง EOF ต่อ (E12 ยัง timeout) drill ใหม่ **E12**
+  ต้อง rebuild agent image
+
+### Docs
+
+- THREAT_MODEL §4.1: ตารางผลวัด Kata (PID namespace, inotify, `--pids-limit` ไม่บังคับใน guest, stdin)
+
+### Added
+
+- **รองรับ Kata Containers แบบมีข้อจำกัด:** CI job ใหม่ `Kata Containers drills` (ชุดทดสอบทั้งชุด, session จริงผ่าน proxy, breach → 99,
+  fork bomb หยุดที่ nproc) เสีย sentinel เหมือน gVisor และบอกตรง ๆ ว่า `NOT armed` (ผู้ใช้ตัดสินใจ 2026-10-08)
+
 ## [1.2.6] — 2026-10-07
 
 **security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก · breach ที่มีแต่ sentinel เห็นมี record**
