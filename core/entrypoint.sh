@@ -469,7 +469,10 @@ on_breach_signal() {
     trap '' USR1   # one shutdown, however many monitors send the signal
     printf '\n' >&2
     if breach_recorded; then
-        log "SIGUSR1 received from the canary tripwire - terminating sandbox"
+        # breach.flag and the workspace are both writable by the agent, which can
+        # also send this signal: a record proves nothing about who sent it. Only
+        # the sentinel's log can (the CLI reads it - drill E11).
+        log "SIGUSR1 received with a breach record present (written inside the agent's reach) - terminating sandbox"
     else
         # PID 1 runs as uid 1001 like the agent, so the agent can send this too.
         # Still fail closed (exit 99), but do not claim the tripwire fired.

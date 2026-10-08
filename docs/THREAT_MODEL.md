@@ -168,6 +168,7 @@ container ที่ `--pid container:<A>` หายไปทันทีเม�
   ก่อน v1.2.7 CLI พาดหัวว่า `the canary tripwire terminated this sandbox` ตอนนี้พาดหัวนั้นต้องมี sentinel ยืนยัน
   นอกนั้นขึ้น `SECURITY BREACH (unconfirmed)` (ยัง exit 99) ข้อจำกัด: breach จริงที่ canary ใน home
   (`~/.aws`, `~/.ssh`) และทุก breach ใต้ gVisor/Kata ก็ขึ้น unconfirmed เพราะไม่มีอะไรนอกมือ agent เห็น (drill E11)
+  หลัง v1.2.7 entrypoint ก็ไม่ log ว่า "from the canary tripwire" แล้ว บอกแค่ว่ามี breach record (เขียนในมือ agent)
 - **เนื้อหา** ของ report ใด ๆ ใน workspace ยังปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report ได้)
   record เดียวที่ agent แตะไม่ได้คือ **log ของ container sentinel** (agent ไม่มี Docker socket และไม่ได้แชร์
   stdout กับมัน) ตั้งแต่ v1.2.1 sentinel ไม่ใช้ `--rm` แล้ว CLI อ่าน log นั้นก่อนลบ และพิมพ์

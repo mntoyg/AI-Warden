@@ -5,7 +5,7 @@
 > the system is right — fix this file in your first commit and say so.
 
 - **Last updated:** 2026-10-08 (session 13 cont., cloud Linux container)
-- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
+- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (`7a577d8`, PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
 - **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v18)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
@@ -39,7 +39,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 0. **Tag v1.2.6 and v1.2.7, then release both** (`git ls-remote --tags origin`). v1.2.6 = `9d265d0`
    (release notes drafted in session 13: `release-v1.2.6.md`, plus a superseded note for v1.2.5);
    v1.2.7 = the merge commit of PR #3 (notes: CHANGELOG 1.2.7). On the Windows box:
-   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 <merge> -m ...; git push origin v1.2.6 v1.2.7`,
+   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 7a577d8 -m ...; git push origin v1.2.6 v1.2.7`,
    wait for CI on both tags, publish, mark v1.2.5 and v1.2.6 superseded. Security fixes are not shipped until tagged.
 1. **Run v1.2.7 on the Windows box** (both releases shipped on CI evidence only).
    `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex path with a
@@ -48,10 +48,10 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    Desktop. E11 changes what a home-canary breach prints there (`SECURITY BREACH (unconfirmed)` when only
    the inline monitor saw it) - check DEMO.md act 3 still matches a real take. Then re-quote
    `docs/VERIFICATION.md` from that one run. A failure there is a v1.2.8 fix, not a note.
-2. **(decide first) The entrypoint still logs "SIGUSR1 received from the canary tripwire" when a
-   report file exists** - E11 fixed the CLI headline only. PID 1 is inside the agent's reach, so its line
-   is forgeable either way; rewording it ("SIGUSR1 received with a breach record present") is cheap but
-   changes demo output. Ask before changing.
+2. **Ship the Unreleased entrypoint fix as v1.2.8** (done in PR #4, user call 2026-10-08): PID 1 logs
+   "SIGUSR1 received with a breach record present (written inside the agent's reach)" instead of "from the
+   canary tripwire"; E11 checks it (negative CI 37714927464 failed ext4/gVisor/Kata, fix 37714975701 green on
+   all 5). Bump to 1.2.8 + CHANGELOG date when tagging; it needs an agent-image rebuild.
 3. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
    watcher heard the Kata agent's reads via virtiofsd) - but NOT via `--pid container:`, which gave a
    runc container the HOST PID namespace. `--memory` under Kata is unmeasured (the VM had `-m 2G`).
@@ -67,7 +67,8 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    OpenSSL squid build).
 7. **Housekeeping:** delete origin branches `kata-probe`, `verify-s12`,
    `claude/wizardly-edison-9pzqzk` once the user agrees (session 12's git proxy refused the delete).
-   Session 13 never tried: deleting is outward-facing; ask first.
+   The user agreed (2026-10-08); the API delete was refused by the session proxy ("Write access to this
+   GitHub API path is not permitted"), so the user deletes them in the GitHub UI. Check `git branch -r`.
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -266,6 +267,7 @@ would I know if this silently did nothing?" — then run that.
   User chose Kata supported with limits + CI job; added it. Bumped to 1.2.7; PR #3.
 - **Learned:** E12 caught a fix that did nothing on the runtime it was for - the recurring bug shape, in my
   own change. A watchdog snapshot inside the hung CI job found in one run what session 12 could not.
+  Then PR #4: E11 extended to PID 1's "from the canary tripwire" line (user call), drill first, fix green.
 - **Prompt should have said:** "a runtime-specific fix is proven on that runtime, old vs new" and "put CI
   evidence at the end of the job; the API only gives a tail" (both now Gotchas, and in v18).
 

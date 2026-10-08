@@ -842,6 +842,8 @@ fi
 # then signal PID 1. Exit 99 stays (fail closed) and the report is still listed,
 # but the CLI may only say "the canary tripwire terminated this sandbox" when the
 # sentinel - outside the agent's reach - confirms it. Here it saw nothing.
+# PID 1 (inside that reach too) may only say a breach record is present, not
+# that the tripwire sent the signal.
 printf '\n'
 info "E11: a report the agent forged must be headlined as unconfirmed, not as the tripwire's"
 E11_WS="${PROJECT_ROOT}/workspaces/.verify-e11-$$"
@@ -864,6 +866,8 @@ fi
 if [ "$e11_rc" -eq 99 ] && [ "$e11_reports" = "1" ] \
    && [ "$e11_sentinel" = "1" ] \
    && printf '%s' "$e11_out" | grep -q 'SECURITY BREACH (unconfirmed)' \
+   && printf '%s' "$e11_out" | grep -q 'SIGUSR1 received with a breach record present' \
+   && ! printf '%s' "$e11_out" | grep -q 'SIGUSR1 received from the canary tripwire' \
    && printf '%s' "$e11_out" | grep -q 'Incident report: .*WARDEN_SECURITY_INCIDENT.json' \
    && ! printf '%s' "$e11_out" | grep -q 'Confirmed by the sentinel' \
    && ! printf '%s' "$e11_out" | grep -q 'the canary tripwire terminated this sandbox'; then
