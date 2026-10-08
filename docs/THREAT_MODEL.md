@@ -272,7 +272,7 @@ tripwire (uid เดียวกัน) แล้วอ่าน canary จะ�
 ไม่มีการอ้างว่ามีสองชั้น sentinel แบบ runc ที่อยู่ข้าง agent แบบ runsc ได้ยินการอ่าน canary จริง (วัดแล้ว) แต่เห็น
 แค่ process ของ gVisor Sentry และส่งสัญญาณหามันไม่ได้ (`Permission denied`) จึงเป็นได้แค่พยาน ไม่ใช่ตัวกัก
 
-**วัดบน Kata Containers แล้ว (Kata 4.2.0, qemu + KVM บน runner ของ GitHub, session 12–13)** — ยังไม่ได้อยู่ใน CI ประจำ
+**รองรับ Kata Containers แบบมีข้อจำกัด (ตั้งแต่ v1.2.7, CI job `Kata Containers drills`)** — วัดครั้งแรกบน Kata 4.2.0 (qemu + KVM บน runner ของ GitHub, session 12–13)
 workflow ชั่วคราวติดตั้ง Kata แบบ static แล้วรัน CLI จริงด้วย `WARDEN_RUNTIME=kata` ผลที่วัดได้:
 
 | เรื่อง | ใต้ Kata | ผลต่อ AI Warden |
@@ -283,8 +283,9 @@ workflow ชั่วคราวติดตั้ง Kata แบบ static แ
 | `--pids-limit` / fork | `--pids-limit 512` **ไม่บังคับอะไรใน guest** (fork ได้ครบ 700); `--ulimit nproc=512` บังคับจริง (fork 511 แล้ว EAGAIN) | CLI ตั้ง nproc 512 ทุก session อยู่แล้ว จึงยังหยุด fork bomb ได้ |
 | stdin เมื่อไม่มี `-i` | runc ให้ `/dev/null` (EOF) แต่ Kata ให้ **pipe ที่ไม่มีวันปิด** — aider ค้างตลอดกาลที่คำถาม first-run (`anon_pipe_read`) ทำให้ suite ค้างใน phase I | ตั้งแต่ v1.2.7 session ที่ไม่ได้อยู่บน TTY ได้ `</dev/null` จาก entrypoint ในกรง (`docker run -i` + `/dev/null` ไม่ได้ผล: Kata ไม่ส่ง EOF ต่อ) — drill E12 |
 
-**สิ่งที่ต้องยอมรับถ้าเลือก Kata:** เหมือน gVisor — ได้ขอบเขต VM แต่ **เสีย sentinel** ชุดทดสอบทั้งชุดใต้ Kata ยังไม่เคยรันจบ
-(ก่อนแก้ stdin ค้างใน phase I) จึงยังไม่ประกาศว่ารองรับ
+**สิ่งที่ต้องยอมรับถ้าเลือก Kata:** เหมือน gVisor — ได้ขอบเขต VM แต่ **เสีย sentinel** (agent ที่ฆ่า inline tripwire แล้วอ่าน canary
+จะไม่ถูกกัก) ชุดทดสอบทั้งชุดผ่านใต้ Kata ครั้งแรกหลังแก้ stdin (kata-probe run 37711877983: `All phases passed`) และ CI รันทุก PR
+(ผู้ใช้ตัดสินใจ 2026-10-08)
 
 ### 4.2 การรั่วผ่านช่องทางที่อนุญาต
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา

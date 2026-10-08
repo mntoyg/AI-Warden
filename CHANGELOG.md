@@ -34,6 +34,11 @@
 
 - THREAT_MODEL §4.1: ตารางผลวัด Kata (PID namespace, inotify, `--pids-limit` ไม่บังคับใน guest, stdin)
 
+### Added
+
+- **รองรับ Kata Containers แบบมีข้อจำกัด:** CI job ใหม่ `Kata Containers drills` (ชุดทดสอบทั้งชุด, session จริงผ่าน proxy, breach → 99,
+  fork bomb หยุดที่ nproc) เสีย sentinel เหมือน gVisor และบอกตรง ๆ ว่า `NOT armed` (ผู้ใช้ตัดสินใจ 2026-10-08)
+
 ## [1.2.6] — 2026-10-07
 
 **security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก · breach ที่มีแต่ sentinel เห็นมี record**
