@@ -128,7 +128,8 @@ E9_VAULT="warden-verify-e9-vault-$$"
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
-        warden-verify-m-free warden-verify-m-cap \
+        warden-verify-m-free warden-verify-m-cap warden-verify-m-swap \
+        warden-verify-m-forkfree warden-verify-m-nproc warden-verify-m-pids \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e9 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt warden-verify-i0 warden-verify-h-busy \
@@ -1694,24 +1695,32 @@ else
 fi
 
 # =============================================================================
-printf '\n%s===== PHASE M: the memory cap is enforced, not just labelled =====%s\n' "$C_BOLD" "$C_RESET"
+printf '\n%s====== PHASE M: resource caps are enforced, not just labelled ======%s\n' "$C_BOLD" "$C_RESET"
 # =============================================================================
-# Phase A asks the cgroup whether memory.max is set. That is a label, and this
-# project's recurring defect is a control that reports itself armed while
-# enforcing nothing: under a VM or a user-space runtime the guest cgroup can
-# read "capped" while the allocation it is supposed to stop goes through (under
-# Kata the VM's own size, not --memory, bounded a session - unmeasured until
-# this phase). So the cap is measured: a container allocates past it, and the
-# last chunk it managed to touch is the answer. The UNCAPPED control runs first
-# - without it an allocator that failed for any other reason would look like
-# enforcement.
+# Phase A's resource section is four cgroup READS: memory.max, memory.swap.max,
+# pids.max and the rlimits. That is a label, and this project's recurring defect
+# is a control that reports itself armed while enforcing nothing - under a VM or
+# a user-space runtime the guest cgroup can read "capped" while the thing it is
+# supposed to stop goes through (under Kata the VM's own size, not --memory,
+# bounded a session; under gVisor memory.max does not exist and pids.max reads
+# "max"). So the caps are MEASURED here, each with its own control first,
+# because a probe that failed for some other reason looks exactly like
+# enforcement:
+#   M (mem)  allocate past --memory; the last chunk touched is the answer
+#   M (swap) --memory-swap larger than --memory: if the allocator then gets
+#            past the cap, equal values are what stops it, not the label
+#   M (proc) fork until the kernel refuses: nproc is the bound the CLI relies
+#            on under every runtime, --pids-limit only on runc
 M_CAP_MIB=256
 M_TARGET_MIB=768
+M_FORK_CAP=64
+M_FORK_TARGET=150
 m_fail() { bad "phase M: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
-info "allocating ${M_TARGET_MIB} MiB against a ${M_CAP_MIB} MiB cap (measured, not read off the cgroup)"
+info "measuring --memory, --memory-swap and the process caps by running into them"
 printf '\n'
 cp "${SCRIPT_DIR}/drill-alloc-memory.py" "${VERIFY_WS}/.warden-alloc.py"
-chmod 0644 "${VERIFY_WS}/.warden-alloc.py" 2>/dev/null || true
+cp "${SCRIPT_DIR}/drill-fork-count.py" "${VERIFY_WS}/.warden-forks.py"
+chmod 0644 "${VERIFY_WS}/.warden-alloc.py" "${VERIFY_WS}/.warden-forks.py" 2>/dev/null || true
 m_base=(
     "${VERIFY_RT[@]}"
     --network "$INTERNAL_NET"
@@ -1719,7 +1728,6 @@ m_base=(
     --workdir /workspace
     --cap-drop=ALL
     --security-opt no-new-privileges:true
-    --pids-limit 256
     --entrypoint python3
     -v "${VERIFY_WS_MOUNT}:/workspace:ro"
 )
@@ -1729,11 +1737,29 @@ m_base=(
 m_measure() {
     local name="$1"; shift
     docker rm -f "$name" >/dev/null 2>&1 || true
-    M_OUT="$(docker run "${m_base[@]}" "$@" --name "$name" "$AGENT_IMAGE" \
+    M_OUT="$(docker run "${m_base[@]}" --pids-limit 256 "$@" --name "$name" "$AGENT_IMAGE" \
         -u /workspace/.warden-alloc.py "$M_TARGET_MIB" 2>&1)"
     M_HIGH="$(printf '%s\n' "$M_OUT" | sed -n 's/^alloc \([0-9]*\) MiB$/\1/p' | tail -1)"
     M_HIGH="${M_HIGH:-0}"
     M_LABEL="$(printf '%s\n' "$M_OUT" | sed -n 's|^label /sys/fs/cgroup/memory.max ||p' | tail -1)"
+    M_STATE="$(docker inspect -f 'exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}' "$name" 2>/dev/null)"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+}
+# The fork runs carry --pids-limit 4096, the host task cap the CLI uses under
+# gVisor: 256 would bound the runtime's own host tasks and kill the sandbox at
+# ~150-300 guest processes (session 11), which is not what is being measured.
+m_forks() {
+    local name="$1"; shift
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    M_OUT="$(docker run "${m_base[@]}" "$@" --name "$name" "$AGENT_IMAGE" \
+        -u /workspace/.warden-forks.py "$M_FORK_TARGET" 8 2>&1)"
+    M_N="$(printf '%s\n' "$M_OUT" | sed -n 's/^forked \([0-9]*\),.*/\1/p' | tail -1)"
+    if [ -z "$M_N" ]; then
+        M_N="$(printf '%s\n' "$M_OUT" | sed -n 's/^forked \([0-9]*\) - no limit hit$/\1/p' | tail -1)"
+    fi
+    M_N="${M_N:-0}"
+    M_ERR="$(printf '%s\n' "$M_OUT" | sed -n 's/^forked [0-9]*, then: //p' | tail -1)"
+    M_LABEL="$(printf '%s\n' "$M_OUT" | sed -n 's|^label /sys/fs/cgroup/pids.max ||p' | tail -1)"
     M_STATE="$(docker inspect -f 'exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}' "$name" 2>/dev/null)"
     docker rm -f "$name" >/dev/null 2>&1 || true
 }
@@ -1742,17 +1768,60 @@ m_measure warden-verify-m-free
 m_free_high="$M_HIGH"; m_free_state="$M_STATE"; m_free_label="${M_LABEL:-unreadable}"; m_free_out="$M_OUT"
 m_measure warden-verify-m-cap --memory "${M_CAP_MIB}m" --memory-swap "${M_CAP_MIB}m"
 m_cap_high="$M_HIGH"; m_cap_state="$M_STATE"; m_cap_label="${M_LABEL:-unreadable}"
+# Swap larger than memory: the one posture phase A's memory.swap.max read is
+# supposed to rule out. Its own control is the capped run above.
+m_measure warden-verify-m-swap --memory "${M_CAP_MIB}m" --memory-swap "$((M_CAP_MIB * 2))m"
+m_swap_high="$M_HIGH"; m_swap_state="$M_STATE"
 
-note "  uncapped: ${m_free_high} MiB (${m_free_state:-no container state}), memory.max=${m_free_label}"
-note "  capped:   ${m_cap_high} MiB (${m_cap_state:-no container state}), memory.max=${m_cap_label}"
+note "  mem uncapped: ${m_free_high} MiB (${m_free_state:-no container state}), memory.max=${m_free_label}"
+note "  mem capped:   ${m_cap_high} MiB (${m_cap_state:-no container state}), memory.max=${m_cap_label}"
+note "  mem + swap:   ${m_swap_high} MiB (${m_swap_state:-no container state}) with --memory-swap $((M_CAP_MIB * 2))m"
 
 if [ "$m_free_high" -lt "$M_TARGET_MIB" ]; then
     m_fail "the uncapped control reached only ${m_free_high} MiB of ${M_TARGET_MIB} - this host cannot stage the drill, so the capped run proves nothing"
     printf '%s\n' "$m_free_out" | grep -vE '^alloc [0-9]+ MiB$' | head -5 | sed 's/^/         /'
 elif [ "$m_cap_high" -lt "$M_CAP_MIB" ]; then
-    good "phase M: --memory ${M_CAP_MIB}m stopped the allocator at ${m_cap_high} MiB while the uncapped control took ${m_free_high} MiB"
+    good "phase M (mem): --memory ${M_CAP_MIB}m stopped the allocator at ${m_cap_high} MiB while the uncapped control took ${m_free_high} MiB"
+    if [ "$m_swap_high" -gt "$m_cap_high" ]; then
+        good "phase M (swap): swap is a real sidestep here - with --memory-swap $((M_CAP_MIB * 2))m the same allocator reached ${m_swap_high} MiB, so the suite's EQUAL --memory-swap is what holds the cap, not the label"
+    else
+        note "  SKIP phase M (swap): this host shows no swap sidestep to rule out (${m_swap_high} MiB with double the swap allowance, vs ${m_cap_high} MiB capped) - the cap itself is still proven above"
+    fi
 else
     m_fail "--memory ${M_CAP_MIB}m enforced nothing: the allocator reached ${m_cap_high} MiB (${m_cap_state}) inside a cgroup that says memory.max=${m_cap_label}"
+fi
+
+m_forks warden-verify-m-forkfree --pids-limit 4096
+m_ff_n="$M_N"; m_ff_state="$M_STATE"; m_ff_label="${M_LABEL:-unreadable}"; m_ff_out="$M_OUT"
+m_forks warden-verify-m-nproc --pids-limit 4096 --ulimit "nproc=${M_FORK_CAP}:${M_FORK_CAP}"
+m_np_n="$M_N"; m_np_err="$M_ERR"; m_np_state="$M_STATE"
+
+note "  forks uncapped: ${m_ff_n} (${m_ff_state:-no container state}), pids.max=${m_ff_label}"
+note "  forks nproc=${M_FORK_CAP}:  ${m_np_n} (${m_np_state:-no container state}) ${m_np_err:+- ${m_np_err}}"
+
+if [ "$m_ff_n" -lt "$M_FORK_TARGET" ]; then
+    m_fail "the uncapped fork control managed only ${m_ff_n} of ${M_FORK_TARGET} (${m_ff_state}) - the bounded runs below would prove nothing"
+    printf '%s\n' "$m_ff_out" | grep -vE '^label ' | head -4 | sed 's/^/         /'
+elif [ "$m_np_n" -lt "$M_FORK_CAP" ] && printf '%s' "$m_np_err" | grep -q 'errno 11'; then
+    good "phase M (proc): --ulimit nproc=${M_FORK_CAP} stopped the fork loop at ${m_np_n} with EAGAIN while the uncapped control forked ${m_ff_n}"
+else
+    m_fail "--ulimit nproc=${M_FORK_CAP} did not bound the fork loop: ${m_np_n} forks (${m_np_state}), refusal='${m_np_err:-none}'"
+fi
+
+# --pids-limit is a runc bound only: under gVisor it caps the runtime's HOST
+# tasks and under Kata it bounds nothing in the guest (both measured, session
+# 11/13 and documented in THREAT_MODEL). Claiming it here would be a label.
+if [ -z "${WARDEN_RUNTIME:-}" ] || [ "${WARDEN_RUNTIME}" = "runc" ]; then
+    m_forks warden-verify-m-pids --pids-limit "$M_FORK_CAP" --ulimit nproc=4096:4096
+    m_pl_n="$M_N"; m_pl_err="$M_ERR"; m_pl_state="$M_STATE"; m_pl_label="${M_LABEL:-unreadable}"
+    note "  forks --pids-limit ${M_FORK_CAP}: ${m_pl_n} (${m_pl_state:-no container state}), pids.max=${m_pl_label} ${m_pl_err:+- ${m_pl_err}}"
+    if [ "$m_pl_n" -lt "$M_FORK_CAP" ]; then
+        good "phase M (proc): --pids-limit ${M_FORK_CAP} stopped the fork loop at ${m_pl_n} (pids.max=${m_pl_label}), not merely reported as set"
+    else
+        m_fail "--pids-limit ${M_FORK_CAP} enforced nothing: ${m_pl_n} forks (${m_pl_state}) with pids.max=${m_pl_label}"
+    fi
+else
+    note "  SKIP phase M (proc, --pids-limit): under WARDEN_RUNTIME=${WARDEN_RUNTIME} it bounds host tasks, not guest processes - documented limit, nproc above is the bound that holds"
 fi
 
 # =============================================================================

@@ -353,6 +353,15 @@ QUERY secret-old.exfil.example.org type 1 from 172.30.0.10     # nameserver ไ�
 `--memory`, `--cpus`, `--pids-limit` จำกัดผลกระทบไว้แล้ว แต่ไม่ได้ป้องกัน
 timing side channel หรือการอ่านข้อมูลข้าม container บนโฮสต์เดียวกัน
 
+เพดานเหล่านี้ **วัดแล้ว ไม่ใช่อ่านจาก cgroup** (phase M ตั้งแต่ v1.2.9/v1.2.10 — phase A อ่านไฟล์
+`memory.max` / `memory.swap.max` / `pids.max` ซึ่งเป็น label และใต้ gVisor ไฟล์แรกไม่มีอยู่เลย):
+
+| เพดาน | ที่วัดได้ | ตัวที่บังคับจริง |
+|---|---|---|
+| `--memory` | บังคับทุก runtime; เพดาน `256m` ใช้ได้จริง 240 MiB (runc) / 208–224 (gVisor) / 144 (Kata), เพดาน `1024m` ได้ 1008 / 976 / 896 — overhead **คงที่** ไม่ใช่สัดส่วน | cgroup (runc/gVisor) หรือ kernel ของ guest (Kata — `exit=137` แต่ `OOMKilled=false`) |
+| `--memory-swap` | ถ้าตั้งใหญ่กว่า `--memory` **เลี่ยงเพดานได้จริง**: `--memory 256m --memory-swap 512m` จองได้ **496 MiB** บน Docker Desktop (เทียบ 240 MiB เมื่อตั้งเท่ากัน) | การตั้งให้ **เท่ากับ** `--memory` ซึ่ง CLI และชุดทดสอบทำทุกครั้ง |
+| จำนวน process | `--ulimit nproc=64` → fork ได้ 63 แล้ว **EAGAIN** ทุก runtime; `--pids-limit 64` → 63 (`pids.max=64`) **เฉพาะ runc** (gVisor นับ host task, Kata ไม่บังคับใน guest — ดู §4.1) | `--ulimit nproc` เป็นตัวหลัก, `--pids-limit` เป็น backstop บน runc |
+
 ### 4.5 inotify ใช้ไม่ได้บน bind mount ของ Docker Desktop
 
 นี่คือข้อจำกัดที่ต้องอ่านให้จบ เพราะมันกระทบ canary โดยตรง

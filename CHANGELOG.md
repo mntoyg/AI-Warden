@@ -4,6 +4,28 @@
 
 ---
 
+## [1.2.10] — 2026-10-08
+
+**verification: phase M วัดเพดานที่เหลือทั้งหมด — swap และจำนวน process (ไม่ใช่แค่ `--memory`)**
+
+ไม่ใช่ security fix — ไม่มีพฤติกรรมของกรงเปลี่ยน (ต้อง rebuild agent image ให้ banner ตรงเวอร์ชัน:
+`./scripts/warden-cli.sh build`)
+
+### Added
+
+- **phase M ขยายจาก `--memory` ไปครบทั้ง resource section ของ phase A** ซึ่งเดิมเป็นการ *อ่าน* cgroup 4 ข้อ:
+  - **swap** — `memory.swap.max=0` เคยถูกอ่านแล้วบอกว่า "swap ปิดแล้ว เพดาน RAM เลี่ยงไม่ได้" ตอนนี้วัดท่าที่มันควรปิด:
+    รันซ้ำด้วย `--memory 256m --memory-swap 512m` **วัดได้ 496 MiB** (เทียบกับ 240 MiB เมื่อ swap เท่ากับ memory)
+    บน Docker Desktop — swap เป็นช่องเลี่ยงจริง และสิ่งที่กั้นคือการตั้ง `--memory-swap` ให้ **เท่ากับ** `--memory`
+    ไม่ใช่ตัว label ถ้าเครื่องไหนไม่มี swap ให้เลี่ยง เฟสจะพิมพ์ SKIP พร้อมตัวเลขทั้งสองฝั่ง ไม่ใช่ pass ลอย ๆ
+  - **จำนวน process** — `scripts/drill-fork-count.py` fork จนเคอร์เนลปฏิเสธแล้วพิมพ์จำนวน (probe ต้องรอดจากความตาย
+    ของตัวเอง: shell loop ตายเงียบ ๆ จึงใช้ `os.fork()` ใน try/except + `flush=True`) วัด `--ulimit nproc=64`
+    → **หยุดที่ 63 ด้วย EAGAIN** (ตัวที่บังคับได้ทุก runtime) และ `--pids-limit 64` → หยุดที่ 63, `pids.max=64`
+    (เฉพาะ runc — ใต้ gVisor มันนับ **host task** ใต้ Kata ไม่บังคับอะไรใน guest เลย เฟสจึงพิมพ์ SKIP พร้อมเหตุผล
+    แทนที่จะอ้างสิ่งที่วัดไม่ได้)
+  - ทั้งสองข้อพิสูจน์ย้อนทางแล้ว: ถอด guard ออก → fork ได้ครบ 150 ไม่มีการปฏิเสธ → **FAIL ทั้งคู่, exit 1**
+- `scripts/drill-fork-count.py` — ตัวช่วยของ phase M (ไม่ได้อยู่ใน image ใด)
+
 ## [1.2.9] — 2026-10-08
 
 **verification: เพดานหน่วยความจำถูก *วัด* ไม่ใช่อ่านจาก label (phase M) + ตัวเลขจริงของ Kata/gVisor**

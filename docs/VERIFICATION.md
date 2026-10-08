@@ -131,12 +131,19 @@
   PASS phase L: a CONNECT to a non-allowlisted name was refused (403) without a DNS lookup
   PASS phase L: an allowlisted name that resolves into the LAN (10.1.2.3) is still refused
 
-===== PHASE M: the memory cap is enforced, not just labelled =====
-==> allocating 768 MiB against a 256 MiB cap (measured, not read off the cgroup)
+====== PHASE M: resource caps are enforced, not just labelled ======
+==> measuring --memory, --memory-swap and the process caps by running into them
 
-    uncapped: 768 MiB (exit=0 OOMKilled=false), memory.max=max
-    capped:   240 MiB (exit=137 OOMKilled=true), memory.max=268435456
-  PASS phase M: --memory 256m stopped the allocator at 240 MiB while the uncapped control took 768 MiB
+    mem uncapped: 768 MiB (exit=0 OOMKilled=false), memory.max=max
+    mem capped:   240 MiB (exit=137 OOMKilled=true), memory.max=268435456
+    mem + swap:   496 MiB (exit=137 OOMKilled=true) with --memory-swap 512m
+  PASS phase M (mem): --memory 256m stopped the allocator at 240 MiB while the uncapped control took 768 MiB
+  PASS phase M (swap): swap is a real sidestep here - with --memory-swap 512m the same allocator reached 496 MiB, so the suite's EQUAL --memory-swap is what holds the cap, not the label
+    forks uncapped: 150 (exit=0 OOMKilled=false), pids.max=4096
+    forks nproc=64:  63 (exit=0 OOMKilled=false) - errno 11 Resource temporarily unavailable
+  PASS phase M (proc): --ulimit nproc=64 stopped the fork loop at 63 with EAGAIN while the uncapped control forked 150
+    forks --pids-limit 64: 63 (exit=0 OOMKilled=false), pids.max=64 - errno 11 Resource temporarily unavailable
+  PASS phase M (proc): --pids-limit 64 stopped the fork loop at 63 (pids.max=64), not merely reported as set
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
