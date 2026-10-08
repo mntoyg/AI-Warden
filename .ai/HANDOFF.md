@@ -63,8 +63,10 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    JSONL from the user's git repos (commit -> diff), project files (docs/docstrings -> text/code), Claude /
    ChatGPT exports, and licence-checked Hugging Face datasets; every record redacted; 14 stdlib tests run in
    CI's static job. Not yet tried: a real Hub download (huggingface.co is blocked in cloud sessions) and a
-   real chat export. **Next:** the user runs it on Colab (data to Drive), then step 2 - a training notebook
-   (LoRA on Qwen2.5-Coder-1.5B -> merge -> GGUF q8_0 + `warden-model-lab/manifest/1`), then
+   real chat export. The user ran it on Colab (2026-10-08, result not seen here). Step 2 WRITTEN, never run on
+   a GPU: `notebook/train.ipynb` (LoRA on Qwen2.5-Coder-1.5B, SMOKE=True first -> merge -> GGUF q8_0 +
+   `warden-model-lab/manifest/1`, whose parsing a test checks with the CLI's own sed lines). **Next:** the
+   user runs it (smoke, then full), downloads the model dir outside any workspace, then
    `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` vs the untuned base.
 6. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
    cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
