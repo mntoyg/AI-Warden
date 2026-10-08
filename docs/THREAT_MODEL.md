@@ -363,8 +363,9 @@ timing side channel หรือการอ่านข้อมูลข้า
 | จำนวน process | `--ulimit nproc=64` → fork ได้ 63 แล้ว **EAGAIN** ทุก runtime; `--pids-limit 64` → 63 (`pids.max=64`) **เฉพาะ runc** (gVisor นับ host task, Kata ไม่บังคับใน guest — ดู §4.1) | `--ulimit nproc` เป็นตัวหลัก, `--pids-limit` เป็น backstop บน runc |
 
 **`RLIMIT_NPROC` เป็นงบของ uid และขอบเขตการนับขึ้นกับโฮสต์ (วัดสองฝั่ง, session 15):** บน runner ของ GitHub
-ซึ่ง **job รันเป็น uid 1001 เอง** container ที่ตั้ง `nproc=64` ด้วย uid 1001 **สตาร์ต python ไม่ขึ้นเลย**
-(`exit=255`, fork 0 — run 37760397979) ส่วนบน Docker Desktop 100 process ของ uid 1001 ที่ยังมีชีวิตใน container
+ซึ่ง **job รันเป็น uid 1001 เอง** เพดาน `nproc=64` ตัวเดียวกันให้ uid 4242 fork ได้ 63 แต่ให้ **uid 1001 fork ได้
+แค่ 4** (run 37764437022) และรอบก่อนหน้านั้น container **สตาร์ต python ไม่ขึ้นเลย** (`exit=255`, fork 0 —
+run 37760397979) เพราะงบถูกใช้หมด ส่วนบน Docker Desktop 100 process ของ uid 1001 ที่ยังมีชีวิตใน container
 อื่น **ไม่ถูกนับ** เข้าเพดานเดียวกัน (fork ได้ 63 แล้ว EAGAIN ตามปกติ) ทิศทางนี้คือ "แน่นกว่าที่ขอ" ไม่ใช่หลวมกว่า
 และเพดานจริงของ CLI คือ `nproc=512` ซึ่งเหลือ headroom พอ — เลข 64 ของ drill เท่านั้นที่ไปชนงบของ uid
 phase M จึงวัด *กลไก* ด้วย uid ที่ไม่มีใครใช้ (4242) และยิง uid 1001 ซ้ำอีกหนึ่งนัดแบบ **note อย่างเดียว**
