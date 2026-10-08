@@ -4,25 +4,26 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-10-08 (session 14, Windows box)
-- **Latest release:** [v1.2.8](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.8) — PID 1's own log line no longer claims the tripwire sent SIGUSR1 when the agent could have forged the breach record itself (extends E11 to the entrypoint, PR #4). On top of v1.2.7 (breach headline only when the sentinel confirms, E11; stdin EOF under Kata, E12; Kata supported with limits) and v1.2.6 (proxy DNS exfiltration closed, L; inotify overflow, E9; sentinel-only record, E10; UNVERIFIED dirs). All three were merged on `main` by cloud sessions 12/13 but left untagged (their git proxy refused tag pushes, HTTP 403); tagged, released and verified on Docker Desktop this session (v1.2.8 twice - once to confirm the merged fix, again after bumping the stale version strings). v1.0.0–v1.2.7 carry a superseded note.
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v19)
+- **Last updated:** 2026-10-08 (session 15, Windows box)
+- **Latest release:** [v1.2.9](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.9) — **phase M: the memory cap is MEASURED, not read off a label.** Not a security fix; no cage behaviour changed, but the suite proves one more thing. `--memory` is enforced on all three runtimes (runc 240/256 MiB usable, gVisor 208–224, Kata 144; at a 1 GiB cap 1008 / 976 / 896 — the overhead is fixed, not proportional, so the CLI's default `4g` still leaves the agent ~3.9 GiB). Two findings beside it: under Kata the kill is `exit=137` with **`OOMKilled=false`** (the guest kernel does it; the host never sees an OOM), and under gVisor `/sys/fs/cgroup/memory.max` **does not exist in the sandbox at all**, so phase A can only `skip` and the outside measurement is the only proof. v1.2.8 is NOT superseded (no security change).
+- **Previous release:** [v1.2.8](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.8) — PID 1's own log line no longer claims the tripwire sent SIGUSR1 when the agent could have forged the breach record itself (extends E11 to the entrypoint, PR #4). On top of v1.2.7 (breach headline only when the sentinel confirms, E11; stdin EOF under Kata, E12; Kata supported with limits) and v1.2.6 (proxy DNS exfiltration closed, L; inotify overflow, E9; sentinel-only record, E10; UNVERIFIED dirs). All three were merged on `main` by cloud sessions 12/13 but left untagged (their git proxy refused tag pushes, HTTP 403); tagged, released and verified on Docker Desktop this session (v1.2.8 twice - once to confirm the merged fix, again after bumping the stale version strings). v1.0.0–v1.2.7 carry a superseded note.
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v20)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
 
 ---
 
-## 1. Status (verified 2026-10-08, session 14, Windows box)
+## 1. Status (verified 2026-10-08, session 15, Windows box)
 
 | Thing | State |
 |---|---|
-| `main` | v1.2.8 = PR #4 (E11 extended to PID 1's log line) on top of PR #3 (v1.2.7: E11, E12, Kata CI job) on top of `9d265d0` (v1.2.6), plus PRs #5-#8 (notebook/ data collection + training, see item 2). `main` fast-forwarded here from 73 commits behind at session start. Version strings were bumped to 1.2.8 this session - PR #4's fix was merged under `[Unreleased]` with the code still saying 1.2.7 |
-| Tags | `v1.0.0`…`v1.2.7` carry a superseded warning · **`v1.2.8` (Latest)**. v1.2.6, v1.2.7 and v1.2.8 all tagged + released THIS session (`git tag -a ...; git push origin ...` from the Windows box - the cloud sessions' git proxy had refused this with 403) |
-| CI | **5 jobs**: static · CVE scan · ext4 drills · gVisor (runsc) drills · Kata Containers drills. Green on all three new tags and on `main` through PR #8. Real-image proofs from sessions 12/13: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (37711877983) |
-| Local suite (Docker Desktop / Windows) | **run on Docker Desktop for the first time this session, twice**: rebuilt `--pull` (codex-cli 0.156.1 → **0.161.0**; claude 2.1.197 and aider 0.86.2 unchanged), full `verify-isolation.sh` A–L exit 0, `enforced=4/7` on the v1.2.7-era code; after the version bump, rebuilt (cached, fast) and ran again clean on v1.2.8 (35 passed in the self-test, was 34). **3b2, L, E9, E10, E11, E12 all PASS on Docker Desktop for the first time** (previously CI-only). `docs/VERIFICATION.md` §0 re-quoted from the v1.2.8 run |
+| `main` | **v1.2.9 = phase M (measured memory cap) + the docs it produced, tagged and released from this box** (`ef3a83b`; CI green on the `main` push 37753123954 and on the tag). On top of: v1.2.8 = PR #4 (E11 extended to PID 1's log line) on top of PR #3 (v1.2.7: E11, E12, Kata CI job) on top of `9d265d0` (v1.2.6), plus PRs #5-#8 (notebook/ data collection + training, see item 2). `main` fast-forwarded here from 73 commits behind at session start. Version strings were bumped to 1.2.8 this session - PR #4's fix was merged under `[Unreleased]` with the code still saying 1.2.7 |
+| Tags | `v1.0.0`…`v1.2.7` carry a superseded warning · `v1.2.8` · **`v1.2.9` (Latest)**. v1.2.6–v1.2.8 were tagged + released in session 14; v1.2.9 in session 15, same way (`git tag -a ...; git push origin ...` from the Windows box - the cloud sessions' git proxy had refused this with 403). **v1.2.8 carries NO superseded note on purpose**: v1.2.9 is verification + docs, not a security fix |
+| CI | **5 jobs**: static · CVE scan · ext4 drills · gVisor (runsc) drills · Kata Containers drills. Green on every tag through v1.2.9 and on `main` through `ef3a83b`. Phase M's measurements came from a temporary branch (`kata-memcap-probe`, now deleted): runs **37749560187** (cap 256m, all 5 jobs green) and **37751167935** (cap 256m + 1024m, all 5 green). Real-image proofs from sessions 12/13: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (37711877983) |
+| Local suite (Docker Desktop / Windows) | **session 15: A–M exit 0 on v1.2.9**, self-test 35/35, `enforced=4/7`, one SKIP (phase J's no-GPU side, CI runs it). Run AFTER the version bump, on an image rebuilt from cache (no `--pull`, so the bundled CLIs are still session 14's: codex-cli 0.161.0, claude 2.1.197, aider 0.86.2). Phase M's teeth were proven on the old behaviour first with a phase-M-only scratch harness: cap stripped → uncapped 768 / capped 768, `exit=0 OOMKilled=false`, `memory.max=max`, suite **exit 1**; cap in place → capped 240 MiB, `exit=137 OOMKilled=true`, exit 0. `docs/VERIFICATION.md` §0 now carries the phase M block from the v1.2.9 run. Session 14's run, for reference: rebuilt `--pull` (codex-cli 0.156.1 → **0.161.0**; claude 2.1.197 and aider 0.86.2 unchanged), full `verify-isolation.sh` A–L exit 0, `enforced=4/7` on the v1.2.7-era code; after the version bump, rebuilt (cached, fast) and ran again clean on v1.2.8 (35 passed in the self-test, was 34). **3b2, L, E9, E10, E11, E12 all PASS on Docker Desktop for the first time** (previously CI-only). `docs/VERIFICATION.md` §0 re-quoted from the v1.2.8 run |
 | Real codex path | **confirmed working on codex-cli 0.161.0**: login from `OPENAI_API_KEY` OK, `sandbox_mode=danger-full-access` OK, reached api.openai.com - but every prompt returns `ERROR: Quota exceeded`. Not a sandbox fault (same as session 10). Needs a workspace that is a git repo - 0.161.0 added a trusted-directory check (`--skip-git-repo-check` exists but unneeded for a real project folder, which is always a git repo) |
-| CI suite, ext4 / gVisor / Kata | unchanged from sessions 12-13: ext4 `enforced=7/7` all phases; gVisor D = honest SKIP, sentinel `NOT armed`; Kata supported with limits, same tradeoff, CI job green |
+| CI suite, ext4 / gVisor / Kata | ext4 `enforced=7/7` all phases; gVisor D = honest SKIP, sentinel `NOT armed`; Kata supported with limits, same tradeoff, CI job green. **Session 15 adds phase M to all three** and it passes on each: `--memory` is enforced everywhere, with a fixed per-runtime overhead (runc ~16 MiB, gVisor ~48, Kata ~112–128) |
 | Egress audit trail | live (`up` healed it at session start, same as every session) |
 | Local model | unchanged: no trained GGUF locally. `notebook/` (collect + train) merged to main this session (PRs #5-#8, user's Colab run in progress/result not seen here) |
 | OpenAI key | **still out of credit** (confirmed again this session via a real codex call) - ask the user to top up, do not debug further |
@@ -37,7 +38,9 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 
 0. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
    watcher heard the Kata agent's reads via virtiofsd) - but NOT via `--pid container:`, which gave a
-   runc container the HOST PID namespace. `--memory` under Kata is unmeasured (the VM had `-m 2G`).
+   runc container the HOST PID namespace. (`--memory` under Kata: **ANSWERED session 15** — enforced,
+   measured by the new phase M, v1.2.9. The Kata/gVisor numbers are in `docs/THREAT_MODEL.md`'s runtime
+   tables and CHANGELOG `[1.2.9]`; nothing left to measure there.)
 1. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
    in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
    step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day. Blocked separately on OpenAI
@@ -246,6 +249,10 @@ would I know if this silently did nothing?" — then run that.
 | A runc container with `--pid container:<kata container>` gets the HOST PID namespace | It listed dockerd, qemu and the runner (session 13, P2). Never build a runc witness for Kata that way |
 | The API returns only a log tail, and `gh api .../logs` is refused | The built-in gh will not follow the blob redirect; `get_job_logs` gives `tail_lines` only. Put what you need at the END of a job (an `if: always()` report step) or in its own small job (session 13: probes and suite as separate jobs) |
 | A fix can pass every runc check and do nothing on the runtime it targets | Session 13's first stdin fix was green on runc; only E12 run under Kata showed `rc=142`. Prove a runtime-specific fix on that runtime, old vs new, before claiming it |
+| `bash -e` kills a `( ... ) &` sampler too, not just the step | Session 15: a background loop sampling `pgrep -af qemu` every 0.5 s died on its FIRST sample - taken before the VM existed, so pgrep exited 1 - and the step reported `vm=unseen` as if Kata had hidden it. `\|\| true` belongs INSIDE the sampler, not only on the measured command |
+| A sampled value can belong to the PREVIOUS container | The same sampler, read with `head -1` from an appended file, reported `-m1056M` for a run that allocated 1536 MiB - impossible, it was the previous VM still shutting down. One file per run, and sanity-check every sample against the measurement it sits beside (the capped rows' `-m 288M` / `-m 1056M` were credible because they tracked their own caps) |
+| `gh run view --log` is refused, but the job-log API is not a tail after all | Session 15, from the Windows box: `gh run view --job <id> --log` says "still in progress; logs will be available when it is complete", and the plain API call dies with "the response contains terminal escape sequences". `gh api repos/<owner>/<repo>/actions/jobs/<id>/logs --allow-escape-sequences` returns the **whole** log of a completed job (lines from the middle of a 10-minute job came back fine). Still put the evidence at the end of a job when the run may stay in flight, but a finished job's full log IS reachable |
+| Docker's `.State.OOMKilled` is false under Kata when the cap kills | The guest kernel does the kill, so the host records `exit=137 OOMKilled=false` (measured, 256m and 1024m caps). Judge a memory kill by the exit code and the allocation high-water mark, never by that flag. Under gVisor the opposite trap: `/sys/fs/cgroup/memory.max` does not exist in the sandbox at all, so an in-container check `skip`s and proves nothing - only an allocation past the cap does (phase M) |
 ---
 
 ## 6. Conventions
@@ -259,6 +266,45 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-10-08 — session 15 · Windows box · v1.2.9: the memory cap is measured, not read off a label
+- **Did:** verified the handoff against reality first (clean `main`, `v1.2.8` = HEAD~1 with only a docs
+  commit past it, so the tag was NOT stale this time; the one remaining remote branch
+  `claude/cool-knuth-mh33o8` has no commits past `main`; last 3 CI runs green; audit trail live). Checked
+  for the Colab output before asking: `D:\code-project\warden-model-lab` holds only the **untuned** base
+  GGUF from 26 Sep, no `manifest/`, nothing from October - so Next steps #2 is still on the user's side,
+  and they confirmed the training run has not happened, the demo still has no date, and the OpenAI key is
+  still not topped up. They picked Next steps #0's open question: **is `--memory` enforced under Kata?**
+  Phase A could not answer it - it READS `/sys/fs/cgroup/memory.max` and passes when the file says
+  "capped", which is the project's recurring defect shape. Wrote the assertion first
+  (`scripts/drill-alloc-memory.py` + a new **phase M**: allocate past the cap in 16 MiB chunks, touching
+  every page, uncapped container first as the positive control), watched it FAIL on the old behaviour with
+  a phase-M-only scratch harness (cap stripped: capped run reached the full 768 MiB, `exit=0
+  OOMKilled=false`, `memory.max=max`, suite exit 1), then saw it pass with the cap in place (240 MiB,
+  `exit=137 OOMKilled=true`). Measured the runtimes this box cannot run on a temporary branch
+  (`kata-memcap-probe`): a push trigger for it, plus a raw both-ways measurement step in the gVisor and
+  Kata jobs before the suite, and the same numbers repeated in an `if: always()` end-of-job step. Runs
+  37749560187 (256m) and 37751167935 (256m + 1024m) were green on all five jobs each. **Answer: enforced
+  on all three**, with a fixed overhead (runc ~16 MiB, gVisor ~48, Kata ~112–128) - so the CLI's default
+  `--memory 4g` is still honest, while a 256 MiB cap loses almost half under Kata. Two findings beside it:
+  under Kata the kill is `exit=137` with **`OOMKilled=false`** (the guest kernel does it, the host never
+  sees an OOM), and under gVisor `memory.max` **does not exist in the sandbox at all**, so phase A can only
+  `skip`. Landed phase M on `main` without the temporary CI scaffolding, bumped to 1.2.9 FIRST, rebuilt from
+  cache (no `--pull`, CLIs untouched), re-ran the whole suite on the new label (A–M exit 0, 35/35,
+  `enforced=4/7`), waited for CI green on the `main` push, then tagged and released v1.2.9 - **without** a
+  superseded note on v1.2.8, which would have been false (no security change). Deleted the probe branch.
+  Docs: README claimed "11 phases" and its table stopped at **K** (phase L from v1.2.6 was never added) -
+  now 13 with both L and M; `docs/THREAT_MODEL.md` gained a `--memory` row in the gVisor and Kata tables;
+  `VERIFICATION.md` §0 quotes phase M from the v1.2.9 run; DEMO's checklist says A–M.
+- **Learned:** the project's own rule "judge by measurement, never by a label" had a blind spot inside the
+  suite itself - phase A's resource section was four cgroup READS, and under gVisor one of those files is
+  absent, which `skip`s quietly and looks like coverage. Also: `gh api .../actions/jobs/<id>/logs
+  --allow-escape-sequences` returns a finished job's FULL log from this box, not the tail the handoff
+  assumed, which makes CI measurements much cheaper to read back. And `bash -e` reaches further than the
+  step: it killed a background `pgrep` sampler on its first non-match, and the step then reported the
+  missing VM size as if Kata had hidden it.
+- **Prompt should have said:** a guard that READS a kernel file is a label, not a measurement - including
+  the ones already inside the suite; and `|| true` belongs inside any background sampler in an Actions step.
 
 ### 2026-10-08 — session 14 · Windows box · v1.2.6/v1.2.7/v1.2.8 tagged, released and verified
 - **Did:** `main` was 73 commits behind origin (fast-forwarded, clean - no local-only work). `git ls-remote
@@ -701,6 +747,23 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v20 · 2026-10-08** — session 15. (a) WORK: a guard that READS a kernel file is a LABEL, the
+  reads already inside the suite included - phase A's `memory.max` check passed on a file gVisor
+  does not even have, so it `skip`ped and looked like coverage (phase M now makes the kernel act);
+  (b) a finished job's FULL log is reachable with `gh api .../actions/jobs/<id>/logs
+  --allow-escape-sequences` (not `gh run view --log`, refused mid-run), so an end-of-job report
+  step is a belt, not the only way - v18's "the API gives a tail only" was too pessimistic;
+  (c) `bash -e` kills a `( ... ) &` sampler on its first non-match, and a sampled value read with
+  `head -1` can belong to the PREVIOUS container (both cost this session a wrong `vm=unseen` and
+  one impossible VM size); (d) a SECURITY fix owes a superseded note, a verification/docs release
+  does not - v1.2.9 claiming one would have been false; (e) START e names the three standing
+  blockers so they are asked once, not re-litigated.
+- **v19 · 2026-10-08** — session 14, logged late (session 15 noticed the line was missing).
+  (a) START b: check `main` HEAD against the last tag - a merged PR with no version-string bump
+  makes the tag stale, and the Windows suite run had verified untagged code without knowing it;
+  (b) WORK: after a version bump, re-verify rather than trusting a prior run under the old label;
+  (c) a newer agent CLI can add real new behaviour (codex-cli 0.161.0's trusted-directory check) -
+  test both ways before calling it a regression.
 - **v18 · 2026-10-08** — session 13 (cont.). (a) WORK: prove a runtime-specific fix ON that runtime, old vs
   new (the first stdin fix was green on runc and did nothing on Kata; E12 caught it); (b) CI evidence goes at
   the END of a job or in its own job - the API returns only a tail; (c) a hung session is stopped by polling +
