@@ -58,9 +58,14 @@ reason; if the reason no longer holds, delete the item instead of doing it.
 4. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
    in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
    step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
-5. **Local model:** waits on the user's Colab GGUF (lab notebook, GGUF + manifest outside any
-   workspace), then `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws>
-   aider-local` with a real task vs the untuned base in `outputs/qwen-base/`. Do not build a model store.
+5. **Local model - our own, trained in `notebook/`** (user call 2026-10-08: notebook in this repo, data
+   never committed). Step 1 DONE: `notebook/collect_data.ipynb` + `notebook/collect/` gather chat-format
+   JSONL from the user's git repos (commit -> diff), project files (docs/docstrings -> text/code), Claude /
+   ChatGPT exports, and licence-checked Hugging Face datasets; every record redacted; 14 stdlib tests run in
+   CI's static job. Not yet tried: a real Hub download (huggingface.co is blocked in cloud sessions) and a
+   real chat export. **Next:** the user runs it on Colab (data to Drive), then step 2 - a training notebook
+   (LoRA on Qwen2.5-Coder-1.5B -> merge -> GGUF q8_0 + `warden-model-lab/manifest/1`), then
+   `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` vs the untuned base.
 6. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
    cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
    in the mount guard (needs an is-it-a-mountpoint heuristic); SNI peek-and-splice (needs an
@@ -255,6 +260,17 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-10-08 — session 13 (cont. 2) · notebook/: data collection for our own model
+- **Did:** the user asked for a `notebook/` folder to train our own AI and to collect data today. Found the
+  2026-09-16 decision that notebook + data live in a separate private repo; asked: notebook here, data never
+  committed; all four sources. Built `notebook/collect/` (common/redact, from_git, from_files, from_chats,
+  from_hf, build) and `collect_data.ipynb` (14 cells, Colab + Drive). 14 tests; a mutation (redact() doing
+  nothing) failed 4 of them; every notebook cell executed against this checkout (215 records, 0 secret-shaped
+  strings left); `.gitignore` proven with `git check-ignore`. Trailers (Co-Authored-By) were leaking into
+  prompts - stripped, tested.
+- **Learned:** the generic "token = ..." rule over-redacted real code (`token = get_token()`); only literal
+  values are secrets. A leak re-scan must strip the markers first, or it flags its own `<REDACTED:...>`.
 
 ### 2026-10-08 — session 13 (cont.) · v1.2.7: E11, E12, Kata supported
 - **Did:** the user returned (context 18%, weekly 59% → stop 70%) and said continue. v1.2.6 still

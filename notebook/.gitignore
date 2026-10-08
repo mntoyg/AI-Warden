@@ -1,0 +1,11 @@
+# Training data can hold your private code and chats, and this repo is public.
+# Nothing collected or trained here is ever committed.
+data/
+outputs/
+*.jsonl
+*.gguf
+*.safetensors
+*.bin
+conversations.json
+__pycache__/
+.ipynb_checkpoints/

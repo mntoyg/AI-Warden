@@ -67,6 +67,12 @@ jobs:
           pull hadolint/hadolint:latest
           pull zricethezav/gitleaks:latest
 
+      # Collectors for the self-trained model's data (notebook/). Stdlib only,
+      # no network; the redaction tests are the ones that matter - training
+      # data can come back out of the model word for word.
+      - name: notebook collectors (unit tests)
+        run: cd notebook && python3 -m unittest discover -s . -p 'test_*.py' -v
+
       - name: shellcheck
         run: |
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
