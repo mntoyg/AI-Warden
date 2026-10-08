@@ -281,7 +281,7 @@ workflow ชั่วคราวติดตั้ง Kata แบบ static แ
 | `--pid container:<agent>` | sentinel แบบ Kata ได้ VM และ PID namespace ของตัวเอง; **container แบบ runc ที่ขอแชร์ PID namespace กับ container ของ Kata ได้ PID namespace ของโฮสต์** (เห็น dockerd, qemu ฯลฯ) | **sentinel กักไม่ได้** — มันตรวจเจอว่าตัวเองเป็น PID 1 ของ namespace ตัวเองและบอก `NOT armed` (self-proof ตั้งแต่ v1.2.4 ใช้ได้กับ Kata โดยไม่ต้องแก้) ห้ามสร้าง witness แบบ runc ด้วย `--pid container:` ใต้ Kata |
 | inotify ข้าม container | watcher ใน Kata ไม่ได้ยินการเปิดไฟล์จาก container อื่นเลย (0 event); watcher แบบ **runc** บนโฮสต์ได้ยินการอ่านของ agent ใน Kata (OPEN + ACCESS ผ่าน virtiofsd) | inline tripwire (VM เดียวกับ agent) ใช้ได้; witness แบบตรวจจับอย่างเดียวฝั่ง runc เป็นไปได้เหมือน gVisor |
 | `--pids-limit` / fork | `--pids-limit 512` **ไม่บังคับอะไรใน guest** (fork ได้ครบ 700); `--ulimit nproc=512` บังคับจริง (fork 511 แล้ว EAGAIN) | CLI ตั้ง nproc 512 ทุก session อยู่แล้ว จึงยังหยุด fork bomb ได้ |
-| stdin เมื่อไม่มี `-i` | runc ให้ `/dev/null` (EOF) แต่ Kata ให้ **pipe ที่ไม่มีวันปิด** — aider ค้างตลอดกาลที่คำถาม first-run (`anon_pipe_read`) ทำให้ suite ค้างใน phase I | ตั้งแต่ v1.2.7 CLI ส่ง `-i` + `/dev/null` เมื่อไม่ได้อยู่บน TTY (drill E12) |
+| stdin เมื่อไม่มี `-i` | runc ให้ `/dev/null` (EOF) แต่ Kata ให้ **pipe ที่ไม่มีวันปิด** — aider ค้างตลอดกาลที่คำถาม first-run (`anon_pipe_read`) ทำให้ suite ค้างใน phase I | ตั้งแต่ v1.2.7 session ที่ไม่ได้อยู่บน TTY ได้ `</dev/null` จาก entrypoint ในกรง (`docker run -i` + `/dev/null` ไม่ได้ผล: Kata ไม่ส่ง EOF ต่อ) — drill E12 |
 
 **สิ่งที่ต้องยอมรับถ้าเลือก Kata:** เหมือน gVisor — ได้ขอบเขต VM แต่ **เสีย sentinel** ชุดทดสอบทั้งชุดใต้ Kata ยังไม่เคยรันจบ
 (ก่อนแก้ stdin ค้างใน phase I) จึงยังไม่ประกาศว่ารองรับ

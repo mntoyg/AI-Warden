@@ -19,8 +19,10 @@
 
 - **ใต้ Kata session ที่ไม่ใช่ interactive ค้างตลอดกาลเมื่อ agent ถามอะไรก็ตาม:** ถ้าไม่มี `-i` runc ให้ `/dev/null` เป็น stdin
   (EOF) แต่ Kata ให้ pipe ที่ไม่มีวันปิด — aider ค้างที่คำถาม first-run (`anon_pipe_read`, วัดบน runner) ทำให้ชุดทดสอบใต้ Kata
-  ค้างใน phase I ทุกครั้ง ตอนนี้ CLI ส่ง `-i` และป้อน `/dev/null` เมื่อไม่ได้อยู่บน TTY: agent ได้ EOF ทันทีทุก runtime
-  เหมือนที่ runc ให้มาตลอด (session แบบ `-it` ไม่เปลี่ยน) drill ใหม่ **E12**
+  ค้างใน phase I ทุกครั้ง ตอนนี้เมื่อไม่ได้อยู่บน TTY CLI ส่ง `WARDEN_STDIN=closed` และ entrypoint รัน agent ด้วย
+  `</dev/null` จากในกรง: agent ได้ EOF ทันทีทุก runtime เหมือนที่ runc ให้มาตลอด (session แบบ `-it` ไม่เปลี่ยน)
+  ลองแบบ `docker run -i ... </dev/null` ก่อนแล้ว **ไม่ได้ผล** — Kata ไม่ส่ง EOF ต่อ (E12 ยัง timeout) drill ใหม่ **E12**
+  ต้อง rebuild agent image
 
 ### Docs
 

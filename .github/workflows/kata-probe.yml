@@ -69,7 +69,7 @@ jobs:
           for cli in warden-cli-old.sh warden-cli.sh; do
             ws="$PWD/workspaces/e12-${cli%.sh}"; mkdir -p "$ws"; chmod 0777 "$ws"
             s=$(date +%s)
-            out="$(WARDEN_RUNTIME=kata NO_COLOR=1 timeout 120 ./scripts/$cli run "$ws" bash -- -c \
+            out="$(WARDEN_RUNTIME=kata NO_COLOR=1 timeout -k 10 120 ./scripts/$cli run "$ws" bash -- -c \
               'if read -r -t 15 line; then echo "stdin: got data"; else echo "stdin: rc=$?"; fi' < /dev/null 2>&1)"; rc=$?
             echo "[$cli] rc=${rc} after $(( $(date +%s) - s )) s: $(printf '%s\n' "$out" | grep -E '^stdin:' | tr '\n' ' ')"
           done
@@ -80,8 +80,17 @@ jobs:
           ws="$PWD/workspaces/h-kata"; mkdir -p "$ws"; chmod 0777 "$ws"
           s=$(date +%s)
           rc=0
-          WARDEN_RUNTIME=kata WARDEN_MODEL_MANIFEST=/tmp/m/manifest.json NO_COLOR=1 timeout 300 \
-            ./scripts/warden-cli.sh run "$ws" aider-local -- --no-git --exit --verbose > /tmp/h.log 2>&1 || rc=$?
+          ( WARDEN_RUNTIME=kata WARDEN_MODEL_MANIFEST=/tmp/m/manifest.json NO_COLOR=1 \
+              ./scripts/warden-cli.sh run "$ws" aider-local -- --no-git --exit --verbose > /tmp/h.log 2>&1; \
+            echo "$?" > /tmp/h.rc ) &
+          cli=$!
+          for i in $(seq 1 60); do kill -0 "$cli" 2>/dev/null || break; sleep 5; done
+          if kill -0 "$cli" 2>/dev/null; then
+            echo "HUNG: still running after 300 s - removing its containers"
+            docker ps --format "{{.Names}}" | grep "^warden-sbx-h-kata" | xargs -r docker rm -f >/dev/null
+            wait "$cli" 2>/dev/null || true
+          fi
+          rc="$(cat /tmp/h.rc 2>/dev/null || echo none)"
           echo "aider-local under kata: rc=${rc} after $(( $(date +%s) - s )) s"
           grep -E '^Model:|max_input_tokens|githubusercontent|session ended|exited with code' /tmp/h.log | cut -c1-160
 
