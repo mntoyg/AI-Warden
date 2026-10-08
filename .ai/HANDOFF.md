@@ -4,30 +4,29 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-10-08 (session 13 cont., cloud Linux container)
-- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (`7a577d8`, PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v18)
+- **Last updated:** 2026-10-08 (session 14, Windows box)
+- **Latest release:** [v1.2.8](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.8) — PID 1's own log line no longer claims the tripwire sent SIGUSR1 when the agent could have forged the breach record itself (extends E11 to the entrypoint, PR #4). On top of v1.2.7 (breach headline only when the sentinel confirms, E11; stdin EOF under Kata, E12; Kata supported with limits) and v1.2.6 (proxy DNS exfiltration closed, L; inotify overflow, E9; sentinel-only record, E10; UNVERIFIED dirs). All three were merged on `main` by cloud sessions 12/13 but left untagged (their git proxy refused tag pushes, HTTP 403); tagged, released and verified on Docker Desktop this session (v1.2.8 twice - once to confirm the merged fix, again after bumping the stale version strings). v1.0.0–v1.2.7 carry a superseded note.
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v19)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
 
 ---
 
-## 1. Status (verified 2026-10-07, session 13)
+## 1. Status (verified 2026-10-08, session 14, Windows box)
 
 | Thing | State |
 |---|---|
-| `main` | v1.2.7 = merge of PR #3 (E11, E12, Kata CI job, version 1.2.7) on top of `9d265d0` (v1.2.6). **Tags `v1.2.6` and `v1.2.7` missing on origin** (git proxy 403 on tag push) |
-| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning · `v1.2.5` still Latest, WITHOUT its superseded note (text drafted in session 13: `v125-note.md`) |
-| CI | **5 jobs** since PR #3: static · CVE scan · ext4 drills · gVisor (runsc) drills · **Kata Containers drills**. Real-image proofs: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (kata-probe 37711877983) |
-| Local suite (Docker Desktop / Windows) | last run on **v1.2.5** (A–K PASS, `enforced=4/7`). **v1.2.6 never run there**: phase L, E9, E10 and self-test 3b2 have never met Docker Desktop (3b2 = its DNS). First job on the Windows box |
-| CI suite, ext4 / gVisor | ext4: all phases A–L, `enforced=7/7`. gVisor: as v1.2.5 (D = honest SKIP, sentinel `NOT armed`) |
-| Kata | **supported with limits since v1.2.7** (user call 2026-10-08): full suite passed under kata (kata-probe run 37711877983, 423 s) after the stdin fix; CI job `Kata Containers drills` added in PR #3. Sentinel honestly `NOT armed`; `--pids-limit` does not bound guest processes, nproc 512 does. Probe workflow kept at `.ai/kata-probe.yml` |
-| Egress audit trail | unchecked since session 11 (cloud sessions have no Docker Desktop). `up` heals it |
-| Local model | unchanged: no trained GGUF (last checked 2026-09-27) |
-| OpenAI key | out of credit at last check (2026-09-27); session 12 heard it would be topped up for the demo — unknown now |
-| Temporary branches | `kata-probe`, `verify-s12`, `claude/wizardly-edison-9pzqzk` still on origin (merged or probe-only) |
-| Cloud sessions | `dockerd` starts as root; Docker Hub pulls work; deb.debian.org is blocked (session 12) → no image builds; push + API work in session 13 |
+| `main` | v1.2.8 = PR #4 (E11 extended to PID 1's log line) on top of PR #3 (v1.2.7: E11, E12, Kata CI job) on top of `9d265d0` (v1.2.6), plus PRs #5-#8 (notebook/ data collection + training, see item 2). `main` fast-forwarded here from 73 commits behind at session start. Version strings were bumped to 1.2.8 this session - PR #4's fix was merged under `[Unreleased]` with the code still saying 1.2.7 |
+| Tags | `v1.0.0`…`v1.2.7` carry a superseded warning · **`v1.2.8` (Latest)**. v1.2.6, v1.2.7 and v1.2.8 all tagged + released THIS session (`git tag -a ...; git push origin ...` from the Windows box - the cloud sessions' git proxy had refused this with 403) |
+| CI | **5 jobs**: static · CVE scan · ext4 drills · gVisor (runsc) drills · Kata Containers drills. Green on all three new tags and on `main` through PR #8. Real-image proofs from sessions 12/13: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (37711877983) |
+| Local suite (Docker Desktop / Windows) | **run on Docker Desktop for the first time this session, twice**: rebuilt `--pull` (codex-cli 0.156.1 → **0.161.0**; claude 2.1.197 and aider 0.86.2 unchanged), full `verify-isolation.sh` A–L exit 0, `enforced=4/7` on the v1.2.7-era code; after the version bump, rebuilt (cached, fast) and ran again clean on v1.2.8 (35 passed in the self-test, was 34). **3b2, L, E9, E10, E11, E12 all PASS on Docker Desktop for the first time** (previously CI-only). `docs/VERIFICATION.md` §0 re-quoted from the v1.2.8 run |
+| Real codex path | **confirmed working on codex-cli 0.161.0**: login from `OPENAI_API_KEY` OK, `sandbox_mode=danger-full-access` OK, reached api.openai.com - but every prompt returns `ERROR: Quota exceeded`. Not a sandbox fault (same as session 10). Needs a workspace that is a git repo - 0.161.0 added a trusted-directory check (`--skip-git-repo-check` exists but unneeded for a real project folder, which is always a git repo) |
+| CI suite, ext4 / gVisor / Kata | unchanged from sessions 12-13: ext4 `enforced=7/7` all phases; gVisor D = honest SKIP, sentinel `NOT armed`; Kata supported with limits, same tradeoff, CI job green |
+| Egress audit trail | live (`up` healed it at session start, same as every session) |
+| Local model | unchanged: no trained GGUF locally. `notebook/` (collect + train) merged to main this session (PRs #5-#8, user's Colab run in progress/result not seen here) |
+| OpenAI key | **still out of credit** (confirmed again this session via a real codex call) - ask the user to top up, do not debug further |
+| Temporary branches | `kata-probe`, `verify-s12`, `claude/wizardly-edison-9pzqzk` deleted this session (user had already agreed 2026-10-08; cloud session's API delete was refused, this session's `git push --delete` worked) |
 
 ---
 ## 2. Next steps — priority order
@@ -36,49 +35,38 @@ Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 `.ai/ROADMAP.md` (Thai, session 12) gives the phase view; this list wins where they differ.
 
-0. **Tag v1.2.6 and v1.2.7, then release both** (`git ls-remote --tags origin`). v1.2.6 = `9d265d0`
-   (release notes drafted in session 13: `release-v1.2.6.md`, plus a superseded note for v1.2.5);
-   v1.2.7 = the merge commit of PR #3 (notes: CHANGELOG 1.2.7). On the Windows box:
-   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 7a577d8 -m ...; git push origin v1.2.6 v1.2.7`,
-   wait for CI on both tags, publish, mark v1.2.5 and v1.2.6 superseded. Security fixes are not shipped until tagged.
-1. **Run v1.2.7 on the Windows box** (both releases shipped on CI evidence only).
-   `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex path with a
-   honeypot read (expect 99; `Quota exceeded` = credit, ask), then `./scripts/verify-isolation.sh` A–L on
-   Docker Desktop: exit 0, `enforced=4/7`, and **3b2, L, E9, E10, E11, E12 pass** - none has met Docker
-   Desktop. E11 changes what a home-canary breach prints there (`SECURITY BREACH (unconfirmed)` when only
-   the inline monitor saw it) - check DEMO.md act 3 still matches a real take. Then re-quote
-   `docs/VERIFICATION.md` from that one run. A failure there is a v1.2.8 fix, not a note.
-2. **Ship the Unreleased entrypoint fix as v1.2.8** (done in PR #4, user call 2026-10-08): PID 1 logs
-   "SIGUSR1 received with a breach record present (written inside the agent's reach)" instead of "from the
-   canary tripwire"; E11 checks it (negative CI 37714927464 failed ext4/gVisor/Kata, fix 37714975701 green on
-   all 5). Bump to 1.2.8 + CHANGELOG date when tagging; it needs an agent-image rebuild.
-3. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
+0. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
    watcher heard the Kata agent's reads via virtiofsd) - but NOT via `--pid container:`, which gave a
    runc container the HOST PID namespace. `--memory` under Kata is unmeasured (the VM had `-m 2G`).
-4. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
+1. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
    in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
-   step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
-5. **Local model - our own, trained in `notebook/`** (user call 2026-10-08: notebook in this repo, data
+   step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day. Blocked separately on OpenAI
+   credit (session 14 re-confirmed `Quota exceeded` through a real codex call - ask, don't debug).
+2. **Local model - our own, trained in `notebook/`** (user call 2026-10-08: notebook in this repo, data
    never committed). Step 1 DONE: `notebook/collect_data.ipynb` + `notebook/collect/` gather chat-format
    JSONL from the user's git repos (commit -> diff), project files (docs/docstrings -> text/code), Claude /
    ChatGPT exports, and licence-checked Hugging Face datasets; every record redacted; 14 stdlib tests run in
-   CI's static job. Not yet tried: a real Hub download (huggingface.co is blocked in cloud sessions) and a
-   real chat export. The user ran it on Colab (2026-10-08, result not seen here). Step 2 WRITTEN, never run on
-   a GPU: `notebook/train.ipynb` (LoRA on Qwen2.5-Coder-1.5B, SMOKE=True first -> merge -> GGUF q8_0 +
-   `warden-model-lab/manifest/1`, whose parsing a test checks with the CLI's own sed lines). **Next:** the
-   user runs it (smoke, then full), downloads the model dir outside any workspace, then
+   CI's static job. Step 2 WRITTEN (`notebook/train.ipynb`, LoRA on Qwen2.5-Coder-1.5B, SMOKE=True first ->
+   merge -> GGUF q8_0 + `warden-model-lab/manifest/1`), merged through PR #7/#8 (torchao removed before peft
+   builds LoRA layers - a real Colab run hit this). **Next:** the user runs it (smoke, then full) on Colab,
+   downloads the model dir outside any workspace, then
    `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` vs the untuned base.
-6. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
+3. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
    cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
    in the mount guard (needs an is-it-a-mountpoint heuristic); SNI peek-and-splice (needs an
    OpenSSL squid build).
-7. **Housekeeping:** delete origin branches `kata-probe`, `verify-s12`,
-   `claude/wizardly-edison-9pzqzk` once the user agrees (session 12's git proxy refused the delete).
-   The user agreed (2026-10-08); the API delete was refused by the session proxy ("Write access to this
-   GitHub API path is not permitted"), so the user deletes them in the GitHub UI. Check `git branch -r`.
 
 ### Decided this session (do not re-raise without new evidence)
 
+- **v1.2.6 and v1.2.7 are tagged + released from the Windows box** (session 14): both were merged
+  to `main` by cloud sessions 12/13 but left untagged because their git proxy refused tag pushes
+  (403). This session has real write access, so both were tagged at their merge commits
+  (`9d265d0`, `7a577d8`), pushed, CI confirmed green, and released with superseded notes on the
+  predecessors. v1.2.8 followed immediately: `main` already had PR #4's entrypoint fix merged
+  under `[Unreleased]` with the version strings still saying 1.2.7, so the Windows run that was
+  Next steps #1 (build --pull, real codex path, full suite) was done against code one commit
+  past the v1.2.7 tag. Rather than verify a stale tag, bumped to 1.2.8, re-verified, and shipped
+  that instead - the version string now matches what was actually tested.
 - **v1.2.6 ships from a cloud session on CI evidence** (user call 2026-10-07): v1.2.5's DNS
   channel was confirmed on its real image and the repo is public, so waiting for the Windows box
   was worse than shipping with "not yet run on Docker Desktop" written in the release. The Windows
@@ -262,6 +250,33 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-10-08 — session 14 · Windows box · v1.2.6/v1.2.7/v1.2.8 tagged, released and verified
+- **Did:** `main` was 73 commits behind origin (fast-forwarded, clean - no local-only work). `git ls-remote
+  --tags` confirmed v1.2.6 and v1.2.7 were merged but untagged, exactly as sessions 12/13 left them - this
+  session has real write access (`git push --dry-run` succeeded), so tagged both at their merge commits
+  (`9d265d0`, `7a577d8`), pushed, waited for CI green on both, published releases with drafted notes, marked
+  v1.2.5 and v1.2.6 superseded. Deleted the three agreed-stray branches (`kata-probe`, `verify-s12`,
+  `claude/wizardly-edison-9pzqzk`) that the cloud session's API delete had refused. Started Docker Desktop,
+  rebuilt `--pull` (codex-cli 0.156.1 → 0.161.0, claude/aider unchanged). Ran the real codex path: with a
+  non-git scratch workspace it refused ("Not inside a trusted directory" - 0.161.0's new check, not a warden
+  bug); with a git-initialized workspace (what every real project is) it logged in, launched with
+  `sandbox_mode=danger-full-access`, reached api.openai.com, and hit `Quota exceeded` - same unresolved
+  credit issue as session 10, confirmed again rather than assumed. Ran the full `verify-isolation.sh` suite
+  on Docker Desktop for the first time against this code line: A–L exit 0, `enforced=4/7`, and - for the
+  first time ever on Docker Desktop rather than CI only - 3b2, L, E9, E10, E11 and E12 all passed. While
+  re-quoting `docs/VERIFICATION.md` from that run, noticed the version strings (CLI, entrypoint, monitor)
+  still said 1.2.7 even though `main` HEAD already carried PR #4's entrypoint fix under `[Unreleased]` -
+  the Windows run had therefore verified code one commit past the v1.2.7 tag, unlabelled. Bumped to 1.2.8,
+  turned CHANGELOG's `[Unreleased]` into `[1.2.8]`, rebuilt (cache-fast), re-ran the full suite clean a
+  second time (self-test 35 passed, was 34), tagged and released v1.2.8 as Latest, marked v1.2.7 superseded.
+- **Learned:** a tag can go stale the moment a later PR merges without a version bump - "done means run"
+  has to include checking the version string actually matches what the suite just verified, not just that
+  the suite passed. codex-cli 0.161.0's git-repo-trust check is a real behaviour change but not a bug to
+  chase: every real `warden-cli.sh run <project>` target is already a git repo, so it never fires in
+  practice - confirmed by testing both ways instead of assuming either.
+- **Prompt should have said:** after a version-string bump driven by a merged-but-unlabelled fix, re-run
+  the suite before tagging rather than trusting the previous run's result under the old label.
 
 ### 2026-10-08 — session 13 (cont. 2) · notebook/: data collection for our own model
 - **Did:** the user asked for a `notebook/` folder to train our own AI and to collect data today. Found the

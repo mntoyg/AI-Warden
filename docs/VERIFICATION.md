@@ -34,6 +34,7 @@
   [PASS] no host private keys reachable
   [PASS] no direct TCP egress (the sandbox network is internal)
   [PASS] external DNS resolvers are unreachable
+  [PASS] Docker's resolver answers the proxy's name but not external names - no DNS tunnel
   [PASS] egress proxy reachable at warden-egress-proxy:3128
   [PASS] allowlisted host api.anthropic.com reachable through the proxy (HTTP 401)
   [PASS] allowlisted host registry.npmjs.org reachable (HTTP 200)
@@ -49,7 +50,7 @@
   [PASS] memory is capped in the cgroup (memory.max=2147483648)
   [PASS] swap is disabled (memory.swap.max=0) - the memory cap can't be sidestepped
   [PASS] process count is capped (pids.max=256) - fork bombs are bounded
-  34 passed, 0 failed, 0 skipped
+  35 passed, 0 failed, 0 skipped
   PASS phase A: every isolation assertion held
 
 ================= PHASE B: live breach drill ====================
@@ -69,11 +70,15 @@
   PASS phase E1: breach contained (99); report refused the symlink and was preserved as a tamper-tagged fallback
   PASS phase E2: breach contained (99) and the injected escape sequences were neutralised (?[2K) in the log
   PASS phase E2b: a newline in the reader's exe path was neutralised (?) - no forged log line
+  PASS phase E9: queue overflowed while the canary was read - the monitor tripped on the lost events (99)
+  PASS phase E10: sentinel-only breach contained (99) and recorded (1 report(s)), not called forged
   PASS phase E3: every unsafe mount target was refused and a legitimate project dir was accepted
   PASS phase E4: the seeder refused to write through the dangling symlink (target never created)
   PASS phase E5: the impersonating reader was contained (99) and named by its open descriptor (attribution=complete)
   PASS phase E6: breach contained (99); its own report was written beside the pre-existing one, which was left untouched, and both the CLI and 'status' named the new one
   PASS phase E7: a self-sent SIGUSR1 still ends the session (99) but is reported as unrecorded, not as a tripwire breach
+  PASS phase E11: a report written inside the agent's reach, with no sentinel confirmation, is headlined as unconfirmed (99, report listed)
+  PASS phase E12: a non-interactive session read EOF on stdin at once (read rc=1, not a timeout)
   PASS phase E8: with df failing, doctor says it could not measure disk space instead of passing it
 
 =========== PHASE F: runtime fail-closed (gVisor plumbing) ==========
@@ -121,6 +126,10 @@
   PASS phase K: the sandbox said the sentinel is NOT armed, with its reason
   PASS phase K: the CLI reported it from the sentinel's own log
   PASS phase K: the session still ran, guarded by the in-sandbox tripwire (rc=0)
+
+======== PHASE L: the proxy resolves only allowlisted names =========
+  PASS phase L: a CONNECT to a non-allowlisted name was refused (403) without a DNS lookup
+  PASS phase L: an allowlisted name that resolves into the LAN (10.1.2.3) is still refused
 
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
