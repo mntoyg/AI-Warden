@@ -6,6 +6,13 @@
 
 ## [Unreleased]
 
+### Security
+
+- **entrypoint (PID 1) ไม่อ้างว่า tripwire เป็นคนส่ง SIGUSR1:** เมื่อมี breach record อยู่ entrypoint เคย log ว่า
+  `SIGUSR1 received from the canary tripwire` แต่ทั้ง `breach.flag` และ workspace อยู่ในมือ agent และ agent ส่งสัญญาณเองได้
+  ตอนนี้ log ว่า `SIGUSR1 received with a breach record present (written inside the agent's reach)` — ต่อจาก E11 ที่แก้พาดหัวของ CLI
+  drill **E11** ตรวจบรรทัดนี้ด้วย (ผู้ใช้เลือกทางแก้ 2026-10-08) ต้อง rebuild agent image
+
 ## [1.2.7] — 2026-10-08
 
 **security/fix: พาดหัว breach ตามหลักฐาน (E11) · session ที่ไม่ใช่ interactive ไม่ค้างใต้ Kata อีก (E12)**
