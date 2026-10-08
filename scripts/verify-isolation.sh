@@ -2,7 +2,7 @@
 # =============================================================================
 #  AI Warden - Isolation Verification Suite (host driver)
 # -----------------------------------------------------------------------------
-#  Proves the sandbox actually does what the README claims. Eleven phases:
+#  Proves the sandbox actually does what the README claims. Thirteen phases:
 #
 #    A. In-sandbox self-test  - privilege containment, host isolation, egress
 #                               filtering and canary arming, asserted from the
@@ -48,6 +48,10 @@
 #    L. Proxy DNS               - the egress proxy must refuse a non-allowlisted
 #                               name without resolving it (a logging fake DNS
 #                               sees every lookup): no DNS exfiltration.
+#    M. Memory cap (measured)  - phase A only READS memory.max off the cgroup;
+#                               here a container allocates past --memory and
+#                               must be stopped below it, with an uncapped
+#                               control proving the allocator can get there.
 #
 #  Usage:  ./scripts/verify-isolation.sh [--keep] [--no-breach] [--no-sentinel]
 # =============================================================================
@@ -73,7 +77,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,43p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,57p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -124,6 +128,7 @@ E9_VAULT="warden-verify-e9-vault-$$"
 
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
+        warden-verify-m-free warden-verify-m-cap \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e9 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt warden-verify-i0 warden-verify-h-busy \
@@ -1686,6 +1691,68 @@ else
     else
         l_fail "an allowlisted name resolving to 10.1.2.3 was not refused (queried: $(l_saw "$L_REBIND"), refused: $(l_denied "$L_REBIND"))"
     fi
+fi
+
+# =============================================================================
+printf '\n%s===== PHASE M: the memory cap is enforced, not just labelled =====%s\n' "$C_BOLD" "$C_RESET"
+# =============================================================================
+# Phase A asks the cgroup whether memory.max is set. That is a label, and this
+# project's recurring defect is a control that reports itself armed while
+# enforcing nothing: under a VM or a user-space runtime the guest cgroup can
+# read "capped" while the allocation it is supposed to stop goes through (under
+# Kata the VM's own size, not --memory, bounded a session - unmeasured until
+# this phase). So the cap is measured: a container allocates past it, and the
+# last chunk it managed to touch is the answer. The UNCAPPED control runs first
+# - without it an allocator that failed for any other reason would look like
+# enforcement.
+M_CAP_MIB=256
+M_TARGET_MIB=768
+m_fail() { bad "phase M: $*"; PHASE_FAILURES=$((PHASE_FAILURES + 1)); }
+info "allocating ${M_TARGET_MIB} MiB against a ${M_CAP_MIB} MiB cap (measured, not read off the cgroup)"
+printf '\n'
+cp "${SCRIPT_DIR}/drill-alloc-memory.py" "${VERIFY_WS}/.warden-alloc.py"
+chmod 0644 "${VERIFY_WS}/.warden-alloc.py" 2>/dev/null || true
+m_base=(
+    "${VERIFY_RT[@]}"
+    --network "$INTERNAL_NET"
+    --user 1001:1001
+    --workdir /workspace
+    --cap-drop=ALL
+    --security-opt no-new-privileges:true
+    --pids-limit 256
+    --entrypoint python3
+    -v "${VERIFY_WS_MOUNT}:/workspace:ro"
+)
+# One measurement per clean container, and no --rm: a cgroup kill is a SIGKILL,
+# so the container's own exit code and OOMKilled flag are evidence the process
+# cannot report about itself.
+m_measure() {
+    local name="$1"; shift
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    M_OUT="$(docker run "${m_base[@]}" "$@" --name "$name" "$AGENT_IMAGE" \
+        -u /workspace/.warden-alloc.py "$M_TARGET_MIB" 2>&1)"
+    M_HIGH="$(printf '%s\n' "$M_OUT" | sed -n 's/^alloc \([0-9]*\) MiB$/\1/p' | tail -1)"
+    M_HIGH="${M_HIGH:-0}"
+    M_LABEL="$(printf '%s\n' "$M_OUT" | sed -n 's|^label /sys/fs/cgroup/memory.max ||p' | tail -1)"
+    M_STATE="$(docker inspect -f 'exit={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}}' "$name" 2>/dev/null)"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+}
+
+m_measure warden-verify-m-free
+m_free_high="$M_HIGH"; m_free_state="$M_STATE"; m_free_label="${M_LABEL:-unreadable}"; m_free_out="$M_OUT"
+m_measure warden-verify-m-cap --memory "${M_CAP_MIB}m" --memory-swap "${M_CAP_MIB}m"
+m_cap_high="$M_HIGH"; m_cap_state="$M_STATE"; m_cap_label="${M_LABEL:-unreadable}"
+
+note "  uncapped: ${m_free_high} MiB (${m_free_state:-no container state}), memory.max=${m_free_label}"
+note "  capped:   ${m_cap_high} MiB (${m_cap_state:-no container state}), memory.max=${m_cap_label}"
+
+if [ "$m_free_high" -lt "$M_TARGET_MIB" ]; then
+    m_fail "the uncapped control reached only ${m_free_high} MiB of ${M_TARGET_MIB} - this host cannot stage the drill, so the capped run proves nothing"
+    printf '%s\n' "$m_free_out" | grep -vE '^alloc [0-9]+ MiB$' | head -5 | sed 's/^/         /'
+elif [ "$m_cap_high" -lt "$M_CAP_MIB" ]; then
+    good "phase M: --memory ${M_CAP_MIB}m stopped the allocator at ${m_cap_high} MiB while the uncapped control took ${m_free_high} MiB"
+else
+    m_fail "--memory ${M_CAP_MIB}m enforced nothing: the allocator reached ${m_cap_high} MiB (${m_cap_state}) inside a cgroup that says memory.max=${m_cap_label}"
 fi
 
 # =============================================================================

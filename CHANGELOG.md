@@ -4,6 +4,47 @@
 
 ---
 
+## [1.2.9] — 2026-10-08
+
+**verification: เพดานหน่วยความจำถูก *วัด* ไม่ใช่อ่านจาก label (phase M) + ตัวเลขจริงของ Kata/gVisor**
+
+ไม่ใช่ security fix — ไม่มีพฤติกรรมของกรงเปลี่ยน แต่ชุดทดสอบอ้างอะไรได้เปลี่ยน
+(ต้อง rebuild agent image เพื่อให้ banner ตรงกับเวอร์ชันที่รันผ่าน: `./scripts/warden-cli.sh build`)
+
+### Added
+
+- **phase M — เพดานหน่วยความจำที่วัดจริง:** phase A แค่ *อ่าน* `/sys/fs/cgroup/memory.max` แล้วบอกว่า
+  `memory is capped` ซึ่งเป็น label ไม่ใช่การบังคับ — รูปทรงบั๊กประจำของโปรเจกต์นี้ (ตัวควบคุมที่รายงานว่าตัวเอง
+  armed ทั้งที่ไม่ได้บังคับอะไร) เฟสใหม่จองหน่วยความจำทะลุ `--memory` ด้วย `scripts/drill-alloc-memory.py`
+  (ทีละ 16 MiB และ **แตะทุกหน้า** เพราะ `bytearray(n)` อาจไม่แตะจริง) บรรทัด `alloc N MiB` สุดท้ายคือผลวัด
+  เพราะ cgroup ฆ่าด้วย SIGKILL — process ไม่มีโอกาสรายงานการตายของตัวเอง ใบ **ไม่มี cap รันก่อน**
+  เป็น positive control (ถ้าไม่มีใบนี้ allocator ที่ล้มเพราะเหตุอื่นจะดูเหมือนการบังคับ)
+- `scripts/drill-alloc-memory.py` — ตัวช่วยของ phase M (ไม่ได้อยู่ใน image ใด)
+
+### Measured
+
+วัดบน 3 runtime (local Docker Desktop + branch ชั่วคราว `kata-memcap-probe`, CI run 37749560187 / 37751167935)
+ด้วย allocator ตัวเดียวกัน จอง 16 MiB ต่อครั้งและแตะทุกหน้า:
+
+| runtime | cap `256m` ใช้ได้จริง | cap `1024m` ใช้ได้จริง | overhead | `.State.OOMKilled` | `memory.max` ในกรง |
+|---|---|---|---|---|---|
+| runc (Docker Desktop) | 240 MiB | 1008 MiB | ~16 MiB | `true` | ตรงกับ cap |
+| runsc (gVisor, CI) | 208–224 MiB | 976 MiB | ~48 MiB | `true` | **ไม่มีไฟล์ให้อ่าน** |
+| kata (CI) | 144 MiB | 896 MiB | ~112–128 MiB | **`false`** | ตรงกับ cap |
+
+- **`--memory` บังคับจริงทั้งสามตัว** (ไม่มีกรณี label อ้างว่ามี cap แล้วไม่บังคับ) — ปิดคำถาม "`--memory` ใต้ Kata
+  ยังไม่ถูกวัด" ที่ค้างมาจาก session 13
+- Kata ตั้งขนาด VM = cap + 32 MiB (`-m 288M` / `-m 1056M`; ไม่ใส่ cap ได้ `-m 2G` ซึ่งเป็น default ของ Kata)
+  และ overhead เป็น **ค่าคงที่ ไม่ใช่สัดส่วน** จึงเพดาน default `4g` ของ CLI ยังเหลือให้ agent ~3.9 GiB
+- ใต้ Kata `exit=137` แต่ `OOMKilled=false` — guest kernel เป็นคนฆ่า โฮสต์ไม่เห็น **อย่าตัดสิน OOM จาก flag นี้**
+- ใต้ gVisor ไม่มี `/sys/fs/cgroup/memory.max` ในกรงเลย phase A จึงได้แค่ `skip` — การวัดจากข้างนอก (phase M)
+  เป็นหลักฐานเดียวที่พิสูจน์ได้ว่า cap ทำงาน
+
+### Fixed (docs)
+
+- README เคยบอกว่า "ชุดทดสอบมี 11 เฟส" และตารางหยุดที่ **K** — phase L (v1.2.6) ไม่เคยถูกเพิ่ม
+  ตอนนี้เป็น 13 เฟส มีทั้ง L และ M
+
 ## [1.2.8] — 2026-10-08
 
 ### Security

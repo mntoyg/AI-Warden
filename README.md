@@ -474,7 +474,7 @@ agent container is GONE - killed by the sentinel
 ./scripts/verify-isolation.sh
 ```
 
-ชุดทดสอบมี 11 เฟส (ต้องได้ exit 0):
+ชุดทดสอบมี 13 เฟส (ต้องได้ exit 0):
 
 | เฟส | ทดสอบอะไร | ผลที่ต้องได้ |
 |---|---|---|
@@ -489,6 +489,8 @@ agent container is GONE - killed by the sentinel
 | **I** | local-model session (`WARDEN_MODEL_MANIFEST`) กับโมเดลสาธารณะจิ๋ว: offline จริงทั้ง agent และ model, ไม่มี cloud key, endpoint อันตรายปิด, model server ไม่มีสิทธิ์, ไฟล์โมเดลถูกแก้ / manifest อยู่ใน workspace → ปฏิเสธ, ไม่เหลืออะไรค้างทั้งหลัง exit 0 และ 99 | ผ่านทุกข้อ, ปฏิเสธด้วย **exit 78** |
 | **J** | GPU model server (`WARDEN_MODEL_GPU=1`): ตัวตัดสินจาก log ต้องรับ offload ครบและปฏิเสธ CPU fallback / offload บางส่วน, GPU ไปที่ model server เท่านั้นไม่ใช่ agent, ยัง offline และไม่มีสิทธิ์เหมือน phase I — เครื่องที่มี GPU รันฝั่ง session จริง, เครื่องที่ไม่มี (CI) รันฝั่งปฏิเสธ แล้วพิมพ์ SKIP ให้อีกฝั่ง | offload ครบ หรือ **ปฏิเสธ** ไม่ตกไป CPU เงียบ ๆ |
 | **K** | sentinel พิสูจน์ตัวเอง — docker shim ตัด `--pid container:` ออกจาก sentinel (แบบที่ gVisor ทำ) แล้วดูว่าใครบอกอะไร (CI job gVisor รันของจริงด้วย `WARDEN_RUNTIME=runsc`) | ไม่มีคำว่า `armed out-of-band`, sandbox และ CLI บอก **NOT armed** พร้อมเหตุผล |
+| **L** | DNS ของ proxy — ชื่อที่ไม่อยู่ใน allowlist ต้องถูกปฏิเสธ **โดยไม่ resolve** (fake DNS ที่ log ทุก query เป็นพยาน) และชื่อใน allowlist ที่ชี้เข้า LAN ก็ยังถูกปฏิเสธ | 403 โดยไม่มี query ออกไปหา resolver — ไม่มีช่อง DNS exfiltration |
+| **M** | memory cap **ที่วัดจริง** — phase A แค่ *อ่าน* `memory.max` จาก cgroup ซึ่งเป็น label ไม่ใช่การบังคับ; เฟสนี้จองหน่วยความจำทะลุ `--memory` ใน container สะอาด 2 ใบ (ใบไม่มี cap รันก่อนเป็น positive control) | ใบที่มี cap ต้องถูกหยุด**ใต้**เพดาน ใบที่ไม่มี cap ต้องจองได้ถึงเป้า |
 
 อยากลองด้วยมือก็ได้:
 

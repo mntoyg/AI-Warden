@@ -131,6 +131,13 @@
   PASS phase L: a CONNECT to a non-allowlisted name was refused (403) without a DNS lookup
   PASS phase L: an allowlisted name that resolves into the LAN (10.1.2.3) is still refused
 
+===== PHASE M: the memory cap is enforced, not just labelled =====
+==> allocating 768 MiB against a 256 MiB cap (measured, not read off the cgroup)
+
+    uncapped: 768 MiB (exit=0 OOMKilled=false), memory.max=max
+    capped:   240 MiB (exit=137 OOMKilled=true), memory.max=268435456
+  PASS phase M: --memory 256m stopped the allocator at 240 MiB while the uncapped control took 768 MiB
+
 =========================== RESULT ==============================
   All phases passed. The sandbox is holding.
 ```
