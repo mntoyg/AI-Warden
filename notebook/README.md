@@ -4,6 +4,9 @@
 ผ่าน `aider-local` แบบ offline — ไม่ต้องจ่ายค่า API ภายนอก ฝั่ง AI Warden พร้อมแล้วตั้งแต่ v1.1.0/v1.2.0
 (`WARDEN_MODEL_MANIFEST=... ./scripts/warden-cli.sh run <ws> aider-local`, GPU ด้วย `WARDEN_MODEL_GPU=1`)
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mntoyg/AI-Warden/blob/main/notebook/collect_data.ipynb)
+— คลิกแล้ว Runtime → Run all ได้เลย (ค่าเริ่มต้นไม่ต้องแก้: repo AI-Warden + Magicoder 3000 ตัวอย่าง → Google Drive)
+
 | ขั้น | ไฟล์ | สถานะ |
 |---|---|---|
 | 1. เก็บข้อมูล | [`collect_data.ipynb`](collect_data.ipynb) + [`collect/`](collect/) | **พร้อมใช้** (2026-10-08) |
