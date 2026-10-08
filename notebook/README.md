@@ -10,7 +10,7 @@
 | ขั้น | ไฟล์ | สถานะ |
 |---|---|---|
 | 1. เก็บข้อมูล | [`collect_data.ipynb`](collect_data.ipynb) + [`collect/`](collect/) | **พร้อมใช้** (2026-10-08) |
-| 2. เทรน LoRA → merge → GGUF + manifest | notebook ถัดไป | ยังไม่ทำ |
+| 2. เทรน LoRA → merge → GGUF + manifest | [`train.ipynb`](train.ipynb) + [`train_utils.py`](train_utils.py) ([Open in Colab](https://colab.research.google.com/github/mntoyg/AI-Warden/blob/main/notebook/train.ipynb), T4 GPU) | **เขียนแล้ว ยังไม่เคยรันบน GPU** (2026-10-08) |
 | 3. รันใน AI Warden | `aider-local` | พร้อมแล้ว |
 
 ## กฎความเป็นส่วนตัว (repo นี้เป็น public)
@@ -58,10 +58,23 @@ python3 -m collect.build --out data --git ~/code/AI-Warden --files ~/code/AI-War
 python3 -m unittest discover -s . -p 'test_*.py'      # stdlib only, no network
 ```
 
+## เทรน (`train.ipynb`)
+
+- Qwen2.5-Coder-1.5B-Instruct (Apache-2.0), LoRA r=16 บนทุก projection, float32 + fp16 autocast (T4 ไม่มี bf16),
+  ตัวอย่างที่ยาวเกิน `MAX_LEN` ถูก**ทิ้ง** (ไม่ตัด เพราะตัดแล้วคำตอบหาย)
+- `SMOKE = True` (ค่าเริ่มต้น) = 30 step บน 200 ตัวอย่าง เพื่อลองท่อทั้งเส้น → ผ่านแล้วค่อย `SMOKE = False`
+- ตรวจ sha256 ของข้อมูลกับ `manifest.json` ของตอนเก็บก่อนเทรน (`verify_dataset`)
+- ผลลัพธ์: `<ชื่อ>-q8_0.gguf` + `manifest.json` ที่ AI Warden ตรวจ — test อ่าน manifest ด้วยบรรทัด `sed` **ตัวจริง**
+  จาก `scripts/warden-cli.sh` ถ้าฝั่งใดเปลี่ยน test จะพัง ไม่ใช่การรันครั้งแรกของคุณ
+- argument ของ TRL ที่เปลี่ยนชื่อระหว่างเวอร์ชัน (`max_seq_length`/`max_length`, `tokenizer`/`processing_class`,
+  `evaluation_strategy`/`eval_strategy`) ส่งตามที่เวอร์ชันที่ติดตั้งรับ — ไม่ pin เวอร์ชันที่อาจเน่า
+
 ## ผลที่วัดแล้ว (2026-10-08, session 13)
 
-- test 14 ข้อผ่าน และ **ล้มเมื่อทำให้ `redact()` ไม่ทำอะไร** (4 ข้อ FAIL) — test มีฟันจริง
+- test 18 ข้อผ่าน (collect 14 + train_utils 4) และ **ล้มเมื่อทำให้ `redact()` ไม่ทำอะไร** (4 ข้อ FAIL) หรือเปลี่ยนชื่อ
+  `gguf_sha256` ใน manifest (FAIL) — test มีฟันจริง
 - รัน notebook ทุก cell กับ repo นี้ (นอก Colab, ปิด HF): 215 record (docs 142, code 57, git 16 —
   clone นี้เป็น shallow 84 commit), สแกนรอบสอง `secret-shaped strings left: 0`
-- **ยังไม่ได้ลอง:** ดาวน์โหลดจาก Hugging Face จริง (session คลาวด์ถูก proxy ปฏิเสธ huggingface.co) และ
+- **ยังไม่ได้ลอง:** `train.ipynb` บน GPU จริง (ไม่มี GPU ใน session คลาวด์) — รันครั้งแรกด้วย `SMOKE = True`;
+  ดาวน์โหลดจาก Hugging Face จริง (session คลาวด์ถูก proxy ปฏิเสธ huggingface.co) และ
   export แชทจริง (ทดสอบด้วยไฟล์จำลองรูปแบบเดียวกัน) — ลองครั้งแรกบน Colab แล้วดูขั้นที่ 4 และ 6
