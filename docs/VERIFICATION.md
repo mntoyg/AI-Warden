@@ -139,8 +139,9 @@
     mem + swap:   496 MiB (exit=137 OOMKilled=true) with --memory-swap 512m
   PASS phase M (mem): --memory 256m stopped the allocator at 240 MiB while the uncapped control took 768 MiB
   PASS phase M (swap): swap is a real sidestep here - with --memory-swap 512m the same allocator reached 496 MiB, so the suite's EQUAL --memory-swap is what holds the cap, not the label
-    forks uncapped: 150 (exit=0 OOMKilled=false), pids.max=4096
-    forks nproc=64:  63 (exit=0 OOMKilled=false) - errno 11 Resource temporarily unavailable
+    forks uncapped:         150 (exit=0 OOMKilled=false), pids.max=4096
+    forks nproc=64:          63 (exit=0 OOMKilled=false) - errno 11 Resource temporarily unavailable
+    same cap as uid 1001:   63 (exit=0 OOMKilled=false) - errno 11 Resource temporarily unavailable [note only: ...]
   PASS phase M (proc): --ulimit nproc=64 stopped the fork loop at 63 with EAGAIN while the uncapped control forked 150
     forks --pids-limit 64: 63 (exit=0 OOMKilled=false), pids.max=64 - errno 11 Resource temporarily unavailable
   PASS phase M (proc): --pids-limit 64 stopped the fork loop at 63 (pids.max=64), not merely reported as set

@@ -362,6 +362,14 @@ timing side channel หรือการอ่านข้อมูลข้า
 | `--memory-swap` | ถ้าตั้งใหญ่กว่า `--memory` **เลี่ยงเพดานได้จริง**: `--memory 256m --memory-swap 512m` จองได้ **496 MiB** บน Docker Desktop (เทียบ 240 MiB เมื่อตั้งเท่ากัน) | การตั้งให้ **เท่ากับ** `--memory` ซึ่ง CLI และชุดทดสอบทำทุกครั้ง |
 | จำนวน process | `--ulimit nproc=64` → fork ได้ 63 แล้ว **EAGAIN** ทุก runtime; `--pids-limit 64` → 63 (`pids.max=64`) **เฉพาะ runc** (gVisor นับ host task, Kata ไม่บังคับใน guest — ดู §4.1) | `--ulimit nproc` เป็นตัวหลัก, `--pids-limit` เป็น backstop บน runc |
 
+**`RLIMIT_NPROC` เป็นงบของ uid และขอบเขตการนับขึ้นกับโฮสต์ (วัดสองฝั่ง, session 15):** บน runner ของ GitHub
+ซึ่ง **job รันเป็น uid 1001 เอง** container ที่ตั้ง `nproc=64` ด้วย uid 1001 **สตาร์ต python ไม่ขึ้นเลย**
+(`exit=255`, fork 0 — run 37760397979) ส่วนบน Docker Desktop 100 process ของ uid 1001 ที่ยังมีชีวิตใน container
+อื่น **ไม่ถูกนับ** เข้าเพดานเดียวกัน (fork ได้ 63 แล้ว EAGAIN ตามปกติ) ทิศทางนี้คือ "แน่นกว่าที่ขอ" ไม่ใช่หลวมกว่า
+และเพดานจริงของ CLI คือ `nproc=512` ซึ่งเหลือ headroom พอ — เลข 64 ของ drill เท่านั้นที่ไปชนงบของ uid
+phase M จึงวัด *กลไก* ด้วย uid ที่ไม่มีใครใช้ (4242) และยิง uid 1001 ซ้ำอีกหนึ่งนัดแบบ **note อย่างเดียว**
+เพื่อบันทึกว่าโฮสต์นั้นทำตัวแบบไหน (gVisor/Kata ไม่เจอเรื่องนี้: Sentry และ kernel ของ guest นับแยกในกรง)
+
 ### 4.5 inotify ใช้ไม่ได้บน bind mount ของ Docker Desktop
 
 นี่คือข้อจำกัดที่ต้องอ่านให้จบ เพราะมันกระทบ canary โดยตรง

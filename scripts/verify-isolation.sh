@@ -129,7 +129,7 @@ E9_VAULT="warden-verify-e9-vault-$$"
 cleanup() {
     docker rm -f warden-verify-selftest warden-verify-breach warden-verify-failclosed \
         warden-verify-m-free warden-verify-m-cap warden-verify-m-swap \
-        warden-verify-m-forkfree warden-verify-m-nproc warden-verify-m-pids \
+        warden-verify-m-forkfree warden-verify-m-nproc warden-verify-m-nproc1001 warden-verify-m-pids \
         warden-verify-e1 warden-verify-e1-read warden-verify-e2 warden-verify-e2b warden-verify-e9 warden-verify-e3 warden-verify-e5 \
         warden-verify-e4-setup warden-verify-e4-seed warden-verify-e4-read \
         warden-verify-rt warden-verify-i0 warden-verify-h-busy \
@@ -1791,17 +1791,30 @@ else
     m_fail "--memory ${M_CAP_MIB}m enforced nothing: the allocator reached ${m_cap_high} MiB (${m_cap_state}) inside a cgroup that says memory.max=${m_cap_label}"
 fi
 
-m_forks warden-verify-m-forkfree --pids-limit 4096
+# RLIMIT_NPROC is a per-UID budget, and how far it reaches is a property of the
+# HOST, measured both ways: on a GitHub runner, whose job user IS uid 1001, a
+# container that set nproc=64 as uid 1001 could not even start python (exit 255,
+# zero forks, run 37760397979), while on Docker Desktop 100 live uid-1001
+# processes in another container did NOT count against the same cap (63 forks,
+# EAGAIN). So the mechanism is measured on an otherwise unused uid, and the real
+# uid gets a note-only run below - the number says what this host does.
+m_forks warden-verify-m-forkfree --user 4242:4242 --pids-limit 4096
 m_ff_n="$M_N"; m_ff_state="$M_STATE"; m_ff_label="${M_LABEL:-unreadable}"; m_ff_out="$M_OUT"
-m_forks warden-verify-m-nproc --pids-limit 4096 --ulimit "nproc=${M_FORK_CAP}:${M_FORK_CAP}"
-m_np_n="$M_N"; m_np_err="$M_ERR"; m_np_state="$M_STATE"
+m_forks warden-verify-m-nproc --user 4242:4242 --pids-limit 4096 --ulimit "nproc=${M_FORK_CAP}:${M_FORK_CAP}"
+m_np_n="$M_N"; m_np_err="$M_ERR"; m_np_state="$M_STATE"; m_np_out="$M_OUT"
+m_forks warden-verify-m-nproc1001 --pids-limit 4096 --ulimit "nproc=${M_FORK_CAP}:${M_FORK_CAP}"
+m_n1_n="$M_N"; m_n1_err="$M_ERR"; m_n1_state="$M_STATE"
 
-note "  forks uncapped: ${m_ff_n} (${m_ff_state:-no container state}), pids.max=${m_ff_label}"
-note "  forks nproc=${M_FORK_CAP}:  ${m_np_n} (${m_np_state:-no container state}) ${m_np_err:+- ${m_np_err}}"
+note "  forks uncapped:         ${m_ff_n} (${m_ff_state:-no container state}), pids.max=${m_ff_label}"
+note "  forks nproc=${M_FORK_CAP}:          ${m_np_n} (${m_np_state:-no container state}) ${m_np_err:+- ${m_np_err}}"
+note "  same cap as uid 1001:   ${m_n1_n} (${m_n1_state:-no container state}) ${m_n1_err:+- ${m_n1_err}} [note only: this uid's budget is shared with whatever else runs as 1001 on the host; the CLI's nproc=512 leaves the headroom this 64 does not]"
 
 if [ "$m_ff_n" -lt "$M_FORK_TARGET" ]; then
     m_fail "the uncapped fork control managed only ${m_ff_n} of ${M_FORK_TARGET} (${m_ff_state}) - the bounded runs below would prove nothing"
     printf '%s\n' "$m_ff_out" | grep -vE '^label ' | head -4 | sed 's/^/         /'
+elif ! printf '%s\n' "$m_np_out" | grep -q '^label /sys/fs/cgroup/pids'; then
+    m_fail "the nproc probe never ran (${m_np_state}), so nothing was measured - not the same as a cap that held"
+    printf '%s\n' "$m_np_out" | head -4 | sed 's/^/         /'
 elif [ "$m_np_n" -lt "$M_FORK_CAP" ] && printf '%s' "$m_np_err" | grep -q 'errno 11'; then
     good "phase M (proc): --ulimit nproc=${M_FORK_CAP} stopped the fork loop at ${m_np_n} with EAGAIN while the uncapped control forked ${m_ff_n}"
 else
