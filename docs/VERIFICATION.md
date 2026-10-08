@@ -374,6 +374,7 @@ grep -n 'http_access deny all' core/network/squid.conf
 | report ที่มีอยู่แล้วไม่กลืน report ใหม่ (E6) | วาง `WARDEN_SECURITY_INCIDENT.json` (0444, uid 1001) แล้ว trip canary ผ่าน `warden-cli.sh run` | exit `99` + ไฟล์เดิมไม่ถูกแตะ + report ใหม่มี `report_path_preexisting` และ CLI แสดงชื่อไฟล์ใหม่ |
 | doctor ไม่ pass สิ่งที่วัดไม่ได้ (E8) | วาง `df` ที่ล้มไว้หน้า PATH แล้วรัน `setup-host.sh` | ยังมี `Summary` + บอก `could not measure free disk space` ไม่ใช่ `sufficient free disk space` |
 | สัญญาณที่ agent ส่งเองไม่ใช่ breach (E7) | `kill -USR1 1` จากใน sandbox | exit `99` แต่ `no breach record found` + `NO incident report` ไม่มีคำว่า tripwire terminated |
+| report ที่ agent ปลอมเองไม่ถูกพาดหัวว่าเป็นของ tripwire (E11) | เขียน `WARDEN_SECURITY_INCIDENT.json` เองแล้ว `kill -USR1 1` ผ่าน `warden-cli.sh run` | exit `99` + `SECURITY BREACH (unconfirmed)` + report ยังถูกแสดง + sentinel `recorded no breach` ไม่มีคำว่า tripwire terminated |
 | รายงานบอกว่ามองเห็นได้แค่ไหน (D) | ฆ่า inline monitor แล้วอ่าน canary ผ่าน `warden-cli.sh run` | report `"mode": "sentinel"` + `"attribution": "restricted"` |
 | codex ใช้ได้จริงใน sandbox (G) | `OPENAI_API_KEY=<fake> warden-cli.sh run <dir> codex -- login status` | `Logged in using an API key` + บรรทัด launching มี `sandbox_mode="danger-full-access"` |
 | โหมด GPU ไม่ตกไป CPU เงียบ ๆ (J) | `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<m> warden-cli.sh run <dir> aider-local` | มี GPU: `local model ready: ... on GPU (offloaded N/N layers)`; ไม่มี GPU หรือ offload ไม่ครบ: ปฏิเสธ ไม่มีอะไรค้าง |

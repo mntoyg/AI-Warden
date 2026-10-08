@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+### Security
+
+- **CLI พาดหัว report ที่ agent ปลอมเองว่าเป็นของ tripwire:** agent เขียน `WARDEN_SECURITY_INCIDENT.json` ลง workspace เองแล้ว
+  `kill -USR1 1` ได้ CLI เคยพาดหัว `SECURITY BREACH: the canary tripwire terminated this sandbox` ทั้งที่ sentinel (นอกมือ agent)
+  ไม่เห็นอะไรเลย ปลอมได้แค่ผลบวกลวง แต่พาดหัวอ้างผู้เขียนที่ CLI ตรวจสอบไม่ได้ ตอนนี้พาดหัวนั้นขึ้นเฉพาะเมื่อ sentinel ยืนยัน
+  นอกนั้นขึ้น `SECURITY BREACH (unconfirmed)` (ยัง exit 99 ยังแสดง report และยังบอกให้ rotate key) ข้อแลกเปลี่ยน: breach จริงที่
+  canary ใน home (`~/.aws`, `~/.ssh`) ซึ่งมีแต่ inline monitor เห็น และทุก breach ใต้ gVisor/Kata (sentinel ไม่ arm) จะขึ้น unconfirmed ด้วย
+  drill ใหม่ **E11** (ผู้ใช้เลือกทางแก้ 2026-10-08)
+
 ## [1.2.6] — 2026-10-07
 
 **security: ปิด DNS exfiltration ผ่าน egress proxy · คิว inotify ล้นไม่กลืนการอ่าน canary อีก · breach ที่มีแต่ sentinel เห็นมี record**

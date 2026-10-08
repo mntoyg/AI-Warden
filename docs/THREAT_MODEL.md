@@ -164,6 +164,10 @@ container ที่ `--pid container:<A>` หายไปทันทีเม�
   จะได้ log ว่า "from the canary tripwire" และ CLI ชี้ไปที่ incident report ที่ไม่มีอยู่จริง ตอนนี้ยังจบ
   ด้วย exit 99 (fail closed) แต่ entrypoint บอกว่า `no breach record found` และ CLI บอกว่า `NO incident
   report ... possibly forged` เพราะ monitor เขียน record **ก่อน** ส่งสัญญาณเสมอ (drill E7)
+- **report ปลอม + สัญญาณที่ส่งเอง:** agent เขียน `WARDEN_SECURITY_INCIDENT.json` เองแล้ว `kill -USR1 1` ได้
+  ก่อน v1.2.7 CLI พาดหัวว่า `the canary tripwire terminated this sandbox` ตอนนี้พาดหัวนั้นต้องมี sentinel ยืนยัน
+  นอกนั้นขึ้น `SECURITY BREACH (unconfirmed)` (ยัง exit 99) ข้อจำกัด: breach จริงที่ canary ใน home
+  (`~/.aws`, `~/.ssh`) และทุก breach ใต้ gVisor/Kata ก็ขึ้น unconfirmed เพราะไม่มีอะไรนอกมือ agent เห็น (drill E11)
 - **เนื้อหา** ของ report ใด ๆ ใน workspace ยังปลอมได้ (agent เขียนไฟล์ชื่อใหม่ที่ดูเหมือน report ได้)
   record เดียวที่ agent แตะไม่ได้คือ **log ของ container sentinel** (agent ไม่มี Docker socket และไม่ได้แชร์
   stdout กับมัน) ตั้งแต่ v1.2.1 sentinel ไม่ใช้ `--rm` แล้ว CLI อ่าน log นั้นก่อนลบ และพิมพ์
