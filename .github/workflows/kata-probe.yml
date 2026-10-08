@@ -4,6 +4,7 @@ name: kata-probe
 on:
   push:
     branches: [claude/cool-knuth-mh33o8]
+    paths: ['.github/workflows/kata-probe.yml']
   workflow_dispatch:
 
 jobs:
