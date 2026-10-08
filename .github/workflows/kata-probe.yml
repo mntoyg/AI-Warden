@@ -8,9 +8,86 @@ on:
   workflow_dispatch:
 
 jobs:
-  hang:
+  proof:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: KVM present
+        run: |
+          ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm
+          uname -r
+
+      - name: Install Kata (static release) and register it with Docker
+        run: |
+          set -e
+          url="$(curl -fsSL --retry 5 https://api.github.com/repos/kata-containers/kata-containers/releases/latest \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["tag_name"], file=sys.stderr); print([a["browser_download_url"] for a in r["assets"] if a["name"].startswith("kata-static-") and "amd64" in a["name"] and a["name"].endswith((".tar.zst",".tar.xz"))][0])')"
+          echo "asset: $url"
+          curl -fsSL --retry 5 -o /tmp/kata.tar "$url"
+          case "$url" in
+            *.zst) sudo tar --zstd -xf /tmp/kata.tar -C / ;;
+            *.xz)  sudo tar -xJf /tmp/kata.tar -C / ;;
+          esac
+          find /opt/kata -name 'containerd-shim-kata*' -o -name 'configuration*.toml' | sort
+          shim="$(find /opt/kata -type f -name 'containerd-shim-kata-v2' | head -1)"
+          test -n "$shim" && test -x "$shim"
+          sudo ln -sf "$shim" /usr/local/bin/containerd-shim-kata-v2
+          echo "shim: $shim"
+          sudo python3 - <<'EOF'
+          import json, os
+          p = "/etc/docker/daemon.json"
+          d = json.load(open(p)) if os.path.exists(p) else {}
+          d.setdefault("runtimes", {})["kata"] = {"runtimeType": "io.containerd.kata.v2"}
+          json.dump(d, open(p, "w"), indent=2)
+          print(json.dumps(d))
+          EOF
+          sudo systemctl restart docker
+          docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'
+          docker --version
+
+      - name: Build both images
+        run: ./scripts/warden-cli.sh build --pull >/tmp/build.log 2>&1 || { tail -40 /tmp/build.log; exit 1; }
+
+      - name: Model + manifest (same as phase I)
+        run: |
+          mkdir -p /tmp/m
+          curl -sfL --retry 3 --max-time 120 -o /tmp/m/stories260K.gguf \
+            https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+          sha="$(sha256sum /tmp/m/stories260K.gguf | cut -d' ' -f1)"
+          printf '{"schema": "warden-model-lab/manifest/1", "model_name": "verify-tiny", "gguf_file": "stories260K.gguf", "gguf_sha256": "%s"}\n' "$sha" > /tmp/m/manifest.json
+
+      - name: E12 payload under kata - old CLI (fb1788e) vs this CLI
+        continue-on-error: true
+        run: |
+          git show fb1788e:scripts/warden-cli.sh > scripts/warden-cli-old.sh
+          chmod +x scripts/warden-cli-old.sh
+          for cli in warden-cli-old.sh warden-cli.sh; do
+            ws="$PWD/workspaces/e12-${cli%.sh}"; mkdir -p "$ws"; chmod 0777 "$ws"
+            s=$(date +%s)
+            out="$(WARDEN_RUNTIME=kata NO_COLOR=1 timeout 120 ./scripts/$cli run "$ws" bash -- -c \
+              'if read -r -t 15 line; then echo "stdin: got data"; else echo "stdin: rc=$?"; fi' < /dev/null 2>&1)"; rc=$?
+            echo "[$cli] rc=${rc} after $(( $(date +%s) - s )) s: $(printf '%s\n' "$out" | grep -E '^stdin:' | tr '\n' ' ')"
+          done
+
+      - name: phase I's aider-local --exit under kata with this CLI
+        continue-on-error: true
+        run: |
+          ws="$PWD/workspaces/h-kata"; mkdir -p "$ws"; chmod 0777 "$ws"
+          s=$(date +%s)
+          rc=0
+          WARDEN_RUNTIME=kata WARDEN_MODEL_MANIFEST=/tmp/m/manifest.json NO_COLOR=1 timeout 300 \
+            ./scripts/warden-cli.sh run "$ws" aider-local -- --no-git --exit --verbose > /tmp/h.log 2>&1 || rc=$?
+          echo "aider-local under kata: rc=${rc} after $(( $(date +%s) - s )) s"
+          grep -E '^Model:|max_input_tokens|githubusercontent|session ended|exited with code' /tmp/h.log | cut -c1-160
+
+  suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v5
 
@@ -48,50 +125,48 @@ jobs:
           docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'
           docker --version
 
-      - name: H1 what stdin does a container get (no -i), runc vs kata
-        continue-on-error: true
-        run: |
-          for rt in runc kata; do
-            echo "[$rt] fd0: $(docker run --rm --runtime "$rt" alpine readlink /proc/self/fd/0)"
-            s=$(date +%s)
-            out="$(timeout 20 docker run --rm --runtime "$rt" alpine sh -c 'cat >/dev/null; echo EOF-after-cat' 2>&1)"; rc=$?
-            echo "[$rt] cat on stdin: rc=${rc} after $(( $(date +%s) - s )) s: ${out}"
-          done
-
       - name: Build both images
         run: ./scripts/warden-cli.sh build --pull >/tmp/build.log 2>&1 || { tail -40 /tmp/build.log; exit 1; }
 
-      - name: Model + manifest (same as phase I)
-        run: |
-          mkdir -p /tmp/m
-          curl -sfL --retry 3 --max-time 120 -o /tmp/m/stories260K.gguf \
-            https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
-          sha="$(sha256sum /tmp/m/stories260K.gguf | cut -d' ' -f1)"
-          printf '{"schema": "warden-model-lab/manifest/1", "model_name": "verify-tiny", "gguf_file": "stories260K.gguf", "gguf_sha256": "%s"}\n' "$sha" > /tmp/m/manifest.json
-          cat /tmp/m/manifest.json
-
-      - name: H2 phase I's aider-local --exit under runc and kata, then look inside if it hangs
+      - name: Suite under kata with a watchdog (stops after 45 min)
         continue-on-error: true
         run: |
-          for rt in runc kata; do
-            ws="$PWD/workspaces/h-$rt"; mkdir -p "$ws"; chmod 0777 "$ws"
-            s=$(date +%s)
-            ( WARDEN_RUNTIME="$rt" WARDEN_MODEL_MANIFEST=/tmp/m/manifest.json NO_COLOR=1 \
-                ./scripts/warden-cli.sh run "$ws" aider-local -- --no-git --exit --verbose > "/tmp/h-$rt.log" 2>&1; \
-              echo "rc=$?" >> "/tmp/h-$rt.log" ) &
-            cli=$!
-            for i in $(seq 1 30); do kill -0 "$cli" 2>/dev/null || break; sleep 5; done
-            if kill -0 "$cli" 2>/dev/null; then
-              echo "[$rt] STILL RUNNING after 150 s - inside the agent:"
-              c="$(docker ps --format '{{.Names}}' | grep -E '^warden-sbx-h-' | grep -v -- '-model$' | head -1)"
-              docker exec "$c" sh -c 'p=$(pgrep -f "agents/venv/bin/aider" | head -1); echo "aider pid=$p"; ls -l /proc/$p/fd/0 /proc/$p/fd/1 /proc/$p/fd/2; echo "wchan main: $(cat /proc/$p/wchan)"; for t in /proc/$p/task/*; do echo "task ${t##*/}: $(cat $t/wchan) $(cat $t/comm)"; done; echo "tcp (st 02 = SYN_SENT):"; cat /proc/$p/net/tcp | head -8' 2>&1
-              docker exec "$c" python3 -c 'import socket,time; s=time.time()
-          try:
-              socket.create_connection(("151.101.0.223", 443), timeout=15); print("connect OK")
-          except Exception as e: print("connect to a public IP:", type(e).__name__, e, "after %.1f s" % (time.time()-s))' 2>&1
-              docker rm -f "$c" "${c}-model" >/dev/null 2>&1 || true
-              wait "$cli" 2>/dev/null || true
-            fi
-            echo "[$rt] finished after $(( $(date +%s) - s )) s; log tail:"
-            grep -vE '^\s*$' "/tmp/h-$rt.log" | tail -12 | cut -c1-200
+          cat > /tmp/wd.sh <<'EOF'
+          #!/usr/bin/env bash
+          # Every 60 s: what runs on the host, and inside each warden container.
+          while :; do
+            {
+              echo "===== snapshot $(date -u +%H:%M:%S)"
+              docker ps --format '{{.Names}} {{.Status}} {{.Image}}'
+              ps -eo pid,etimes,stat,args --forest | grep -E 'verify-isolation|warden-cli|docker (run|exec|wait|logs|rm|stop)|timeout' | grep -v grep | cut -c1-220 | tail -25
+              for c in $(docker ps --format '{{.Names}}' | grep -E '^warden-|-sentinel$|-model$'); do
+                echo "--- in ${c}:"
+                timeout 10 docker exec "$c" ps -eo pid,etimes,stat,args 2>&1 | cut -c1-200 | tail -12
+                echo "--- logs ${c}:"
+                timeout 10 docker logs --tail 8 "$c" 2>&1 | cut -c1-200
+              done
+            } > /tmp/wd.now 2>&1
+            mv /tmp/wd.now /tmp/wd.last
+            cat /tmp/wd.last >> /tmp/wd.all
+            sleep 60
           done
+          EOF
+          chmod +x /tmp/wd.sh
+          /tmp/wd.sh &
+          wd=$!
+          start=$(date +%s)
+          rc=0
+          WARDEN_RUNTIME=kata NO_COLOR=1 timeout 2700 ./scripts/verify-isolation.sh > /tmp/suite.log 2>&1 || rc=$?
+          kill "$wd" 2>/dev/null || true
+          echo "suite rc=${rc} after $(( $(date +%s) - start )) s" | tee /tmp/suite.rc
+
+      - name: Report (kept last so the log tail holds it)
+        if: always()
+        run: |
+          echo "##### PASS/FAIL/SKIP lines"
+          grep -E '^  (PASS|FAIL|SKIP)|PHASE [A-L]' /tmp/suite.log | cut -c1-200 | tail -40 || true
+          echo "##### suite tail"
+          tail -25 /tmp/suite.log | cut -c1-220 || true
+          cat /tmp/suite.rc 2>/dev/null || true
+          echo "##### last watchdog snapshot"
+          cat /tmp/wd.last 2>/dev/null || true

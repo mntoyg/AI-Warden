@@ -982,7 +982,13 @@ cmd_run() {
         fi
     fi
 
-    if [ -t 0 ] && [ -t 1 ]; then args+=(-it); fi
+    # Without -i, runc hands the agent /dev/null on stdin, but a Kata container
+    # gets a pipe that never reaches EOF: aider's first-run "what's new?" prompt
+    # then waited forever (CI kata-probe, anon_pipe_read, 2026-10-08). So a
+    # non-interactive session attaches stdin and feeds it /dev/null - EOF at
+    # once on every runtime, as runc always gave.
+    local interactive=0
+    if [ -t 0 ] && [ -t 1 ]; then interactive=1; args+=(-it); else args+=(-i); fi
 
     local -a agent_cmd=()
     local line
@@ -1024,7 +1030,11 @@ cmd_run() {
     reports_before="$(incident_reports "$abs")"
 
     local rc=0
-    docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
+    if [ "$interactive" = "1" ]; then
+        docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" || rc=$?
+    else
+        docker "${args[@]}" "$AGENT_IMAGE" "${agent_cmd[@]}" < /dev/null || rc=$?
+    fi
     # Read the sentinel's own log before it is removed: the one breach record
     # the agent cannot forge (see sentinel_breach_paths).
     local sentinel_ran=0 sentinel_seen="" sentinel_unarmed="" sentinel_lines="" seen
