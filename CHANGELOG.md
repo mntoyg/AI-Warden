@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+## [1.2.7] — 2026-10-08
+
+**security/fix: พาดหัว breach ตามหลักฐาน (E11) · session ที่ไม่ใช่ interactive ไม่ค้างใต้ Kata อีก (E12)**
+
+ต้อง rebuild agent image (`./scripts/warden-cli.sh build --pull`): ตัวแก้ stdin อยู่ใน entrypoint
+
 ### Security
 
 - **CLI พาดหัว report ที่ agent ปลอมเองว่าเป็นของ tripwire:** agent เขียน `WARDEN_SECURITY_INCIDENT.json` ลง workspace เองแล้ว
