@@ -272,6 +272,20 @@ tripwire (uid เดียวกัน) แล้วอ่าน canary จะ�
 ไม่มีการอ้างว่ามีสองชั้น sentinel แบบ runc ที่อยู่ข้าง agent แบบ runsc ได้ยินการอ่าน canary จริง (วัดแล้ว) แต่เห็น
 แค่ process ของ gVisor Sentry และส่งสัญญาณหามันไม่ได้ (`Permission denied`) จึงเป็นได้แค่พยาน ไม่ใช่ตัวกัก
 
+**วัดบน Kata Containers แล้ว (Kata 4.2.0, qemu + KVM บน runner ของ GitHub, session 12–13)** — ยังไม่ได้อยู่ใน CI ประจำ
+workflow ชั่วคราวติดตั้ง Kata แบบ static แล้วรัน CLI จริงด้วย `WARDEN_RUNTIME=kata` ผลที่วัดได้:
+
+| เรื่อง | ใต้ Kata | ผลต่อ AI Warden |
+|---|---|---|
+| session จริงผ่าน CLI | ใช้ได้, ไปถึง api.anthropic.com ผ่าน proxy (`--add-host` เหมือน gVisor), inline tripwire `enforced=7/7`, breach → exit 99 | ใช้ได้ |
+| `--pid container:<agent>` | sentinel แบบ Kata ได้ VM และ PID namespace ของตัวเอง; **container แบบ runc ที่ขอแชร์ PID namespace กับ container ของ Kata ได้ PID namespace ของโฮสต์** (เห็น dockerd, qemu ฯลฯ) | **sentinel กักไม่ได้** — มันตรวจเจอว่าตัวเองเป็น PID 1 ของ namespace ตัวเองและบอก `NOT armed` (self-proof ตั้งแต่ v1.2.4 ใช้ได้กับ Kata โดยไม่ต้องแก้) ห้ามสร้าง witness แบบ runc ด้วย `--pid container:` ใต้ Kata |
+| inotify ข้าม container | watcher ใน Kata ไม่ได้ยินการเปิดไฟล์จาก container อื่นเลย (0 event); watcher แบบ **runc** บนโฮสต์ได้ยินการอ่านของ agent ใน Kata (OPEN + ACCESS ผ่าน virtiofsd) | inline tripwire (VM เดียวกับ agent) ใช้ได้; witness แบบตรวจจับอย่างเดียวฝั่ง runc เป็นไปได้เหมือน gVisor |
+| `--pids-limit` / fork | `--pids-limit 512` **ไม่บังคับอะไรใน guest** (fork ได้ครบ 700); `--ulimit nproc=512` บังคับจริง (fork 511 แล้ว EAGAIN) | CLI ตั้ง nproc 512 ทุก session อยู่แล้ว จึงยังหยุด fork bomb ได้ |
+| stdin เมื่อไม่มี `-i` | runc ให้ `/dev/null` (EOF) แต่ Kata ให้ **pipe ที่ไม่มีวันปิด** — aider ค้างตลอดกาลที่คำถาม first-run (`anon_pipe_read`) ทำให้ suite ค้างใน phase I | ตั้งแต่ v1.2.7 CLI ส่ง `-i` + `/dev/null` เมื่อไม่ได้อยู่บน TTY (drill E12) |
+
+**สิ่งที่ต้องยอมรับถ้าเลือก Kata:** เหมือน gVisor — ได้ขอบเขต VM แต่ **เสีย sentinel** ชุดทดสอบทั้งชุดใต้ Kata ยังไม่เคยรันจบ
+(ก่อนแก้ stdin ค้างใน phase I) จึงยังไม่ประกาศว่ารองรับ
+
 ### 4.2 การรั่วผ่านช่องทางที่อนุญาต
 ดู §3.1 — allowlist ควบคุมปลายทาง ไม่ควบคุมเนื้อหา
 **บรรเทา:** ให้ token ที่แคบที่สุด, ตัด `deb.debian.org` ออกถ้าไม่ต้องติดตั้ง OS package,
