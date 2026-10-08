@@ -4,9 +4,9 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-10-07 (session 13, cloud Linux container)
-- **Latest release:** v1.2.5 on GitHub. **v1.2.6 is merged on `main` (`9d265d0`) but NOT tagged yet**: the cloud session's git proxy refused the tag push (HTTP 403); the user creates tag + release in the GitHub UI (notes drafted in session 13). v1.2.6 = security: the proxy no longer resolves non-allowlisted names (DNS exfiltration, phase L), an inotify queue overflow trips the tripwire (E9), a sentinel-only breach gets a host-written record (E10), unprobeable canary dirs are UNVERIFIED. Verified on real images by CI (ext4 + gVisor); **not yet run on Docker Desktop**. v1.0.0–v1.2.5 carry a superseded/hardening note
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v17)
+- **Last updated:** 2026-10-08 (session 13 cont., cloud Linux container)
+- **Latest release:** v1.2.5 on GitHub. **v1.2.6 (`9d265d0`) and v1.2.7 (PR #3 merge) are merged on `main` but NOT tagged**: the cloud session's git proxy refuses tag pushes (HTTP 403), so both tags + releases are the user's step (Next steps #0). v1.2.6 = proxy DNS exfiltration (L), inotify overflow (E9), sentinel-only record (E10), UNVERIFIED dirs. v1.2.7 = breach headline only when the sentinel confirms (E11), stdin EOF for non-interactive sessions under Kata (E12), **Kata supported with limits + CI job**
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v18)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
@@ -17,12 +17,12 @@
 
 | Thing | State |
 |---|---|
-| `main` | `9d265d0` = merge of PR #1 (session 12 branch + version bump to 1.2.6) + this handoff PR. **Tag `v1.2.6` missing on origin** (git proxy 403 on tag push) |
-| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning · `v1.2.5` still Latest and still WITHOUT its superseded note - add it when v1.2.6 is released (text drafted in session 13) |
-| CI | 4 jobs: static · CVE scan · ext4 drills · gVisor (runsc) drills. Session 12 fixes green on real images on temp branches (36364368300: E9 + L; 36500312536: E10) with negative proofs (36365091898: old squid.conf FAILS L; 36500312493: old CLI FAILS E10). PR #1: run 37701110789 (`71483b4`) and 37701337562 (`1252a01`), all 4 jobs green |
+| `main` | v1.2.7 = merge of PR #3 (E11, E12, Kata CI job, version 1.2.7) on top of `9d265d0` (v1.2.6). **Tags `v1.2.6` and `v1.2.7` missing on origin** (git proxy 403 on tag push) |
+| Tags | `v1.0.0`…`v1.2.4` carry a superseded warning · `v1.2.5` still Latest, WITHOUT its superseded note (text drafted in session 13: `v125-note.md`) |
+| CI | **5 jobs** since PR #3: static · CVE scan · ext4 drills · gVisor (runsc) drills · **Kata Containers drills**. Real-image proofs: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (kata-probe 37711877983) |
 | Local suite (Docker Desktop / Windows) | last run on **v1.2.5** (A–K PASS, `enforced=4/7`). **v1.2.6 never run there**: phase L, E9, E10 and self-test 3b2 have never met Docker Desktop (3b2 = its DNS). First job on the Windows box |
 | CI suite, ext4 / gVisor | ext4: all phases A–L, `enforced=7/7`. gVisor: as v1.2.5 (D = honest SKIP, sentinel `NOT armed`) |
-| Kata | measured on a runner (session 12, Kata 4.2.0): sessions run, sentinel honestly `NOT armed`, breach → 99; the full suite HANGS in phase I (aider-local) — open. Workflow kept at `.ai/kata-probe.yml` |
+| Kata | **supported with limits since v1.2.7** (user call 2026-10-08): full suite passed under kata (kata-probe run 37711877983, 423 s) after the stdin fix; CI job `Kata Containers drills` added in PR #3. Sentinel honestly `NOT armed`; `--pids-limit` does not bound guest processes, nproc 512 does. Probe workflow kept at `.ai/kata-probe.yml` |
 | Egress audit trail | unchecked since session 11 (cloud sessions have no Docker Desktop). `up` heals it |
 | Local model | unchanged: no trained GGUF (last checked 2026-09-27) |
 | OpenAI key | out of credit at last check (2026-09-27); session 12 heard it would be topped up for the demo — unknown now |
@@ -36,27 +36,25 @@ Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 `.ai/ROADMAP.md` (Thai, session 12) gives the phase view; this list wins where they differ.
 
-0. **If tag `v1.2.6` is still missing on origin, create it first** (`git ls-remote --tags origin`):
-   on the Windows box `git tag -a v1.2.6 9d265d0 -m ...; git push origin v1.2.6`, then the release
-   and v1.2.5's superseded note; wait for CI on the tag. A security fix is not shipped until tagged.
-1. **Run v1.2.6 on the Windows box** (it shipped from the cloud on CI evidence only).
-   `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex
-   path with a honeypot read (expect 99; `Quota exceeded` = credit, ask), then
-   `./scripts/verify-isolation.sh` A–L on Docker Desktop: exit 0, `enforced=4/7`, and **3b2, L,
-   E9, E10 pass** - none of them has met Docker Desktop (3b2 asks its embedded DNS). Then re-quote
-   `docs/VERIFICATION.md` from that one run and add a line to the v1.2.6 release. If anything
-   fails there, it is a v1.2.7 fix, not a note.
-2. **(decide first) The CLI trusts a report file that appeared during the session.** An agent can
-   write `WARDEN_SECURITY_INCIDENT.json` (and `/run/warden/breach.flag`) and `kill -USR1 1`: exit
-   99 and the headline "the canary tripwire terminated this sandbox". Only a false positive can be
-   forged, but the headline claims authorship the CLI cannot verify. Proposed: that headline only
-   when the sentinel confirms; otherwise "unconfirmed (written inside the agent's reach)". It
-   changes demo act-3 wording and the message for home-canary breaches (inline-only evidence) -
-   ask with the evidence, then drill first (FAIL on old code), E7 must still pass.
-3. **Kata (low):** read P1–P4 (DNS, `--pid`, cross-container inotify, pids) from run
-   36366900384 or rerun `.ai/kata-probe.yml` with `docker build -q`; find the phase-I aider-local
-   hang under Kata (a docker call with no timeout?); then decide whether THREAT_MODEL §4.1 lists
-   Kata as supported-with-limits. In workflow steps capture rc as `rc=0; cmd || rc=$?`.
+0. **Tag v1.2.6 and v1.2.7, then release both** (`git ls-remote --tags origin`). v1.2.6 = `9d265d0`
+   (release notes drafted in session 13: `release-v1.2.6.md`, plus a superseded note for v1.2.5);
+   v1.2.7 = the merge commit of PR #3 (notes: CHANGELOG 1.2.7). On the Windows box:
+   `git tag -a v1.2.6 9d265d0 -m ...; git tag -a v1.2.7 <merge> -m ...; git push origin v1.2.6 v1.2.7`,
+   wait for CI on both tags, publish, mark v1.2.5 and v1.2.6 superseded. Security fixes are not shipped until tagged.
+1. **Run v1.2.7 on the Windows box** (both releases shipped on CI evidence only).
+   `./scripts/warden-cli.sh build --pull` (note codex/claude/aider versions), the real codex path with a
+   honeypot read (expect 99; `Quota exceeded` = credit, ask), then `./scripts/verify-isolation.sh` A–L on
+   Docker Desktop: exit 0, `enforced=4/7`, and **3b2, L, E9, E10, E11, E12 pass** - none has met Docker
+   Desktop. E11 changes what a home-canary breach prints there (`SECURITY BREACH (unconfirmed)` when only
+   the inline monitor saw it) - check DEMO.md act 3 still matches a real take. Then re-quote
+   `docs/VERIFICATION.md` from that one run. A failure there is a v1.2.8 fix, not a note.
+2. **(decide first) The entrypoint still logs "SIGUSR1 received from the canary tripwire" when a
+   report file exists** - E11 fixed the CLI headline only. PID 1 is inside the agent's reach, so its line
+   is forgeable either way; rewording it ("SIGUSR1 received with a breach record present") is cheap but
+   changes demo output. Ask before changing.
+3. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
+   watcher heard the Kata agent's reads via virtiofsd) - but NOT via `--pid container:`, which gave a
+   runc container the HOST PID namespace. `--memory` under Kata is unmeasured (the VM had `-m 2G`).
 4. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
    in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
    step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day.
@@ -69,6 +67,7 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    OpenSSL squid build).
 7. **Housekeeping:** delete origin branches `kata-probe`, `verify-s12`,
    `claude/wizardly-edison-9pzqzk` once the user agrees (session 12's git proxy refused the delete).
+   Session 13 never tried: deleting is outward-facing; ask first.
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -76,6 +75,10 @@ reason; if the reason no longer holds, delete the item instead of doing it.
   channel was confirmed on its real image and the repo is public, so waiting for the Windows box
   was worse than shipping with "not yet run on Docker Desktop" written in the release. The Windows
   run is Next steps #1, not optional.
+- **The breach headline needs the sentinel** (user call 2026-10-08, E11): "the canary tripwire terminated this
+  sandbox" only when the sentinel confirms; otherwise `SECURITY BREACH (unconfirmed)`. Accepted cost: a real
+  home-canary breach and every gVisor/Kata breach print unconfirmed.
+- **Kata is supported with limits and runs in CI** (user call 2026-10-08), like gVisor: VM boundary, no sentinel.
 - **Session 12's fixes for the sentinel-only breach (E10) and UNVERIFIED dirs were the user's
   choice** (2026-09-29, from the options in ROADMAP phase 2). Phase 2 #1 is still undecided.
 - **gVisor is verified on a GitHub runner, not on this box** (user call 2026-09-27, over installing
@@ -233,6 +236,11 @@ would I know if this silently did nothing?" — then run that.
 | GitHub Actions steps run `bash -e` | `cmd; rc=$?` never reaches `rc=$?` when cmd fails - the step dies silently (twice in session 12). Use `rc=0; cmd || rc=$?` |
 | Temp-branch CI is the real-image test bed | A session that cannot build images can still prove a fix on the real images: a branch whose ci.yml push trigger includes it, plus a negative job that restores the old file (session 12, phase L / E9 / E10) |
 | A root sentinel cannot write to a 0755 Linux workspace | No `CAP_DAC_OVERRIDE`: 6/6 writes failed (run 36369383799). When it also kills the inline monitor first, no report existed until v1.2.6's host-written record (E10). Docker Desktop's 9p mount is writable by all, so the Windows box never showed it |
+| A Kata container's stdin without `-i` is a pipe that never closes | runc gives /dev/null (EOF). Any agent prompt waits forever: aider's first-run "what's new?" sat in `anon_pipe_read` and phase I hung >30 min (session 13). `docker run -i ... </dev/null` did NOT help - Kata did not pass the EOF on (E12 still timed out). The entrypoint now runs the agent `< /dev/null` when the CLI passes `WARDEN_STDIN=closed` |
+| `timeout N warden-cli.sh run ...` does not stop a hung session | bash waits for its foreground `docker run` before running any trap, and timeout signals only its child. A probe must poll and `docker rm -f` the containers itself (session 13 lost a 17-minute job to this) |
+| A runc container with `--pid container:<kata container>` gets the HOST PID namespace | It listed dockerd, qemu and the runner (session 13, P2). Never build a runc witness for Kata that way |
+| The API returns only a log tail, and `gh api .../logs` is refused | The built-in gh will not follow the blob redirect; `get_job_logs` gives `tail_lines` only. Put what you need at the END of a job (an `if: always()` report step) or in its own small job (session 13: probes and suite as separate jobs) |
+| A fix can pass every runc check and do nothing on the runtime it targets | Session 13's first stdin fix was green on runc; only E12 run under Kata showed `rc=142`. Prove a runtime-specific fix on that runtime, old vs new, before claiming it |
 ---
 
 ## 6. Conventions
@@ -246,6 +254,20 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-10-08 — session 13 (cont.) · v1.2.7: E11, E12, Kata supported
+- **Did:** the user returned (context 18%, weekly 59% → stop 70%) and said continue. v1.2.6 still
+  untagged (user's step). Asked: fix the forged-report headline (yes) and how to declare Kata. E11 written
+  first; negative CI 37705657498 (one phase failed on the old CLI), fix green 37705778556. Kata: probes
+  P1-P4 read for the first time; a watchdog in the suite job located the phase-I hang (aider on its first-run
+  prompt); a targeted probe showed fd 0 = a pipe in `anon_pipe_read`. First fix (`-i </dev/null`) was
+  green on runc but E12 under Kata still timed out (rc=142) - replaced by closing stdin in the entrypoint;
+  old CLI rc=142 vs new rc=1, aider-local 70 s, full suite under Kata `All phases passed` (37711877983).
+  User chose Kata supported with limits + CI job; added it. Bumped to 1.2.7; PR #3.
+- **Learned:** E12 caught a fix that did nothing on the runtime it was for - the recurring bug shape, in my
+  own change. A watchdog snapshot inside the hung CI job found in one run what session 12 could not.
+- **Prompt should have said:** "a runtime-specific fix is proven on that runtime, old vs new" and "put CI
+  evidence at the end of the job; the API only gives a tail" (both now Gotchas, and in v18).
 
 ### 2026-10-07 — session 13 · v1.2.6 shipped from a cloud session
 - **Did:** the user pasted a prompt for another project (Forge); attaching that repo was denied,
@@ -635,6 +657,10 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v18 · 2026-10-08** — session 13 (cont.). (a) WORK: prove a runtime-specific fix ON that runtime, old vs
+  new (the first stdin fix was green on runc and did nothing on Kata; E12 caught it); (b) CI evidence goes at
+  the END of a job or in its own job - the API returns only a tail; (c) a hung session is stopped by polling +
+  `docker rm -f`, never by `timeout`; (d) START: both v1.2.6 and v1.2.7 need tagging first.
 - **v17 · 2026-10-07** — session 13. (a) START b reads **origin branches newer than main** and their
   `.ai/` files (session 12's handoff sat unmerged on a branch for 8 days); (b) step 0 keeps "where am
   I + prove push" but adds "a cloud session can still merge: PR + CI on real images; the tag push is refused (403), so tag + release go to the user" (session 13
