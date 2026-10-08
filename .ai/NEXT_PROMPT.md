@@ -28,8 +28,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
       version - the Windows suite run had verified untagged code without knowing it). Last 3 CI
       runs, `docker info`, `./scripts/warden-cli.sh status` (audit trail must say live; `up` heals
       it). Fix HANDOFF first.
-   c. BUDGET: `get_usage` via ToolSearch; if missing, ask once with the question tool for the weekly
-      % and the stop line. END fires at ~70% context OR ~1% before the stop line (costs ~0.5%).
+   c. BUDGET (user rule, 2026-10-08): two independent END triggers, check `get_usage` for both -
+      (1) WEEKLY usage paced at ~10% consumed per calendar day (today's delta since this chat
+      started); (2) CONTEXT WINDOW at ~70% (~1% reserved for the END steps). Either one fires END.
    d. Keys live only in `.env`: test presence, never print one (redact `sk-[A-Za-z0-9_*-]+`).
    e. Check yourself before asking (Colab GGUF in Downloads / D: / G: / lab outputs). Then report
       in 3-5 lines and ask with the AskUserQuestion TOOL, in ONE call, only what blocks work.
@@ -50,9 +51,8 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
    - New drill/assertion: write it FIRST, watch it FAIL on the OLD code, fix, run green - ONLY that
      phase (scratch harness regenerated after every suite edit). Prove a check both ways.
    - A drill side this host cannot run: a PATH shim, proven live with `command -v` first.
-   - A RUNTIME-SPECIFIC fix is proven ON that runtime, old vs new. Runner evidence goes at the END
-     of a job or in its own job (the API gives a tail only); stop a hung session by polling +
-     `docker rm -f`, never `timeout`.
+   - A RUNTIME-SPECIFIC fix is proven ON that runtime, old vs new. Runner evidence: end-of-job or
+     its own job (API gives a tail only); stop a hung session by polling + `docker rm -f`, never `timeout`.
    - EVERY RECORD THE AGENT CAN WRITE IS FORGEABLE; only the sentinel's container log is not.
      Also ask what a REFUSAL leaks, not only whether it refused.
    - JUDGE BY MEASUREMENT, NEVER BY A LABEL. SILENCE IS NOT EVIDENCE: positive control first.

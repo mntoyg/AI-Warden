@@ -51,6 +51,15 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    builds LoRA layers - a real Colab run hit this). **Next:** the user runs it (smoke, then full) on Colab,
    downloads the model dir outside any workspace, then
    `WARDEN_MODEL_GPU=1 WARDEN_MODEL_MANIFEST=<it> warden-cli.sh run <ws> aider-local` vs the untuned base.
+   **Measured this session (not a replacement for the Colab run):** the full pipeline (collect -> LoRA
+   SMOKE -> merge -> GGUF q8_0 -> manifest) runs end-to-end on THIS box's RTX 3050 (4GB) in a scratch
+   venv, but only with **bf16, not the notebook's float32** (a T4 has no bf16; this GPU does, and float32
+   alone needs ~6GB for the 1.5B base model - would OOM on 4GB). 30 smoke steps: val loss 3.61 -> 2.21,
+   peak VRAM 4.47GB (nvidia-smi topped at 3957MiB - the excess is Windows WDDM shared-memory spillover,
+   not a true overflow; nothing crashed), ~48 min for training alone, ~52 min wall end to end. All
+   scratch files/venv deleted after, nothing committed (train.ipynb itself was NOT edited - still
+   correctly tuned for Colab/T4). Useful if the user wants to iterate locally without Colab someday,
+   with a bf16 variant of the training cell - not needed if the Colab run goes fine.
 3. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
    cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
    in the mount guard (needs an is-it-a-mountpoint heuristic); SNI peek-and-splice (needs an
