@@ -67,10 +67,8 @@ id                       # uid=1001(ai_user) gid=1001(ai_user) groups=1001(ai_us
 grep CapBnd /proc/self/status   # CapBnd: 0000000000000000   <- --cap-drop=ALL ทำงาน
 ls /workspace            # app.py  secrets.json
 curl -sS -m 8 --noproxy '*' https://1.1.1.1/      # curl: (7) Couldn't connect to server
-curl -sS -m 15 -o /dev/null -w '%{http_code}
-' https://example.com/   # 403 จาก squid
-curl -sS -m 20 -o /dev/null -w '%{http_code}
-' https://api.anthropic.com/v1/models  # 401 = ผ่าน แต่ไม่มีคีย์
+curl -sS -m 15 -o /dev/null -w '%{http_code}\n' https://example.com/   # 403 จาก squid
+curl -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models  # 401 = ผ่าน แต่ไม่มีคีย์
 ```
 
 **สองช็อต curl นี้พิสูจน์คนละเรื่อง — อย่าพูดสลับ:**
@@ -107,7 +105,151 @@ PUSH=fatal: could not read Username for 'https://github.com': terminal prompts d
 ไม่เห็นว่า push อะไรไป ท่าที่ปลอดภัยกว่าและเป็นท่าที่เอกสารแนะนำ (`docs/THREAT_MODEL.md` §4.3):
 ให้ agent ทำงานใน `/workspace` แล้ว **`git diff` + push จากโฮสต์เอง**
 
-### 0.5 ปิดท้ายวิดีโอใช้งาน
+### 0.5 บทพูด — อ่านตามได้เลย (วิดีโอใช้งาน ~4-5 นาที)
+
+เครื่องหมาย `[...]` คือคิวมือ ไม่ต้องอ่านออกเสียง ตัวเลขทุกตัวในบทนี้มาจากการรันจริงบนเครื่องที่อัด
+ถ้าเครื่องให้เลขอื่น **ให้เชื่อหน้าจอ แล้วพูดตามหน้าจอ** อย่าอ่านตามบท
+
+---
+
+**เปิด (~20 วินาที)** — [จอเปล่า เทอร์มินัลสะอาด]
+
+> "AI Warden คือกรงสำหรับ AI coding agent ครับ แนวคิดคือ agent ทำงานได้เต็มที่ในโฟลเดอร์เดียวที่เราให้
+> แต่ออกเน็ตได้แค่โดเมนใน allowlist และหลุดออกมาหาเครื่องเราไม่ได้ วิดีโอนี้ผมจะเริ่มจาก `git clone`
+> เปล่า ๆ ไปจนรัน agent ในกรงได้จริง ทุกคำสั่งที่เห็นคือของจริง ไม่มีตัดต่อระหว่างคำสั่ง"
+
+---
+
+**ช็อต 1 — clone (~20 วินาที)** — [พิมพ์]
+
+```bash
+git clone https://github.com/mntoyg/AI-Warden.git
+cd AI-Warden
+```
+
+> "repo เป็น public ตั้งใจให้ตรวจสอบได้ ขนาดแค่ประมาณหนึ่งเมกะไบต์กว่า เพราะ image ยังไม่ได้ build
+> ตอนนี้ยังไม่มีอะไรต้องตั้งค่าเลยครับ"
+
+---
+
+**ช็อต 2 — ตรวจเครื่อง (~40 วินาที)** — [พิมพ์ `./scripts/setup-host.sh` แล้วรอให้จบ]
+
+> "คำสั่งแรกไม่ใช่การติดตั้ง มันคือการ *ตรวจ* ว่าเครื่องเราพร้อมไหม"
+
+[ชี้บรรทัด `[ ok ] docker daemon reachable`]
+
+> "ถ้า Docker ยังไม่ขึ้น มันจะขึ้นสีแดงแล้วหยุดตรงนี้ ไม่เดินต่อแบบครึ่ง ๆ กลาง ๆ — ตอนผมซ้อม
+> Docker Desktop ดับเองตอนกลางวัน แล้วมันก็ฟ้องตรงนี้จริง ๆ"
+
+[ชี้ `[ ok ] egress allowlist has 22 rule(s)` และ `[ ok ] .env created from .env.example (mode 600)`]
+
+> "มันบอกว่า allowlist มี 22 กฎ และสร้างไฟล์ `.env` ให้เราเป็น mode 600 — คีย์ทั้งหมดอยู่ในไฟล์นี้
+> ไฟล์เดียว ไม่เคยถูก build ลง image และเดี๋ยวผมจะไม่เปิดไฟล์นี้ให้ดูนะครับ"
+
+[ชี้บรรทัดสรุปและบล็อก Next steps]
+
+> "จบด้วยสรุปว่าผ่านกี่ข้อ แล้วบอกขั้นต่อไปให้เลย — เราก็เดินตามนั้น"
+
+---
+
+**ช็อต 3 — build (~30 วินาที ถ้า cache / ตัดต่อถ้าเครื่องสะอาด)** — [พิมพ์ `./scripts/warden-cli.sh build`]
+
+> "build สอง image ครับ ตัว agent กับตัว egress proxy เครื่องสะอาดครั้งแรกต้องโหลดประมาณ 3-4 กิกะ
+> กินหลายนาที ของผมมี cache อยู่แล้วเลยจบในไม่กี่วินาที"
+
+---
+
+**ช็อต 4-5 — เปิดด่านแล้วดูสถานะ (~40 วินาที)** — [พิมพ์ `./scripts/warden-cli.sh up`]
+
+[ชี้ `[ ok ] egress audit trail live`]
+
+> "บรรทัดนี้สำคัญกว่าที่เห็นครับ มันไม่ได้เช็กแค่ว่า proxy รันอยู่ มันยิง probe เข้าไปแล้วอ่าน log
+> กลับออกมาจริง ๆ เพราะเคยมีเคสที่ log ของ proxy ตายเงียบ ๆ แต่ health check ยังขึ้นเขียว
+> แล้วเราก็ไม่รู้ว่า agent คุยกับใครไปบ้างตั้ง 10 วัน"
+
+[พิมพ์ `./scripts/warden-cli.sh status`]
+
+> "status บอกเวอร์ชัน จำนวนกฎใน allowlist audit trail ว่ามีชีวิต และ network ของ sandbox
+> ที่เป็น `internal=true` — คำนี้แปลว่า container ไม่มีเส้นทางออกเน็ตเลย ทางเดียวคือผ่าน proxy"
+
+---
+
+**ช็อต 6 — เข้าไปในกรง (~80 วินาที)** — [พิมพ์]
+
+```bash
+./scripts/warden-cli.sh run ./my-project bash
+```
+
+[รอ banner ขึ้น ชี้บรรทัด `isolation : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)`]
+
+> "นี่คือ posture ที่มันประกาศก่อนเริ่มทุกครั้ง ทีนี้เราอยู่ข้างในแล้ว ลองสี่อย่างครับ"
+
+[พิมพ์ทีละคำสั่ง]
+
+```bash
+id
+grep CapBnd /proc/self/status
+ls /workspace
+```
+
+> "หนึ่ง เราไม่ใช่ root เป็น uid 1001 · สอง `CapBnd` เป็นศูนย์ทั้งหมด แปลว่า capability ของ Linux
+> ถูกถอดออกหมดจริง ไม่ใช่แค่ใส่ flag ไว้ · สาม ในกรงเห็นแค่โฟลเดอร์โปรเจกต์ของเรา ไม่เห็นเครื่องเรา"
+
+[ถ้าคนดูสังเกต `secrets.json`]
+
+> "ไฟล์ `secrets.json` ที่เห็นไม่ใช่ของผมนะครับ มันคือกับดักที่ sandbox หยอดไว้เอง —
+> ถ้า agent ไปเปิดอ่าน session จะถูกฆ่าทันที อันนั้นเป็นอีกวิดีโอ วิดีโอนี้ผมไม่แตะมัน"
+
+[พิมพ์ช็อต curl สองอัน — **อย่าสลับบท**]
+
+```bash
+curl -sS -m 8 --noproxy '*' https://1.1.1.1/
+curl -sS -m 15 -o /dev/null -w '%{http_code}\n' https://example.com/
+curl -sS -m 20 -o /dev/null -w '%{http_code}\n' https://api.anthropic.com/v1/models
+```
+
+> "อันแรกผมสั่งข้าม proxy ไปเลย ได้ `curl: (7) Couldn't connect` — คือ *ไม่มีเส้นทางออก* จริง ๆ
+> อันที่สองไปโดเมนที่ไม่อยู่ใน allowlist ผ่าน proxy ได้ `403` — อันนี้คือ *allowlist ปฏิเสธ*
+> คนละเรื่องกันครับ อย่าเหมารวม · อันที่สามเป็นโดเมนที่อนุญาต ได้ `401` คือไปถึงจริง
+> แค่ผมไม่ได้ใส่คีย์ในช็อตนี้"
+
+---
+
+**ช็อต 7 — ใช้กับ repo ของเราเอง (~50 วินาที)** — [ยังอยู่ในกรง พิมพ์]
+
+```bash
+git clone --depth 1 https://github.com/<you>/<your-repo>.git
+git -C <your-repo> log --oneline -1
+git push
+```
+
+> "GitHub อยู่ใน allowlist ครับ เลย clone กับ fetch ได้จากในกรง — ตอนผมซ้อม มันดึง commit
+> ที่ผมเพิ่ง push ขึ้นไปเมื่อกี้ลงมาให้เห็นเลย ส่วน `git push` จะเฟล บอกว่าหา username ไม่ได้
+> เพราะกรงไม่มี credential ติดไปด้วย แปลว่า agent push แทนเราเองไม่ได้"
+
+> "ถ้าอยากให้ push ได้ ใส่ `GITHUB_TOKEN` ใน `.env` ได้ แต่พูดตรง ๆ ว่า token ที่เข้าไปอยู่ในกรงแล้ว
+> agent ใช้ได้กับทุก repo ที่ token นั้นเอื้อม และ audit trail เห็นแค่ว่าต่อไป github ไม่เห็นว่า push อะไร
+> ท่าที่ผมแนะนำคือให้ agent ทำงานใน workspace แล้วเรา `git diff` กับ push จากเครื่องเราเอง"
+
+---
+
+**ปิด (~30 วินาที)** — [พิมพ์ `exit`]
+
+[ชี้ `[ ok ] session ended cleanly`]
+
+> "ออกมาแล้วมันเก็บของให้เรียบร้อย ของจริงก็เปลี่ยน `bash` เป็น `claude` หรือ `codex` หรือ `aider`
+> โดยมีคีย์อยู่ใน `.env`"
+
+> "สิ่งที่วิดีโอนี้ *ไม่ได้* อ้างนะครับ: กรงนี้กันการหลุดระดับ kernel ไม่ได้ ถ้า agent มีโค้ดเจาะ kernel
+> และกันไม่ให้เอาข้อมูลออกทางโดเมนที่เราอนุญาตเองไม่ได้ — เรื่องพวกนี้เขียนไว้ตรง ๆ ใน
+> `docs/THREAT_MODEL.md` หัวข้อ 4 ส่วนเรื่อง tripwire กับ breach จริงอยู่ในอีกวิดีโอ"
+
+---
+
+**ถ้าพลาดกลางทาง:** `setup-host.sh` แดง = Docker ยังไม่ขึ้น · session ค้างตอนเริ่ม = proxy ยังไม่ขึ้น
+(`./scripts/warden-cli.sh up`) · อยากซ้อมทั้งเส้นก่อนอัดใหม่ = `./scripts/rehearse-usage.sh`
+
+### 0.6 ปิดท้ายวิดีโอใช้งาน
 
 ```bash
 exit                                  # ออกจากกรง -> "[ ok ] session ended cleanly"
