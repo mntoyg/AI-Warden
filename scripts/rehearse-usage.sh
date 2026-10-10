@@ -90,7 +90,11 @@ probe='id; grep CapBnd /proc/self/status; ls /workspace; '
 probe+='curl -sS -m 8 --noproxy "*" -o /dev/null -w "direct=%{http_code}\n" https://1.1.1.1/ || true; '
 probe+='getent hosts example.com >/dev/null && echo "dns=resolved" || echo "dns=unresolved"; '
 probe+='curl -sS -m 15 -o /dev/null -w "denied=%{http_code}\n" https://example.com/ || true; '
-probe+='curl -sS -m 25 -o /dev/null -w "allowed=%{http_code}\n" https://api.anthropic.com/v1/models || true'
+probe+='curl -sS -m 25 -o /dev/null -w "allowed=%{http_code}\n" https://api.anthropic.com/v1/models || true; '
+# Section 0.4's shot: GitHub is in the allowlist, so a clone from inside the cage
+# works and is the answer to "can it work on MY repo?". Asserted here because it
+# is a live dependency on the day - if github.com is unreachable the take dies.
+probe+='GIT_TERMINAL_PROMPT=0 git ls-remote --heads https://github.com/mntoyg/AI-Warden.git >/dev/null 2>&1 && echo "github=readable" || echo "github=unreachable"'
 ses_out="$("${SCRIPT_DIR}/warden-cli.sh" run "$REHEARSE_WS" bash -- -lc "$probe" 2>&1)"
 
 # Positive control first: a session that never started would fail every check
@@ -131,6 +135,13 @@ case "$allowed" in
     [1-5][0-9][0-9]) good "allowlisted shot: api.anthropic.com answered HTTP ${allowed} through the proxy (401 = reached it, no key)" ;;
     *) bad "an allowlisted host did not answer through the proxy (allowed=${allowed:-none})" ;;
 esac
+
+if printf '%s
+' "$ses_out" | grep -qx 'github=readable'; then
+    good "github shot: the cage reads github.com through the proxy (clone/fetch work; push needs a credential you put in .env yourself)"
+else
+    bad "github.com is not readable from inside the cage - section 0.4's clone shot would fail on camera"
+fi
 
 if printf '%s\n' "$ses_out" | grep -q 'session ended cleanly'; then
     good "the session closed with 'session ended cleanly' - the closing shot"

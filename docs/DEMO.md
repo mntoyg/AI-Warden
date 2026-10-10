@@ -83,7 +83,31 @@ curl -sS -m 20 -o /dev/null -w '%{http_code}
 ถ้าจะพูดถึงมันในวิดีโอ "how to use" ให้บอกแค่ว่าเป็นกับดัก แล้วโยงไปวิดีโอความปลอดภัย; **การเปิดไฟล์นี้
 จะจบ session ด้วย exit 99 ทันที** (นั่นคือองก์ 3 ไม่ใช่องก์สอนใช้)
 
-### 0.4 ปิดท้ายวิดีโอใช้งาน
+### 0.4 ช็อตที่คนดูอยากเห็นที่สุด: ใช้ repo ของตัวเองในกรง
+
+`github.com`, `api.github.com`, `codeload.github.com` และ `.githubusercontent.com` อยู่ใน allowlist
+จึง **clone / fetch / ls-remote ได้จากในกรง** วัดจริงจาก session เดียว (ทั้งหมดผ่าน proxy ที่ถูก audit):
+
+```
+CLONE=ok b6d0570 feat(demo): rehearse-usage.sh - one command that says whether the take is safe
+LSREMOTE=2 ref(s)
+PUSH=fatal: could not read Username for 'https://github.com': terminal prompts disabled
+```
+
+ช็อตนี้เล่าได้สองชั้นในครั้งเดียว:
+
+1. **อ่านได้** — `git clone https://github.com/<you>/<repo>.git` ในกรงสำเร็จ (ในซ้อม มันดึง commit
+   ที่เพิ่ง push ขึ้นไปเมื่อครู่ลงมาให้เห็น ๆ) นี่คือคำตอบของ "เอา repo ฉันมาทำงานได้ไหม"
+2. **เขียนไม่ได้โดยปริยาย** — `git push` ล้มด้วย `could not read Username` เพราะกรง **ไม่มี credential
+   ติดมาด้วย** agent จึง push แทนเราไม่ได้เองเฉย ๆ
+
+ถ้าจะให้ push ได้จริงต้องตั้งใจใส่: `.env` มีช่อง `GITHUB_TOKEN=` อยู่แล้ว และ CLI ส่ง `.env` ทั้งไฟล์
+เข้า container ด้วย `--env-file` (ไม่เคย bake ลง image) — **พูดความเสี่ยงออกกล้องด้วย:** token ที่เข้าไป
+อยู่ในกรงแล้ว agent ใช้ได้กับทุก repo ที่ token นั้นเอื้อม และ audit trail เห็นแค่ `CONNECT github.com:443`
+ไม่เห็นว่า push อะไรไป ท่าที่ปลอดภัยกว่าและเป็นท่าที่เอกสารแนะนำ (`docs/THREAT_MODEL.md` §4.3):
+ให้ agent ทำงานใน `/workspace` แล้ว **`git diff` + push จากโฮสต์เอง**
+
+### 0.5 ปิดท้ายวิดีโอใช้งาน
 
 ```bash
 exit                                  # ออกจากกรง -> "[ ok ] session ended cleanly"
