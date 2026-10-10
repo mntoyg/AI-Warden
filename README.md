@@ -158,22 +158,25 @@ networks:
 
 ## เริ่มใช้งานใน 4 คำสั่ง
 
+เปิด Docker ให้ขึ้นก่อน (`docker info` ต้องผ่าน) — `setup-host.sh` เป็น fail-closed
+ถ้า daemon ไม่ตอบมันจะขึ้น `[fail] docker daemon is not reachable` แล้วออกด้วย exit 1
+
 ```bash
 git clone https://github.com/mntoyg/AI-Warden.git
 cd AI-Warden
-./scripts/setup-host.sh          # ตรวจ prerequisite, สร้าง .env และ network
+./scripts/setup-host.sh          # ตรวจ prerequisite, สร้าง .env (mode 600) และ network
 ```
 
 ```bash
-make build                        # build image ทั้ง agent และ egress proxy (~3-4 GB)
+./scripts/warden-cli.sh build     # build image ทั้ง agent และ egress proxy (~3-4 GB ครั้งแรก)
 ```
 
 ```bash
-make up                           # เปิด egress filter
+./scripts/warden-cli.sh up        # เปิด egress filter + พิสูจน์ว่า audit trail มีชีวิต
 ```
 
 ```bash
-./scripts/verify-isolation.sh     # พิสูจน์ว่า isolation ใช้งานได้จริง
+./scripts/verify-isolation.sh     # พิสูจน์ว่า isolation ใช้งานได้จริง (phase A-M, ~20 นาที)
 ```
 
 จากนั้นรัน agent:
@@ -182,11 +185,10 @@ make up                           # เปิด egress filter
 ./scripts/warden-cli.sh run ./my-project claude
 ```
 
-หรือผ่าน `make`:
-
-```bash
-make run-claude WS=./my-project
-```
+ทุกคำสั่งมี alias ใน `Makefile` (`make build`, `make up`, `make run-claude WS=./my-project`,
+`make logs`) ถ้าเครื่องมี `make` — **บน Windows ไม่มี `make` ติดมาด้วย** จึงใช้ `./scripts/warden-cli.sh`
+เป็นชุดหลัก (เดินตามชุดนี้จาก clone สดแล้วใน session 16: `setup-host.sh` ผ่าน 12 ข้อ,
+build 8 วินาทีเมื่อ cache อยู่, `up` 5 วินาที, session แรก ~17 วินาที — ดู `docs/DEMO.md` §0)
 
 ---
 

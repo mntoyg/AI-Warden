@@ -18,6 +18,70 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 
 ---
 
+## 0. วิดีโอ "how to use" — จาก `git clone` ถึง session แรก
+
+ส่วนนี้แยกจาก 4 องก์ด้านล่าง (ซึ่งเป็นวิดีโอ *ความปลอดภัย*: perimeter → ในกรง → tripwire → agent จริง)
+ส่วนนี้คือวิดีโอ **การใช้งาน**: คนดูเห็นตั้งแต่ clone repo สาธารณะจนรัน agent ในกรงได้จริง
+ทุกคำสั่งและ output ข้างล่างมาจากการซ้อมจาก **clone สดของ `main`** บนเครื่องที่จะอัด (session 16)
+ไม่ได้คัดจาก README
+
+### 0.1 เตรียมก่อนกล้องเดิน
+
+| # | สิ่งที่ต้องทำ | ทำไม |
+|---|---|---|
+| 1 | เปิด Docker Desktop และรอจน `docker info` ผ่าน | `setup-host.sh` **fail-closed**: ถ้า daemon ไม่ขึ้นมันจะขึ้น `[fail] docker daemon is not reachable` และ exit 1 — เจอจริงตอนซ้อม เพราะ Docker Desktop ดับเองระหว่างวัน |
+| 2 | `./scripts/warden-cli.sh build` ให้เสร็จ **ก่อน** อัด (หรือยอมตัดต่อ) | เครื่องสะอาดครั้งแรกต้องดึง ~3–4 GB กินหลายนาที; ถ้า cache อยู่แล้ววัดได้ **8 วินาที** |
+| 3 | ตั้งเทอร์มินัลให้กว้างพอเห็นกรอบ banner ไม่แตก (~70 คอลัมน์ขึ้นไป) | banner `A I   W A R D E N   v1.2.11` คือช็อตเปิด |
+| 4 | **อย่าให้ `.env` ขึ้นกล้อง** และอย่ารัน `codex login status` | มันพิมพ์คีย์บางส่วนออกมา (`sk-proj-***…`) |
+| 5 | เตรียมโฟลเดอร์เปล่าชื่อ `my-project` ไว้ 1 ไฟล์ (เช่น `app.py`) | ให้เห็นว่า agent เห็นแค่โฟลเดอร์นี้ ไม่ใช่เครื่องทั้งเครื่อง |
+
+### 0.2 Shot list (เวลาจริงจากการซ้อม)
+
+| ช็อต | คำสั่ง | สิ่งที่ต้องขึ้นจอ | เวลา |
+|---|---|---|---|
+| 1 | `git clone https://github.com/mntoyg/AI-Warden.git && cd AI-Warden` | clone ~1.4 MB ไม่มีอะไรต้องตั้งค่า | ไม่กี่วินาที |
+| 2 | `./scripts/setup-host.sh` | `[ ok ] docker daemon reachable` · `[ ok ] all 10 required files present` · `[ ok ] egress allowlist has 22 rule(s)` · `[ ok ] .env created from .env.example (mode 600)` · ปิดท้าย `12 passed, 1 warning(s), 0 failure(s)` + บล็อก **Next steps** | ~5 วินาที |
+| 3 | `./scripts/warden-cli.sh build` | `[ ok ] agent sandbox built` · `[ ok ] images ready` | 8 วินาที (cache) / หลายนาที (เครื่องสะอาด) |
+| 4 | `./scripts/warden-cli.sh up` | `[ ok ] egress proxy up (health=healthy)` · `[ ok ] egress audit trail live` | 5 วินาที |
+| 5 | `./scripts/warden-cli.sh status` | v1.2.11 · allowlist 22 rule(s) · **audit trail live** · networks `internal=true` | ทันที |
+| 6 | `./scripts/warden-cli.sh run ./my-project bash` | banner + `isolation : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)` แล้วได้ shell ในกรง | ~17 วินาทีต่อ session |
+
+ในช็อต 6 สี่คำสั่งนี้คือแกนของวิดีโอ — รันแล้วได้ผลนี้จริงจาก clone สด:
+
+```bash
+id                       # uid=1001(ai_user) gid=1001(ai_user) groups=1001(ai_user)
+grep CapBnd /proc/self/status   # CapBnd: 0000000000000000   <- --cap-drop=ALL ทำงาน
+ls /workspace            # app.py  secrets.json
+curl -sS -m 8 --noproxy '*' https://1.1.1.1/      # curl: (7) Couldn't connect to server
+curl -sS -m 15 -o /dev/null -w '%{http_code}
+' https://example.com/   # 403 จาก squid
+curl -sS -m 20 -o /dev/null -w '%{http_code}
+' https://api.anthropic.com/v1/models  # 401 = ผ่าน แต่ไม่มีคีย์
+```
+
+**สองช็อต curl นี้พิสูจน์คนละเรื่อง — อย่าพูดสลับ:**
+
+- `--noproxy '*'` = **ไม่มีเส้นทางออกเลย** (`curl: (7)`, network เป็น `internal`) และชื่อข้างนอกก็ resolve ไม่ได้
+- ไม่ใส่ `--noproxy` = agent image ฝัง `HTTP_PROXY`/`HTTPS_PROXY` ไว้ curl จึงวิ่งเข้า squid แล้วถูกปฏิเสธ
+  `CONNECT tunnel failed, response 403` — นี่คือการพิสูจน์ **allowlist** ไม่ใช่การพิสูจน์ว่าไม่มี route
+
+**`secrets.json` ใน `/workspace` ไม่ใช่ไฟล์ของคนดู** — มันคือ canary ที่ sandbox หยอดไว้เอง (honeytoken)
+ถ้าจะพูดถึงมันในวิดีโอ "how to use" ให้บอกแค่ว่าเป็นกับดัก แล้วโยงไปวิดีโอความปลอดภัย; **การเปิดไฟล์นี้
+จะจบ session ด้วย exit 99 ทันที** (นั่นคือองก์ 3 ไม่ใช่องก์สอนใช้)
+
+### 0.3 ปิดท้ายวิดีโอใช้งาน
+
+```bash
+exit                                  # ออกจากกรง -> "[ ok ] session ended cleanly"
+./scripts/warden-cli.sh run ./my-project claude   # ของจริงต้องมีคีย์ใน .env
+make build / make up / make run-claude WS=./my-project   # ทางเลือกสำหรับเครื่องที่มี make
+```
+
+`make` เป็นเพียง alias ของ `warden-cli.sh` — **บน Windows ไม่มี `make` ติดมาด้วย** ถ้าอัดบนเครื่อง
+Windows ให้ใช้ `./scripts/warden-cli.sh …` ทั้งวิดีโอ (README ก็ยึดชุดนี้เป็นหลักแล้วตั้งแต่ v1.2.11)
+
+---
+
 ## 1. Pre-flight (T-30 นาที ก่อนกล้องเดิน)
 
 **รันทุกคำสั่งใน Git Bash ที่เปิดอยู่ใน terminal แบบ ConPTY** (Windows Terminal หรือ terminal
