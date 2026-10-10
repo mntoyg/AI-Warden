@@ -34,7 +34,7 @@ Linux kernel, Docker daemon และ runtime, image ที่ build จาก r
 
 | # | ผลลัพธ์ | มาตรการหลัก | มาตรการรอง |
 |---|---|---|---|
-| T1 | อ่านคีย์/ข้อมูลลับของโฮสต์ | mount แค่โฟลเดอร์เดียว, `assert_safe_mount()` | canary tripwire |
+| T1 | อ่านคีย์/ข้อมูลลับของโฮสต์ | mount แค่โฟลเดอร์เดียว, `assert_safe_mount()` (รวม volume ของสื่อถอดได้ทั้งลูก — §3.8) | canary tripwire |
 | T2 | ยกสิทธิ์เป็น root ในกรง | `--cap-drop=ALL`, `no-new-privileges`, uid 1001 | ลบ setuid bit ทั้ง image, ไม่มี sudo |
 | T3 | ส่งข้อมูลออกไปปลายทางที่ไม่อนุญาต | network `internal: true` | squid DENY ALL + allowlist |
 | T4 | เปิด reverse shell | ไม่มี route ออก, บล็อกพอร์ตที่ไม่ใช่ 80/443 | บล็อก IP literal |
@@ -242,6 +242,33 @@ key ไม่เคยอยู่บน argv (ที่ `ps` และ monitor 
 
 traffic ระหว่าง agent กับ model ไม่ผ่าน squid จึงไม่อยู่ใน audit trail ของ egress — log ของ
 llama-server คือบันทึกเดียวของเส้นทางนี้ และ canary / sentinel ยังทำงานเหมือนเดิม
+
+### 3.8 mount guard: ถาม kernel ว่าอะไรคือ volume ไม่ใช่เดาจากชื่อ
+
+`assert_safe_mount()` ปฏิเสธพาธที่จะส่งของให้ agent มากกว่าหนึ่งโปรเจกต์: root ของ filesystem,
+พาธระบบ, parent ที่รวมข้อมูลของทุกผู้ใช้ (`/home`, `/Users`, `/media`, `/mnt`, `/run/media`,
+`/cygdrive`, `/Volumes`), ไดรฟ์ทั้งลูก, `$HOME` ทั้งก้อน และตัว source tree ของ AI Warden เอง
+ตรวจทั้ง `pwd -P` และ `pwd -L` เพราะโฮสต์แบบ usrmerge ทำให้ `/bin` → `/usr/bin` (v1.0.2)
+
+**ช่องที่ปิดใน v1.2.11:** กฎเดิมดูแค่ *ชื่อ* ของ parent จึงจับได้แค่ `/media/<label>` แต่ udisks
+auto-mount ไว้ลึกกว่านั้นหนึ่งชั้น (`/media/<user>/<label>`, `/run/media/<user>/<label>`) —
+parent ของมันคือ `/media/alice` ซึ่งไม่ตรงกฎใด ๆ **USB stick ทั้งลูกจึง mount ได้เงียบ ๆ**
+และ `/Volumes` ของ macOS ไม่เคยถูกครอบเลย ปัญหาคือ *ชื่อพาธบอกไม่ได้* ว่าอะไรคือ volume root
+อะไรคือโฟลเดอร์ที่คนสร้างไว้เอง จึงถาม kernel แทน: ถ้าพาธอยู่ใต้ media prefix เหล่านั้น **และเป็น
+mountpoint ของ filesystem ตัวเอง** (`mountpoint -q` ถ้ามี ไม่มีก็เทียบ device number กับ parent)
+→ ปฏิเสธ พร้อมบอกทางออก
+
+| กรณี | ผล | เหตุผล |
+|---|---|---|
+| `/media/alice/USB-STICK` (mountpoint) | **ปฏิเสธ** | ทั้ง volume |
+| `/media/alice/USB-STICK/project` | ผ่าน | โปรเจกต์ใน volume, filesystem เดียวกับ parent |
+| `/media/alice/notes` (ไม่ใช่ mountpoint) | ผ่าน | โฟลเดอร์ธรรมดา ไม่ใช่ volume |
+| `/data` ที่มีดิสก์ของตัวเอง (mountpoint นอก media prefix) | ผ่าน | layout ที่ถูกต้องของเซิร์ฟเวอร์ |
+
+**ข้อจำกัดที่ยอมรับ:** การเทียบ device number มองไม่เห็น bind mount ที่มาจาก device เดียวกัน
+จึงใช้ heuristic นี้เฉพาะกับ media prefix ไม่ใช้เป็นด่านเดียว — กฎชื่อทั้งหมดข้างต้นยังอยู่ครบ
+drill **E3** mount tmpfs จริงสามลูกและยืนยันว่าเป็น mountpoint ก่อนทดสอบ แล้วเช็กทั้งฝั่งปฏิเสธและ
+ฝั่งที่ต้องยังผ่าน (guard ที่ปฏิเสธทุกอย่างก็พังเท่ากับ guard ที่ไม่ปฏิเสธอะไร)
 
 ---
 

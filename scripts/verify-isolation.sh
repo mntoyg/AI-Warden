@@ -637,9 +637,20 @@ CLI_MOUNT="$(host_path "${SCRIPT_DIR}/warden-cli.sh")"
 # other failure mode: a legitimate project dir, and a project nested INSIDE a
 # drive (/media/usb/app) must both still be allowed - a guard that refuses
 # everything is as broken as one that refuses nothing.
-e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot /media/usb/app /cygdrive/c /run/media/u /opt/wtest-project >/dev/null 2>&1; f=0; for p in / /run /home /Users /mnt /mnt/c /media /media/usb /cygdrive /cygdrive/c /run/media /srv /etc /usr /var /root /boot /dev /proc /sys /opt /bin /sbin /lib; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; for ok in /opt/wtest-project /media/usb/app; do if ( assert_safe_mount "$ok" ) >/dev/null 2>&1; then :; else echo "REGRESSION:refused $ok"; f=$((f+1)); fi; done; echo "E3_FAILS=$f"; exit $f'
+# The udisks/Finder volume roots are one level deeper than the parent rule can
+# see (/media/<user>/<label>, /run/media/<user>/<label>, /Volumes/<label>), and
+# a name cannot tell a volume root from an ordinary folder sitting there. So
+# this half of the drill MOUNTS three real tmpfs volumes and proves each one is
+# a mountpoint before testing it - an unmounted path would make the refusals
+# meaningless. The two accept-tests on the other side are what stop the fix
+# from becoming "refuse everything under /media": a project dir INSIDE a volume
+# and a plain folder beside one must both still be allowed.
+e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot /media/usb/app /cygdrive/c /run/media/u /opt/wtest-project /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP >/dev/null 2>&1; f=0; for v in /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do mount -t tmpfs none "$v" >/dev/null 2>&1; mountpoint -q "$v" || { echo "SETUP:not a mountpoint $v"; f=$((f+1)); }; done; mkdir -p /media/alice/USB-STICK/project /media/alice/notes >/dev/null 2>&1; for p in / /run /home /Users /mnt /mnt/c /media /media/usb /cygdrive /cygdrive/c /run/media /Volumes /srv /etc /usr /var /root /boot /dev /proc /sys /opt /bin /sbin /lib /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; for ok in /opt/wtest-project /media/usb/app /media/alice/USB-STICK/project /media/alice/notes; do if ( assert_safe_mount "$ok" ) >/dev/null 2>&1; then :; else echo "REGRESSION:refused $ok"; f=$((f+1)); fi; done; echo "E3_FAILS=$f"; exit $f'
 
-e3_out="$(docker run --rm --user 0:0 --network none --entrypoint bash \
+# --cap-add SYS_ADMIN is for the DRILL container only, so it can mount the
+# tmpfs volumes above. It says nothing about the sandbox, which keeps
+# --cap-drop=ALL (phase A asserts an empty bounding set).
+e3_out="$(docker run --rm --user 0:0 --cap-add SYS_ADMIN --network none --entrypoint bash \
     --name warden-verify-e3 \
     -v "${CLI_MOUNT}:/opt/wtest/scripts/warden-cli.sh:ro" \
     "$AGENT_IMAGE" -c "$e3_payload" 2>&1)"

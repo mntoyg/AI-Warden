@@ -4,6 +4,35 @@
 
 ---
 
+## [1.2.11] — 2026-10-10
+
+**security: mount guard ปฏิเสธ volume ของสื่อถอดได้ทั้งลูก (รูปแบบของ udisks และ macOS)**
+
+ต้อง rebuild agent image เพื่อให้ banner ตรงเวอร์ชัน (`./scripts/warden-cli.sh build`) ตัวแก้อยู่ใน
+`scripts/warden-cli.sh` ซึ่งรันบนโฮสต์ จึงมีผลทันทีที่ pull
+
+### Security
+
+- **`assert_safe_mount()` ยอมให้ mount USB/ดิสก์ภายนอกทั้งลูกได้ ถ้ามันถูก auto-mount แบบ udisks:**
+  กฎเดิมดูแค่ *ชื่อ* parent (`/media`, `/run/media`, `/cygdrive`) ซึ่งจับได้แค่ `/media/<label>`
+  แต่ udisks mount ไว้ลึกกว่านั้นหนึ่งชั้น — `/media/<user>/<label>` — parent ของมันคือ `/media/alice`
+  ซึ่งไม่ตรงกฎใด ๆ **จึงผ่านเงียบ ๆ และ agent ได้ทั้ง USB stick** `/Volumes` ของ macOS
+  ไม่เคยถูกครอบเลยทั้ง `/Volumes` เองและ `/Volumes/<label>`
+- **ทางแก้ — ถาม kernel ไม่ใช่เดาจากชื่อ:** เพิ่ม `is_mount_point()` (ใช้ `mountpoint -q` ถ้ามี
+  ไม่มีก็เทียบ device number กับ parent ด้วย `stat -c %d` / BSD `stat -f %d`) ถ้าพาธอยู่ใต้
+  `/media`, `/run/media`, `/cygdrive` หรือ `/Volumes` **และเป็น mountpoint ของ filesystem ตัวเอง**
+  → ปฏิเสธ พร้อมบอกทางออก ("mount a project folder inside it instead") และเพิ่ม `/Volumes`
+  เข้าทั้งรายการ shared parent และกฎ parent ของไดรฟ์
+- **ไม่ปฏิเสธเหมารวม:** โฟลเดอร์โปรเจกต์ *ข้างใน* volume (`/media/alice/USB-STICK/project`) และ
+  โฟลเดอร์ธรรมดาที่ไม่ใช่ mountpoint (`/media/alice/notes`) ยัง mount ได้ — ทั้งคู่เป็น accept-test ใน drill
+  ส่วน mountpoint ที่อยู่ที่อื่น (เช่น `/data` ที่มีดิสก์ของตัวเอง) เป็น layout ที่ถูกต้อง จึงไม่แตะ
+- **drill E3 ขยาย:** mount tmpfs จริง 3 ลูก (`/media/alice/USB-STICK`, `/run/media/bob/DATA`,
+  `/Volumes/BACKUP`) และ **ยืนยันว่าแต่ละลูกเป็น mountpoint ก่อนทดสอบ** (ถ้า mount ไม่ติด การปฏิเสธจะ
+  ไม่มีความหมาย) container ของ drill ได้ `--cap-add SYS_ADMIN` เพื่อ mount — ไม่เกี่ยวกับ posture ของ
+  sandbox ซึ่งยัง `--cap-drop=ALL` พิสูจน์ย้อนทางแล้ว: บนโค้ดเก่า drill แดง 4 ข้อ
+  (`LEAK:/Volumes`, `LEAK:/media/alice/USB-STICK`, `LEAK:/run/media/bob/DATA`, `LEAK:/Volumes/BACKUP`)
+  ไม่มีบรรทัด `SETUP:` และไม่มี `REGRESSION:`
+
 ## [1.2.10] — 2026-10-08
 
 **verification: phase M วัดเพดานที่เหลือทั้งหมด — swap และจำนวน process (ไม่ใช่แค่ `--memory`)**

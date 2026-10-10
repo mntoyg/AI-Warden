@@ -34,8 +34,8 @@ panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่�
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
-| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.161.0` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.2.8, session 14 - ต้อง workspace เป็น git repo ไม่งั้นโดนปฏิเสธด้วย "Not inside a trusted directory") v1.2.9 และ v1.2.10 rebuild จาก cache ล้วน ไม่ได้ขยับ CLI ตัวไหน |
-| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–M ผ่าน (v1.2.10), **exit 0**, `enforced=4/7` บน Docker Desktop |
+| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.161.0` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.2.8, session 14 - ต้อง workspace เป็น git repo ไม่งั้นโดนปฏิเสธด้วย "Not inside a trusted directory") v1.2.9–v1.2.11 rebuild จาก cache ล้วน ไม่ได้ขยับ CLI ตัวไหน |
+| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–M ผ่าน (v1.2.11), **exit 0**, `enforced=4/7` บน Docker Desktop |
 | 3b | audit trail ของ proxy ยังมีชีวิต | `./scripts/warden-cli.sh status` | บรรทัด audit trail บอก `live` — ถ้า `DEAD` (เกิดแล้ว 2 ครั้งหลังปิด Docker Desktop ไม่สะอาด) รัน `./scripts/warden-cli.sh up` แล้วเช็คใหม่ |
 | 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` — บอกแค่ว่ามี key **ไม่ได้บอกว่ามีเครดิต** ข้อ 5 เป็นตัวพิสูจน์ |
 | 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` — ถ้าเห็น `Quota exceeded` คือเครดิต OpenAI หมด ไม่ใช่ sandbox เสีย |
