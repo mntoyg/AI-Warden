@@ -27,7 +27,7 @@ set -euo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
-readonly WARDEN_VERSION="1.2.10"
+readonly WARDEN_VERSION="1.2.11"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -166,6 +166,25 @@ host_path() {
 # empty path and every check here would be decorative. Calling it directly also
 # gives the .ssh/.aws confirmation prompt a real terminal to read from.
 RESOLVED_MOUNT=""
+# Is this path the root of its own filesystem? Removable media is auto-mounted
+# one level deeper than any name rule can see (udisks puts a volume at
+# /media/<user>/<label>, macOS at /Volumes/<label>), and a name cannot tell a
+# volume root from an ordinary folder someone made beside it. The kernel can:
+# `mountpoint` when util-linux is present, otherwise the device number differs
+# from the parent's (GNU `stat -c`, BSD `stat -f`). It is a heuristic - a bind
+# mount from the same device is invisible to the stat fallback - so it is used
+# only to refuse media prefixes, never as the single guard.
+is_mount_point() {
+    local p="$1" dev parent_dev
+    if command -v mountpoint >/dev/null 2>&1; then
+        mountpoint -q "$p" && return 0
+        return 1
+    fi
+    dev="$(stat -c %d "$p" 2>/dev/null || stat -f %d "$p" 2>/dev/null || echo unknown)"
+    parent_dev="$(stat -c %d "${p}/.." 2>/dev/null || stat -f %d "${p}/.." 2>/dev/null || echo unknown)"
+    [ "$dev" != "unknown" ] && [ "$parent_dev" != "unknown" ] && [ "$dev" != "$parent_dev" ]
+}
+
 assert_safe_mount() {
     local abs="$1"
     RESOLVED_MOUNT=""
@@ -192,7 +211,7 @@ assert_safe_mount() {
         case "$candidate" in
             /|/root|/etc|/usr|/var|/boot|/dev|/proc|/sys|/bin|/sbin|/lib|/lib64|/opt|/srv|/run)
                 die "refusing to mount system path: ${candidate}" ;;
-            /home|/home/|/Users|/Users/|/media|/mnt|/mnt/|/run/media|/cygdrive)
+            /home|/home/|/Users|/Users/|/media|/mnt|/mnt/|/run/media|/cygdrive|/Volumes|/Volumes/)
                 die "refusing to mount a shared parent of user data: ${candidate}" ;;
             /[a-z]|/[a-z]/|/[A-Z]|/[A-Z]/)
                 die "refusing to mount a whole drive: ${candidate}" ;;
@@ -207,12 +226,27 @@ assert_safe_mount() {
         # Match the drive root by its PARENT instead; a project folder nested
         # deeper (e.g. /media/usb/app) has a different parent and is still
         # allowed. /mnt keeps its single-letter rule above, because a hand-made
-        # /mnt/project is a legitimate layout. (The udisks /media/<user>/<label>
-        # form is one level deeper and is not covered here - see HANDOFF.)
+        # /mnt/project is a legitimate layout. /Volumes is listed because macOS
+        # mounts every volume, the boot disk included, directly under it.
         parent="$(dirname "$candidate")"
         case "$parent" in
-            /media|/run/media|/cygdrive)
+            /media|/run/media|/cygdrive|/Volumes)
                 die "refusing to mount what looks like a whole drive: ${candidate}" ;;
+        esac
+
+        # udisks mounts a volume one level deeper than that - /media/<user>/<label>
+        # and /run/media/<user>/<label> - which no name rule above can tell from an
+        # ordinary folder someone made there. Ask the kernel instead: under a media
+        # prefix, a path that is the root of its own filesystem IS the whole volume.
+        # A project folder inside it, or a plain folder beside it, shares its
+        # parent's filesystem and stays allowed; a mountpoint elsewhere (/data on
+        # its own disk) is a legitimate layout, so the test is scoped to these
+        # prefixes. Drill E3 mounts real tmpfs volumes and checks both sides.
+        case "$candidate" in
+            /media/*|/run/media/*|/cygdrive/*|/Volumes/*)
+                if is_mount_point "$candidate"; then
+                    die "refusing to mount a whole removable volume (${candidate} is a mountpoint). Mount a project folder inside it instead."
+                fi ;;
         esac
     done
 
