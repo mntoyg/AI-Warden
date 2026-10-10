@@ -35,19 +35,23 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 | 4 | **อย่าให้ `.env` ขึ้นกล้อง** และอย่ารัน `codex login status` | มันพิมพ์คีย์บางส่วนออกมา (`sk-proj-***…`) |
 | 5 | เตรียมโฟลเดอร์เปล่าชื่อ `my-project` ไว้ 1 ไฟล์ (เช่น `app.py`) | ให้เห็นว่า agent เห็นแค่โฟลเดอร์นี้ ไม่ใช่เครื่องทั้งเครื่อง |
 
-### 0.2 ซ้อมด้วยคำสั่งเดียวก่อนกล้องเดิน
+### 0.2 สคริปต์ที่ "เดินโชว์" ให้ — ใช้ทั้งซ้อมและอัด
 
 ```bash
-./scripts/rehearse-usage.sh        # เขียวทั้งหมด = พร้อมอัด, แดง = ยังอย่าอัด
+./scripts/demo-usage.sh            # บนกล้อง: พิมพ์คำสั่ง -> รันจริง -> โชว์ผล -> รอ Enter
+./scripts/demo-usage.sh --auto     # ซ้อม: ไม่หยุดรอ, ไม่ต้องมี TTY
 ```
 
-มันเดินเส้นทางของ §0.3 จริงแล้ว **ตรวจทุกบรรทัดที่ต้องขึ้นจอ** (daemon ตอบ, `setup-host.sh` exit 0,
-image มีอยู่, `up` บอก audit trail live, `status` บอก live, session จริงที่ได้ `uid=1001`,
-`CapBnd` ว่าง, canary ถูกหยอด, ช็อต curl ทั้งสองแบบพูดถูกเรื่อง, และปิดด้วย `session ended cleanly`)
-ไม่ build ให้ (เครื่องสะอาดต้อง `build` เองก่อน) และไม่รัน suite เต็ม
+มัน **ไม่ใช่สไลด์** — ทุกบรรทัดที่ขึ้นจอมาจากของจริง และแต่ละช็อต **ยืนยันข้ออ้างของตัวเอง**
+(daemon ตอบ · clone จาก GitHub ได้จริง · `setup-host.sh` exit 0 · image มีอยู่ · `up` บอก audit trail
+live · `status` อ่านกลับได้ · session จริงที่ `uid=1001` และ `CapBnd` เป็นศูนย์ · ช็อต curl สองแบบ
+พูดถูกเรื่อง · ในกรง `git clone` ได้ แต่ `git push` ไม่ได้) ถ้าเรื่องไหนไม่เกิดจริงมันจะ **FAIL เสียงดัง**
+แล้ว exit 1 พร้อมบอกว่า `Do not ship this take.` — demo ที่บรรยายว่ากันได้ทั้งที่ไม่ได้กันอะไร
+คือบั๊กที่โปรเจกต์นี้มีอยู่เพื่อจับ
 
-**positive control:** ถ้า session เริ่มไม่ได้ มันจะบอก `nothing below was measured` แล้ว exit 1
-ไม่ปล่อยให้ความเงียบดูเหมือนผ่าน — พิสูจน์แล้วด้วย `WARDEN_RUNTIME=doesnotexist` (CLI ปฏิเสธ → แดง 1 ข้อ)
+**positive control:** ถ้า session เริ่มไม่ได้ มันบอก `the session never ran, so nothing above was
+measured` ไม่ปล่อยให้ความเงียบดูเหมือนผ่าน (พิสูจน์แล้วด้วย `WARDEN_RUNTIME=doesnotexist`)
+รันเต็มบนเครื่องที่จะอัดแล้ว: **12 PASS, exit 0** (`USAGE DEMO COMPLETE`)
 
 ### 0.3 Shot list (เวลาจริงจากการซ้อม)
 
@@ -247,7 +251,7 @@ git push
 ---
 
 **ถ้าพลาดกลางทาง:** `setup-host.sh` แดง = Docker ยังไม่ขึ้น · session ค้างตอนเริ่ม = proxy ยังไม่ขึ้น
-(`./scripts/warden-cli.sh up`) · อยากซ้อมทั้งเส้นก่อนอัดใหม่ = `./scripts/rehearse-usage.sh`
+(`./scripts/warden-cli.sh up`) · อยากซ้อมทั้งเส้นก่อนอัดใหม่ = `./scripts/demo-usage.sh --auto`
 
 ### 0.6 ปิดท้ายวิดีโอใช้งาน
 
