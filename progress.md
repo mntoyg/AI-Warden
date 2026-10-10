@@ -8,21 +8,12 @@
 
 ## 2026-10-10 · session 16 (Windows box) — mount guard: ปฏิเสธ volume ของสื่อถอดได้ทั้งลูก
 
-### 🔴 ค้างอยู่ตรงนี้ — ทำต่อคืนนี้ (RESUME HERE)
+### ✅ ปล่อยครบแล้ว (ปิดงานเย็นวันเดียวกัน)
 
-**v1.2.11 อยู่บน `main` แล้ว (merge PR #10, commit `e0b93f6`) แต่ยัง "ไม่ได้ตัด tag"** — เป็น
-**security fix** จึงต้องปล่อยเป็น release ตามกฎของโปรเจกต์ ("security fixes sitting on main ship to nobody")
-ขั้นตอนที่เหลือ ตามลำดับ:
-
-1. รอ/เช็ก CI ของ push บน main ให้เขียวครบ 5 job ก่อน — `gh run view 38032013326 --json jobs`
-   (ตอนหยุด: static ผ่านแล้ว, ext4/gVisor/Kata/CVE ยังรัน; PR #10 เขียวครบ 5 job มาแล้วบน commit เดียวกัน)
-2. `git tag -a v1.2.11 -F <ข้อความ>` แล้ว `git push origin v1.2.11` (ร่างข้อความได้จาก CHANGELOG `[1.2.11]`
-   ซึ่งเขียนครบแล้ว — ภาษาไทย + คำสั่ง/ผลลัพธ์อังกฤษ)
-3. `gh release create v1.2.11 --latest` พร้อม notes (ดู CHANGELOG `[1.2.11]` และ `docs/THREAT_MODEL.md` §3.8)
-4. **ติด superseded note บน release v1.2.10** — รอบนี้เป็น security fix จริง ต่างจาก v1.2.9/v1.2.10
-   ที่เป็น verification + docs (สองตัวนั้น**ไม่ต้อง**ติด)
-5. รอ CI ของ tag ให้เขียว แล้วปิดงาน: อัปเดต `.ai/HANDOFF.md` (Status/Tags/Session log) + `progress.md`
-   + rewrite `.ai/NEXT_PROMPT.md` (v22, bump + log ใน HANDOFF §8)
+[v1.2.11](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.11) เป็น **Latest** แล้ว — tag ที่ `e0b93f6`
+(commit ที่ merge PR #10) หลัง CI บน `main` เขียวครบทั้งสอง push, release notes เป็นภาษาไทย
+และ **ติด superseded note ให้ v1.2.8, v1.2.9 และ v1.2.10 ทั้งสามรุ่น** เพราะช่อง mount guard อยู่ในทุกรุ่น
+(ไม่ใช่แค่รุ่นก่อนหน้าตัวเดียว) — อ่านกลับมาเช็กแล้วว่าโน้ตขึ้นจริงทั้งสาม
 
 ### ทำอะไรไปแล้ว
 
