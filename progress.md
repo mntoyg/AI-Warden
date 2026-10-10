@@ -15,6 +15,33 @@
 และ **ติด superseded note ให้ v1.2.8, v1.2.9 และ v1.2.10 ทั้งสามรุ่น** เพราะช่อง mount guard อยู่ในทุกรุ่น
 (ไม่ใช่แค่รุ่นก่อนหน้าตัวเดียว) — อ่านกลับมาเช็กแล้วว่าโน้ตขึ้นจริงทั้งสาม
 
+### 🎥 ต่อเย็นเดียวกัน — ฉากวิดีโอ "how to use" (จาก git clone)
+
+ผู้ใช้อยากอัดวิดีโอการใช้งาน: `git clone` จาก GitHub แล้วใช้งานต่อ จึงซ้อมด้วยวิธีเดียวที่พิสูจน์ได้ —
+**clone repo สาธารณะจริง** ลง scratch dir แล้วเดินทุกคำสั่งในเอกสารบนเครื่องที่จะอัด ได้ของจริง 3 อย่าง
+ที่ถ้าไม่ซ้อมจะไปโป๊ะหน้ากล้อง:
+
+1. **README สั่ง `make build` / `make up` ซึ่งใช้ไม่ได้บนเครื่องนี้** — Windows ไม่มี `make` ติดมา
+   ขณะที่ `setup-host.sh` ของโปรเจกต์เองชี้ไป `warden-cli.sh` อยู่แล้ว → quickstart เปลี่ยนเป็น
+   `./scripts/warden-cli.sh …` เป็นชุดหลัก, `make` เป็น alias สำหรับเครื่องที่มี
+2. **Docker Desktop ดับเองระหว่างวัน** → `setup-host.sh` ขึ้น `[fail] docker daemon is not reachable`
+   แล้ว exit 1 (fail-closed ที่ถูกต้อง แต่เสียช็อต) → README + §0.1 เตือนให้เปิด Docker ก่อน
+   พอ Docker ขึ้น: setup-host.sh **exit 0, 12 ผ่าน** จาก clone สด
+3. **ช็อต "ยิงตรงออกเน็ตแล้วไม่ไป" พิสูจน์ผิดเรื่อง** — agent image ฝัง `HTTP_PROXY` ไว้
+   `curl https://1.1.1.1/` จึงวิ่งเข้า squid ได้ `403` (= พิสูจน์ allowlist) การพิสูจน์ว่า**ไม่มีเส้นทางออก**
+   ต้องใส่ `--noproxy '*'` → `curl: (7) Couldn't connect` + ชื่อข้างนอก resolve ไม่ได้
+
+**ของที่ส่งมอบ** (บน `main` แล้ว, CI เขียว): `docs/DEMO.md` **§0** = shot list 6 ช็อตพร้อมเวลาที่วัดได้
+(clone ~1.4 MB · setup-host ~5 s · build 8 s เมื่อ cache / หลายนาทีเครื่องสะอาด · up 5 s · session แรก ~17 s),
+สิ่งที่ต้องเตรียมก่อนกล้องเดิน, และ **§0.4 ช็อต GitHub**: ในกรง `git clone`/`fetch` ได้จริง (ดึง commit
+ที่เพิ่ง push ลงมาให้เห็น) แต่ `git push` เฟล `could not read Username` เพราะกรงไม่มี credential —
+ถ้าจะให้ push ได้ต้องตั้งใจใส่ `GITHUB_TOKEN` ใน `.env` พร้อมความเสี่ยงที่ต้องพูดออกกล้อง
+
+`scripts/rehearse-usage.sh` = คำสั่งเดียวที่ **ตรวจทุกบรรทัดที่ต้องขึ้นจอ** (13 PASS, exit 0)
+และมี positive control: ถ้า session เริ่มไม่ได้มันบอก `nothing below was measured` แล้ว exit 1
+พิสูจน์แล้วด้วย `WARDEN_RUNTIME=doesnotexist` · ตรวจหน้า github.com ที่ render จริงด้วยว่า quickstart
+ที่คนดูจะเห็นเป็นชุด `warden-cli.sh` แล้ว
+
 ### ทำอะไรไปแล้ว
 
 - **ช่องที่เจอ:** `assert_safe_mount()` ดูแค่ *ชื่อ* ของ parent จึงจับได้แค่ `/media/<label>` แต่ udisks
