@@ -6,6 +6,56 @@
 
 ---
 
+## 2026-10-10 · session 16 (Windows box) — mount guard: ปฏิเสธ volume ของสื่อถอดได้ทั้งลูก
+
+### 🔴 ค้างอยู่ตรงนี้ — ทำต่อคืนนี้ (RESUME HERE)
+
+**v1.2.11 อยู่บน `main` แล้ว (merge PR #10, commit `e0b93f6`) แต่ยัง "ไม่ได้ตัด tag"** — เป็น
+**security fix** จึงต้องปล่อยเป็น release ตามกฎของโปรเจกต์ ("security fixes sitting on main ship to nobody")
+ขั้นตอนที่เหลือ ตามลำดับ:
+
+1. รอ/เช็ก CI ของ push บน main ให้เขียวครบ 5 job ก่อน — `gh run view 38032013326 --json jobs`
+   (ตอนหยุด: static ผ่านแล้ว, ext4/gVisor/Kata/CVE ยังรัน; PR #10 เขียวครบ 5 job มาแล้วบน commit เดียวกัน)
+2. `git tag -a v1.2.11 -F <ข้อความ>` แล้ว `git push origin v1.2.11` (ร่างข้อความได้จาก CHANGELOG `[1.2.11]`
+   ซึ่งเขียนครบแล้ว — ภาษาไทย + คำสั่ง/ผลลัพธ์อังกฤษ)
+3. `gh release create v1.2.11 --latest` พร้อม notes (ดู CHANGELOG `[1.2.11]` และ `docs/THREAT_MODEL.md` §3.8)
+4. **ติด superseded note บน release v1.2.10** — รอบนี้เป็น security fix จริง ต่างจาก v1.2.9/v1.2.10
+   ที่เป็น verification + docs (สองตัวนั้น**ไม่ต้อง**ติด)
+5. รอ CI ของ tag ให้เขียว แล้วปิดงาน: อัปเดต `.ai/HANDOFF.md` (Status/Tags/Session log) + `progress.md`
+   + rewrite `.ai/NEXT_PROMPT.md` (v22, bump + log ใน HANDOFF §8)
+
+### ทำอะไรไปแล้ว
+
+- **ช่องที่เจอ:** `assert_safe_mount()` ดูแค่ *ชื่อ* ของ parent จึงจับได้แค่ `/media/<label>` แต่ udisks
+  auto-mount ลึกกว่านั้นหนึ่งชั้น (`/media/<user>/<label>`) parent ของมันคือ `/media/alice` ซึ่งไม่ตรงกฎใด ๆ
+  → **mount USB stick / ดิสก์ภายนอกทั้งลูกเข้า sandbox ได้เงียบ ๆ** และ macOS ไม่เคยถูกครอบเลย
+  (`/Volumes` และ `/Volumes/<label>`)
+- **ทางแก้:** ชื่อพาธบอกไม่ได้ว่าอะไรคือ volume จึงถาม kernel — `is_mount_point()` (`mountpoint -q`
+  ถ้ามี, ไม่มีก็เทียบ device number กับ parent ด้วย `stat -c %d` / BSD `stat -f %d`) ถ้าพาธอยู่ใต้
+  `/media`, `/run/media`, `/cygdrive`, `/Volumes` **และเป็น mountpoint ของตัวเอง** → ปฏิเสธ
+  พร้อมบอกทางออก; เพิ่ม `/Volumes` เข้ารายการ shared parent + กฎ parent ของไดรฟ์
+- **ไม่ปฏิเสธเหมารวม:** `/media/alice/USB-STICK/project` และ `/media/alice/notes` (ไม่ใช่ mountpoint)
+  ยัง mount ได้ — เป็น accept-test ใน drill; `/data` ที่มีดิสก์ของตัวเอง (mountpoint นอก media prefix) ก็ผ่าน
+- **drill E3 ขยาย:** mount tmpfs จริง 3 ลูก และ**ยืนยันว่าเป็น mountpoint ก่อนทดสอบ**
+  พิสูจน์ย้อนทางบนโค้ดเก่าแล้ว: `LEAK:/Volumes`, `LEAK:/media/alice/USB-STICK`,
+  `LEAK:/run/media/bob/DATA`, `LEAK:/Volumes/BACKUP` → 4 ปัญหา, ไม่มี `SETUP:`, ไม่มี `REGRESSION:`
+- **CI รอบแรกของ PR #10 แดงทั้ง 3 drill job — และ drill แดงถูกต้อง:** positive control นับเป็น 3 ปัญหา
+  เพราะ tmpfs mount ไม่ติดบน runner `--cap-add SYS_ADMIN` **ไม่พอ** บนโฮสต์ที่มี **AppArmor**
+  (profile `docker-default` ปฏิเสธ `mount` ตรง ๆ) ซึ่งเป็นเหตุผลที่ผ่านบน Docker Desktop (WSL2 ไม่มี AppArmor)
+  → เพิ่ม `--security-opt apparmor=unconfined` ให้ container ของ **drill** (ไม่ใช่ sandbox),
+  ให้ drill พิมพ์เหตุผลที่ `mount` เฟล, และแก้บรรทัดรายงานของ E3 ให้โชว์ `SETUP:` ไม่ใช่ซ่อนไว้
+- **หลักฐาน:** local suite **A–M exit 0** บน v1.2.11 (60 PASS, `enforced=4/7`, SKIP เดียวคือฝั่ง no-GPU
+  ของ phase J) · PR #10 **เขียวครบ 5 job** (E3 ผ่านบนเคอร์เนล Linux แท้ทั้ง ext4/gVisor/Kata) ·
+  shellcheck clean · branch `mount-guard-removable-volume` ลบแล้ว
+- เอกสารที่อัปเดตแล้ว: `CHANGELOG.md` `[1.2.11]`, `docs/THREAT_MODEL.md` **§3.8** (กฎทั้งชุด + ช่องที่ปิด +
+  ตาราง 4 กรณี + ข้อจำกัดที่ยอมรับ) และแถว T1 ชี้ไปที่มัน, README (ส่วน Host Isolation + แถว phase E),
+  `docs/DEMO.md`
+
+### ติดฝั่งผู้ใช้ (ถามแล้ว 2026-10-10 — ยังเหมือนเดิมทั้งสาม)
+ไม่มีวันถ่าย demo · เครดิต OpenAI ยังไม่เติม · Colab ยังไม่ได้รัน (เครื่องนี้มีแค่ GGUF base)
+
+---
+
 ## 2026-10-08 · session 15 (Windows box) — เลิกเชื่อ label เรื่องเพดานทรัพยากร
 
 ปล่อย 2 release: **v1.2.9** และ **v1.2.10** (ทั้งคู่เป็น verification + docs ไม่ใช่ security fix
