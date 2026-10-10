@@ -645,12 +645,16 @@ CLI_MOUNT="$(host_path "${SCRIPT_DIR}/warden-cli.sh")"
 # meaningless. The two accept-tests on the other side are what stop the fix
 # from becoming "refuse everything under /media": a project dir INSIDE a volume
 # and a plain folder beside one must both still be allowed.
-e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot /media/usb/app /cygdrive/c /run/media/u /opt/wtest-project /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP >/dev/null 2>&1; f=0; for v in /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do mount -t tmpfs none "$v" >/dev/null 2>&1; mountpoint -q "$v" || { echo "SETUP:not a mountpoint $v"; f=$((f+1)); }; done; mkdir -p /media/alice/USB-STICK/project /media/alice/notes >/dev/null 2>&1; for p in / /run /home /Users /mnt /mnt/c /media /media/usb /cygdrive /cygdrive/c /run/media /Volumes /srv /etc /usr /var /root /boot /dev /proc /sys /opt /bin /sbin /lib /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; for ok in /opt/wtest-project /media/usb/app /media/alice/USB-STICK/project /media/alice/notes; do if ( assert_safe_mount "$ok" ) >/dev/null 2>&1; then :; else echo "REGRESSION:refused $ok"; f=$((f+1)); fi; done; echo "E3_FAILS=$f"; exit $f'
+e3_payload='. /opt/wtest/scripts/warden-cli.sh; set +eu; export HOME=/root; mkdir -p /Users /mnt/c /boot /media/usb/app /cygdrive/c /run/media/u /opt/wtest-project /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP >/dev/null 2>&1; f=0; for v in /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do merr="$(mount -t tmpfs none "$v" 2>&1)"; mountpoint -q "$v" || { echo "SETUP:not a mountpoint $v - mount said: ${merr:-nothing}"; f=$((f+1)); }; done; mkdir -p /media/alice/USB-STICK/project /media/alice/notes >/dev/null 2>&1; for p in / /run /home /Users /mnt /mnt/c /media /media/usb /cygdrive /cygdrive/c /run/media /Volumes /srv /etc /usr /var /root /boot /dev /proc /sys /opt /bin /sbin /lib /media/alice/USB-STICK /run/media/bob/DATA /Volumes/BACKUP; do if ( assert_safe_mount "$p" ) >/dev/null 2>&1; then echo "LEAK:$p"; f=$((f+1)); fi; done; for ok in /opt/wtest-project /media/usb/app /media/alice/USB-STICK/project /media/alice/notes; do if ( assert_safe_mount "$ok" ) >/dev/null 2>&1; then :; else echo "REGRESSION:refused $ok"; f=$((f+1)); fi; done; echo "E3_FAILS=$f"; exit $f'
 
-# --cap-add SYS_ADMIN is for the DRILL container only, so it can mount the
-# tmpfs volumes above. It says nothing about the sandbox, which keeps
-# --cap-drop=ALL (phase A asserts an empty bounding set).
-e3_out="$(docker run --rm --user 0:0 --cap-add SYS_ADMIN --network none --entrypoint bash \
+# --cap-add SYS_ADMIN and apparmor=unconfined are for the DRILL container only,
+# so it can mount the tmpfs volumes above. CAP_SYS_ADMIN alone is not enough on
+# a host running AppArmor: its docker-default profile denies mount outright,
+# which is why these mounts worked on Docker Desktop (WSL2, no AppArmor) and
+# failed on a GitHub runner until this flag was added. Neither flag says
+# anything about the sandbox, which keeps --cap-drop=ALL and the default
+# profiles (phase A asserts an empty bounding set).
+e3_out="$(docker run --rm --user 0:0 --cap-add SYS_ADMIN --security-opt apparmor=unconfined --network none --entrypoint bash \
     --name warden-verify-e3 \
     -v "${CLI_MOUNT}:/opt/wtest/scripts/warden-cli.sh:ro" \
     "$AGENT_IMAGE" -c "$e3_payload" 2>&1)"
@@ -660,7 +664,7 @@ if [ "$e3_rc" -eq 0 ]; then
     good "phase E3: every unsafe mount target was refused and a legitimate project dir was accepted"
 else
     bad  "phase E3: the mount guard did not behave correctly (${e3_rc} problem(s))"
-    note "         $(printf '%s' "$e3_out" | grep -E 'LEAK:|REGRESSION:' | tr '\n' ' ')"
+    note "         $(printf '%s' "$e3_out" | grep -E 'LEAK:|REGRESSION:|SETUP:' | tr '\n' ' ')"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
 

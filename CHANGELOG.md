@@ -32,6 +32,11 @@
   sandbox ซึ่งยัง `--cap-drop=ALL` พิสูจน์ย้อนทางแล้ว: บนโค้ดเก่า drill แดง 4 ข้อ
   (`LEAK:/Volumes`, `LEAK:/media/alice/USB-STICK`, `LEAK:/run/media/bob/DATA`, `LEAK:/Volumes/BACKUP`)
   ไม่มีบรรทัด `SETUP:` และไม่มี `REGRESSION:`
+- **`--cap-add SYS_ADMIN` ไม่พอบนโฮสต์ที่มี AppArmor:** profile `docker-default` ปฏิเสธ `mount` ตรง ๆ
+  drill จึง mount ไม่ติดบน runner ของ GitHub (ขณะที่ติดบน Docker Desktop ซึ่งเป็น WSL2 ไม่มี AppArmor)
+  — PR #10 รอบแรกจับได้เพราะ **positive control** นับเป็น 3 ปัญหา ไม่ใช่ปล่อยให้การปฏิเสธผ่านลอย ๆ
+  เพิ่ม `--security-opt apparmor=unconfined` ให้ container ของ drill (ไม่ใช่ของ sandbox) และให้ drill
+  พิมพ์เหตุผลที่ `mount` เฟลออกมาด้วย พร้อมแก้บรรทัดรายงานของ phase E3 ให้โชว์ `SETUP:` ไม่ใช่ซ่อนไว้
 
 ## [1.2.10] — 2026-10-08
 
