@@ -6,6 +6,88 @@
 
 ---
 
+## 2026-11-11 · session 17 (Windows box) — CI แดงสามสัปดาห์เพราะ codex เปลี่ยนคำพูด ไม่ใช่เพราะกรงพัง
+
+### 🔴 สิ่งที่เจอตอนเปิดเซสชัน
+
+`.ai/HANDOFF.md` **ค้างมาหนึ่งเดือน** (เขียนครั้งสุดท้าย 2026-10-10) ไม่รู้เรื่อง commit วิดีโอแปดตัวบน
+`main` และไม่รู้เรื่อง **CI ที่แดงติดกันสามสัปดาห์** — schedule ของ 10-26, 11-02, 11-09 ล้มหมด
+เขียวครั้งสุดท้าย 10-19 **สิ่งเดียวที่ทำให้เห็นคือ `gh run list` ใน reality check** ไม่มีอะไรอื่นเตือนเลย
+
+ทั้งสาม run ล้มที่บรรทัดเดียวกันเป๊ะทั้งสาม runtime (ext4 / gVisor / Kata) ขณะที่ static analysis กับ
+CVE scan ผ่านทุกครั้ง:
+
+```
+FAIL phase G: codex launch is not usable (rc=0, logged_in=0, sandbox_off=1)
+```
+
+### 🔍 ต้นเหตุ — และ**ไม่มีอะไรในกรงพังเลย**
+
+ไม่มี commit ของ repo คั่นระหว่าง run เขียวครั้งสุดท้ายกับ run แดงครั้งแรก เพราะต้นเหตุอยู่ข้างนอก:
+CI rebuild image ทุก run และ codex-cli ขยับ **0.161.0 → 0.167.1** ซึ่ง**เปลี่ยนถ้อยคำของตัวเอง**
+
+| codex-cli | `codex login status` พิมพ์ว่า |
+|---|---|
+| 0.161.0 | `Logged in using an API key - sk-...` |
+| 0.167.1 | `API key configured - sk-warde***00000` |
+
+พิสูจน์ด้วยการรัน wrapper line เดิมด้วยมือบน image ทั้งสองเวอร์ชันก่อนแก้โค้ดแม้บรรทัดเดียว
+(สองคำสั่ง `docker run` ตอบได้ ไม่ต้องไล่อ่านโค้ด) และที่สำคัญ: **บรรทัดที่ fail บอกคำตอบอยู่แล้วตั้งสามสัปดาห์**
+— `rc=0` = login สำเร็จ, `sandbox_off=1` = flag ยังถูกส่ง มีแค่ `logged_in=0` ที่ผิด และมันคือช่องเดียว
+ที่ไป grep ประโยคของ vendor
+
+### ✅ สิ่งที่แก้ — phase G *วัด* แทนการอ่านถ้อยคำ (v1.2.12)
+
+**ไม่ได้แก้ด้วยการเติมสตริงใหม่เข้า grep** เพราะนั่นคือรูปทรงบั๊กประจำของโปรเจกต์นี้ใส่เสื้อใหม่:
+ตัวตรวจที่อ่าน *ถ้อยคำ* ไม่ใช่ *สถานะ* เขียนใหม่เป็นสองการวัด:
+
+- **G1** ส่ง fake key **สองใบที่ต่างกันทั้งหัวและหาง** แล้วบังคับว่า identity line ของ codex ต้องต่างกัน
+  และแต่ละใบต้องมีหัว key ของตัวเอง → ประโยคคงที่ที่ถูก reword ตอบไม่ได้, `auth.json` ค้างตอบไม่ได้,
+  key ที่มาจาก `.env` แทน environment ก็ตอบไม่ได้
+- **G2** บรรทัด log ของเราที่บอกว่าส่ง `sandbox_mode="danger-full-access"` เป็นแค่ **label** —
+  ใช้ **`codex sandbox -- <cmd>`** (subcommand ใหม่ใน 0.167.1) ให้ codex *ลงมือทำ*: ใต้ flag ของ warden
+  คำสั่งเขียนไฟล์นอก workspace ได้ แต่ทับด้วย `-c sandbox_mode="read-only"` (`-c` ตัวหลังชนะ) แล้ว codex
+  ถอยไปใช้ bubblewrap ซึ่งสร้าง user namespace ใต้ `cap-drop=ALL` ไม่ได้ คำสั่งเดียวกันจึงถูกปฏิเสธ
+  → ได้ทั้งผลวัดและ control บนเส้นทาง `warden-cli.sh run` จริง **โดยไม่เสียเครดิต API เลย**
+
+**ดูมัน FAIL ก่อนเชื่อ** — scratch harness เฉพาะ phase G รันกับ `warden-cli.sh` ที่ถูก sabotage:
+
+| wrapper | G1 | G2 |
+|---|---|---|
+| ของจริง | PASS | PASS |
+| ตัด login ออก | **FAIL** `nothing was measured` | PASS |
+| ตัด `sandbox_mode` ออก | PASS | **FAIL** `dfa_wrote=0, label=0` |
+
+### ⚠️ สองเรื่องที่เกือบปล่อย "เขียวปลอม" ออกไป
+
+1. **suite รอบแรกถูก Git for Windows อัปเดตตัวเองฆ่ากลางทาง** — `gfw-install-*` เริ่ม 16:06:51,
+   run ตาย 16:06:49, `usr\bin\bash.exe` หายไป (Bash tool เองพังด้วย) **phase K/L/M ไม่ได้รันเลย**
+   และ background task รายงาน **exit 0 พร้อม output ว่าง** → 45 PASS / 0 FAIL ดูเหมือนผ่าน
+   แก้วิธีทำงาน: เขียน rc ของ suite ลง log เอง (`===EXIT=`) และเช็ค phase สุดท้ายที่ไปถึงก่อนเชื่อทุกครั้ง
+2. **banner ของ canary ยังบอก `v1.2.11`** ทั้งที่ `warden-cli.sh status` บอก `v1.2.12` — version string
+   อยู่ใน **สามไฟล์ สองภาษา** และ `monitors/canary_monitor.py:58` ถูกมองข้ามเพราะค้นด้วย
+   `grep --include="*.sh"` ค่าเดียวกันนี้ไปอยู่ใน **incident report JSON** (`warden_version`) ด้วย
+   ถ้ามี breach เกิดขึ้นรายงานก็จะอ้างเวอร์ชันผิด — เจอเพราะ**อ่าน output ของ run จริง ไม่ใช่เชื่อ `status`**
+
+### 📋 ผลรันบนเครื่องนี้
+
+- suite **A–M exit 0, 61 PASS, 0 FAIL**, self-test 35/35, `enforced=4/7`, SKIP เดียวคือฝั่งไม่มี GPU
+  ของ phase J (CI รันฝั่งนั้น) — รันซ้ำอีกรอบหลังแก้ version string เพื่อให้โค้ดที่ commit คือโค้ดที่รันเขียว
+- เช็ค job อื่นของ CI ไว้ล่วงหน้าก่อน push: `shellcheck -S warning` **rc=0** ตามรายการไฟล์ของ CI เป๊ะ
+  และ trivy OS HIGH/CRITICAL `--ignore-unfixed` = **0 ทั้งสอง image**
+- image หลัง `build --pull`: **codex-cli 0.167.1** (จาก 0.161.0), claude 2.1.197, aider 0.86.2 (ไม่ขยับ)
+- แก้ `--help` ของ suite ด้วย: มันพิมพ์ช่วงบรรทัดคงที่ (`sed -n '2,57p'`) ซึ่งจะกิน Usage line หายไป
+  หลังเพิ่มคำอธิบาย phase G สามบรรทัด → `2,60p`
+
+### ⏭️ ถัดไป
+
+1. วิดีโอ **"how to use"** — ซ้อมแล้ว เขียนสคริปต์แล้ว **ยังไม่ได้อัด** และ**ไม่ติดอะไรทางเทคนิคเลย**
+   ไม่ต้องมีวันนัด ไม่ต้องมีเครดิต OpenAI (เช็ค `demo-usage.sh` บน image ใหม่ก่อน เพราะ codex ขยับเวอร์ชัน)
+2. วิดีโอ demo security — ยังไม่มีวัน + เครดิต OpenAI ยังว่าง (ยืนยันกับผู้ใช้แล้ว 2026-11-11)
+3. local model — ผู้ใช้ยังไม่ได้รัน Colab (เช็คแล้ว: `warden-model-lab` มีแต่ base GGUF ไม่มี `manifest/`)
+
+---
+
 ## 2026-10-10 · session 16 (Windows box) — mount guard: ปฏิเสธ volume ของสื่อถอดได้ทั้งลูก
 
 ### ✅ ปล่อยครบแล้ว (ปิดงานเย็นวันเดียวกัน)

@@ -4,27 +4,31 @@
 > **Reality beats this file.** If git, CI or the running system disagree with it,
 > the system is right — fix this file in your first commit and say so.
 
-- **Last updated:** 2026-10-10 (session 16, Windows box)
+- **Last updated:** 2026-11-11 (session 17, Windows box)
+- **🔴 Read this first if you are new:** this file was **stale by a month** at the start of session 17 -
+  it was last written on 2026-10-10 and knew nothing about (a) the eight "how to use" video commits that
+  were already on `main`, nor (b) **three weeks of red CI**. Both are written up below. The lesson is the
+  one at the top of this file: reality beats this file, so re-check it before trusting a word.
 - **Latest release:** [v1.2.11](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.11) — **SECURITY: the mount guard refuses a whole removable volume.** `assert_safe_mount()` read the parent's NAME, so it caught `/media/<label>` and nothing else; udisks mounts one level deeper (`/media/<user>/<label>`, parent `/media/alice`, matching no rule), so a whole USB stick or external disk was accepted silently - and macOS (`/Volumes`, `/Volumes/<label>`) was never covered at all. A name cannot tell a volume root from an ordinary folder, so the guard now asks the kernel: `is_mount_point()` (`mountpoint -q`, else the device number vs the parent's) refuses any path under `/media`, `/run/media`, `/cygdrive` or `/Volumes` that is its own filesystem's root. It does NOT refuse by prefix: a project inside a volume, a plain folder beside one, and a mountpoint outside those prefixes (`/data` on its own disk) all stay allowed. Drill E3 mounts three real tmpfs volumes and proves each is a mountpoint before testing it. v1.2.8, v1.2.9 and v1.2.10 now carry a superseded note - they all had the hole.
 - **Previous release:** [v1.2.10](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.10) — **phase M now measures the WHOLE of phase A's resource section**, not just `--memory`. Measured: swap really is a sidestep (`--memory 256m --memory-swap 512m` reached **496 MiB** against 240 with equal values, so setting them equal is what holds the cap, not the `memory.swap.max=0` label); `--ulimit nproc=64` stops a fork loop at 63 with EAGAIN on every runtime; `--pids-limit 64` stops it at 63 on runc and is SKIPped with its reason elsewhere (gVisor counts host tasks, Kata bounds nothing in the guest). And `RLIMIT_NPROC` is a per-uid budget whose reach is the host's: on a GitHub runner, whose job user IS uid 1001, the same 64 cap let uid 4242 fork 63 but uid 1001 only **4** (and, before the fix, the container could not even start: `exit=255`, zero forks) - tighter than asked, never looser, and the CLI's real `nproc=512` leaves the headroom the drill's 64 does not. Shipped through PR #9 (all five jobs green). v1.2.9 is NOT superseded (no security change).
 - **Before that:** [v1.2.9](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.9) — **phase M: the memory cap is MEASURED, not read off a label.** Not a security fix; no cage behaviour changed, but the suite proves one more thing. `--memory` is enforced on all three runtimes (runc 240/256 MiB usable, gVisor 208–224, Kata 144; at a 1 GiB cap 1008 / 976 / 896 — the overhead is fixed, not proportional, so the CLI's default `4g` still leaves the agent ~3.9 GiB). Two findings beside it: under Kata the kill is `exit=137` with **`OOMKilled=false`** (the guest kernel does it; the host never sees an OOM), and under gVisor `/sys/fs/cgroup/memory.max` **does not exist in the sandbox at all**, so phase A can only `skip` and the outside measurement is the only proof. v1.2.8 is NOT superseded (no security change).
 - **Before that:** [v1.2.8](https://github.com/mntoyg/AI-Warden/releases/tag/v1.2.8) — PID 1's own log line no longer claims the tripwire sent SIGUSR1 when the agent could have forged the breach record itself (extends E11 to the entrypoint, PR #4). On top of v1.2.7 (breach headline only when the sentinel confirms, E11; stdin EOF under Kata, E12; Kata supported with limits) and v1.2.6 (proxy DNS exfiltration closed, L; inotify overflow, E9; sentinel-only record, E10; UNVERIFIED dirs). All three were merged on `main` by cloud sessions 12/13 but left untagged (their git proxy refused tag pushes, HTTP 403); tagged, released and verified on Docker Desktop this session (v1.2.8 twice - once to confirm the merged fix, again after bumping the stale version strings). v1.0.0–v1.2.7 carry a superseded note.
-- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v22)
+- **Next prompt:** [`.ai/NEXT_PROMPT.md`](NEXT_PROMPT.md) (v23)
 - **🚩 MILESTONE — first live test: POSTPONED, no date.** The 2026-09-29 date set in session 12
   passed without a recording (user, 2026-10-07). Nothing is frozen. Still a video on the Windows
   Docker Desktop box with a real agent + live breach, `enforced=4/7`, act 4 = codex.
 
 ---
 
-## 1. Status (verified 2026-10-08, session 15, Windows box)
+## 1. Status (verified 2026-11-11, session 17, Windows box)
 
 | Thing | State |
 |---|---|
 | `main` | **v1.2.11 = the mount guard refuses a whole removable volume (udisks `/media/<user>/<label>`, macOS `/Volumes`), merged through PR #10, tagged at `e0b93f6` and released as Latest.** Drill E3 mounts real tmpfs volumes; all five CI jobs green on the PR and on both `main` pushes. Under it: **v1.2.10 = phase M extended to swap + process caps, merged through PR #9** (all five jobs green, run 37764437022) on top of **v1.2.9 = phase M (measured memory cap)** (`ef3a83b`, CI green on its `main` push and tag). Both tagged and released from this box. Under those: v1.2.8 = PR #4 (E11 extended to PID 1's log line) on top of PR #3 (v1.2.7: E11, E12, Kata CI job) on top of `9d265d0` (v1.2.6), plus PRs #5-#8 (notebook/ data collection + training, see item 2). `main` fast-forwarded here from 73 commits behind at session start. Version strings were bumped to 1.2.8 this session - PR #4's fix was merged under `[Unreleased]` with the code still saying 1.2.7 |
 | Tags | `v1.0.0`…`v1.2.10` ALL carry a superseded warning (v1.2.8/v1.2.9/v1.2.10 got theirs in session 16 - the mount-guard hole was in every one of them) · **`v1.2.11` (Latest)**. v1.2.6–v1.2.8 were tagged + released in session 14; v1.2.9 and v1.2.10 in session 15, same way (`git tag -a ...; git push origin ...` from the Windows box - the cloud sessions' git proxy had refused this with 403). v1.2.9/v1.2.10 had deliberately carried no note while the newest release was verification-only; v1.2.11 is a real security fix, so the note went on all three |
-| CI | **5 jobs**: static · CVE scan · ext4 drills · gVisor (runsc) drills · Kata Containers drills. Green on every tag through v1.2.9 and on `main` through `ef3a83b`. Phase M's memory measurements came from a temporary branch (`kata-memcap-probe`, deleted): runs **37749560187** (cap 256m) and **37751167935** (cap 256m + 1024m), all 5 jobs green each. The swap/process measurements came through **PR #9** instead - `pull_request` already runs all five jobs, so no ci.yml scaffolding was needed, and its first run (37760397979) caught the uid-1001 nproc collision before `main` ever saw it (fixed in 37764437022, all green). Real-image proofs from sessions 12/13: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (37711877983) |
-| Local suite (Docker Desktop / Windows) | **session 16: A–M exit 0 on v1.2.11** (60 PASS), and session 15: the same on v1.2.10, self-test 35/35, `enforced=4/7`, one SKIP (phase J's no-GPU side, CI runs it). Phase M measures memory, swap and the process caps; every new assertion was watched FAILING on the old behaviour first (guards stripped: capped allocation reached the full 768 MiB and the fork loop ran all 150 with no refusal, suite exit 1). Run AFTER the version bump, on an image rebuilt from cache (no `--pull`, so the bundled CLIs are still session 14's: codex-cli 0.161.0, claude 2.1.197, aider 0.86.2). Phase M's teeth were proven on the old behaviour first with a phase-M-only scratch harness: cap stripped → uncapped 768 / capped 768, `exit=0 OOMKilled=false`, `memory.max=max`, suite **exit 1**; cap in place → capped 240 MiB, `exit=137 OOMKilled=true`, exit 0. `docs/VERIFICATION.md` §0 now carries the phase M block from the v1.2.9 run. Session 14's run, for reference: rebuilt `--pull` (codex-cli 0.156.1 → **0.161.0**; claude 2.1.197 and aider 0.86.2 unchanged), full `verify-isolation.sh` A–L exit 0, `enforced=4/7` on the v1.2.7-era code; after the version bump, rebuilt (cached, fast) and ran again clean on v1.2.8 (35 passed in the self-test, was 34). **3b2, L, E9, E10, E11, E12 all PASS on Docker Desktop for the first time** (previously CI-only). `docs/VERIFICATION.md` §0 re-quoted from the v1.2.8 run |
-| Real codex path | **confirmed working on codex-cli 0.161.0**: login from `OPENAI_API_KEY` OK, `sandbox_mode=danger-full-access` OK, reached api.openai.com - but every prompt returns `ERROR: Quota exceeded`. Not a sandbox fault (same as session 10). Needs a workspace that is a git repo - 0.161.0 added a trusted-directory check (`--skip-git-repo-check` exists but unneeded for a real project folder, which is always a git repo) |
+| CI | **5 jobs**: static · CVE scan · ext4 drills · gVisor (runsc) drills · Kata Containers drills. **🔴 RED for three weeks and nobody was watching: the weekly schedule failed 2026-10-26 (40323195599), 11-02 (41468736318) and 11-09 (42646837760); last green 10-19 (39253372657).** Every time: static + CVE scan PASS, all three drill jobs fail on ONE line - `FAIL phase G: codex launch is not usable (rc=0, logged_in=0, sandbox_off=1)`. **No repo commit sits between the last green and the first red run**, because the cause was upstream: CI rebuilds the agent image every run, and codex-cli went 0.161.0 → 0.167.1, which **reworded `codex login status`** from `Logged in using an API key` to `API key configured`. The cage never broke - `rc=0` (login succeeded) and `sandbox_off=1` (flag still passed) were in the failure line all along. Fixed in **v1.2.12** by making phase G measure instead of read prose (see session 17 below). Green on every tag through v1.2.9 and on `main` through `ef3a83b`. Phase M's memory measurements came from a temporary branch (`kata-memcap-probe`, deleted): runs **37749560187** (cap 256m) and **37751167935** (cap 256m + 1024m), all 5 jobs green each. The swap/process measurements came through **PR #9** instead - `pull_request` already runs all five jobs, so no ci.yml scaffolding was needed, and its first run (37760397979) caught the uid-1001 nproc collision before `main` ever saw it (fixed in 37764437022, all green). Real-image proofs from sessions 12/13: 36364368300 (E9, L), 36500312536 (E10), negatives 36365091898 / 36500312493; E11 negative 37705657498 → fix 37705778556; E12 under Kata old rc=142 → new rc=1 (37711877983) |
+| Local suite (Docker Desktop / Windows) | **session 17: A–M exit 0 on v1.2.12** — 61 PASS, 0 FAIL, self-test 35/35, `enforced=4/7`, one SKIP (phase J's no-GPU side, CI runs it). Image rebuilt `--pull` (codex-cli 0.161.0 → **0.167.1**; claude 2.1.197 and aider 0.86.2 unchanged), and re-run after `monitors/canary_monitor.py` was bumped, so the green run IS the committed code. The two new phase G assertions were each watched FAILING first against a sabotaged copy of `warden-cli.sh`. CI's other two jobs were pre-flighted on this box before pushing: `shellcheck -S warning` rc=0 on CI's exact file list, trivy OS HIGH/CRITICAL `--ignore-unfixed` 0 on both images. Before that, **session 16: A–M exit 0 on v1.2.11** (60 PASS), and session 15: the same on v1.2.10, self-test 35/35, `enforced=4/7`, one SKIP (phase J's no-GPU side, CI runs it). Phase M measures memory, swap and the process caps; every new assertion was watched FAILING on the old behaviour first (guards stripped: capped allocation reached the full 768 MiB and the fork loop ran all 150 with no refusal, suite exit 1). Run AFTER the version bump, on an image rebuilt from cache (no `--pull`, so the bundled CLIs are still session 14's: codex-cli 0.161.0, claude 2.1.197, aider 0.86.2). Phase M's teeth were proven on the old behaviour first with a phase-M-only scratch harness: cap stripped → uncapped 768 / capped 768, `exit=0 OOMKilled=false`, `memory.max=max`, suite **exit 1**; cap in place → capped 240 MiB, `exit=137 OOMKilled=true`, exit 0. `docs/VERIFICATION.md` §0 now carries the phase M block from the v1.2.9 run. Session 14's run, for reference: rebuilt `--pull` (codex-cli 0.156.1 → **0.161.0**; claude 2.1.197 and aider 0.86.2 unchanged), full `verify-isolation.sh` A–L exit 0, `enforced=4/7` on the v1.2.7-era code; after the version bump, rebuilt (cached, fast) and ran again clean on v1.2.8 (35 passed in the self-test, was 34). **3b2, L, E9, E10, E11, E12 all PASS on Docker Desktop for the first time** (previously CI-only). `docs/VERIFICATION.md` §0 re-quoted from the v1.2.8 run |
+| Real codex path | **session 17, codex-cli 0.167.1 (image rebuilt `--pull`)**: `codex login --with-api-key` still does NOT call the API (`API key saved. Authentication is checked when you send a request.`), `~/.codex/auth.json` still holds `{"auth_mode":"apikey",...}`, and `codex login status` returns rc 1 unauthenticated / rc 0 with a key. New in 0.167.1 and now used by phase G: **`codex sandbox -- <cmd>`**, which runs a command under codex's own sandbox - under warden's `danger-full-access` it runs, under a later `-c sandbox_mode="read-only"` bubblewrap cannot make a user namespace below `cap-drop=ALL` and the same command is refused. That is how the flag is measured instead of logged. A real prompt is still **unproven this session** (credit empty). Previously: **confirmed working on codex-cli 0.161.0**: login from `OPENAI_API_KEY` OK, `sandbox_mode=danger-full-access` OK, reached api.openai.com - but every prompt returns `ERROR: Quota exceeded`. Not a sandbox fault (same as session 10). Needs a workspace that is a git repo - 0.161.0 added a trusted-directory check (`--skip-git-repo-check` exists but unneeded for a real project folder, which is always a git repo) |
 | CI suite, ext4 / gVisor / Kata | ext4 `enforced=7/7` all phases; gVisor D = honest SKIP, sentinel `NOT armed`; Kata supported with limits, same tradeoff, CI job green. **Session 15 adds phase M to all three** and it passes on each: `--memory` enforced everywhere with a fixed per-runtime overhead (runc ~16 MiB, gVisor ~48, Kata ~112–128); `nproc` enforced everywhere; `--pids-limit` asserted on runc only, SKIPped elsewhere with the reason |
 | Egress audit trail | live (`up` healed it at session start, same as every session) |
 | Local model | unchanged: no trained GGUF locally. `notebook/` (collect + train) merged to main this session (PRs #5-#8, user's Colab run in progress/result not seen here) |
@@ -38,15 +42,25 @@ Pick the top unchecked item unless the user asks for something else. Each has a
 reason; if the reason no longer holds, delete the item instead of doing it.
 `.ai/ROADMAP.md` (Thai, session 12) gives the phase view; this list wins where they differ.
 
-0. **Kata follow-ups (low):** a detect-only runc witness is possible under Kata too (a runc inotify
-   watcher heard the Kata agent's reads via virtiofsd) - but NOT via `--pid container:`, which gave a
-   runc container the HOST PID namespace. (`--memory` under Kata: **ANSWERED session 15** — enforced,
-   measured by the new phase M, v1.2.9. The Kata/gVisor numbers are in `docs/THREAT_MODEL.md`'s runtime
-   tables and CHANGELOG `[1.2.9]`; nothing left to measure there.)
-1. **Demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no rebuild
-   in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the user's
-   step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day. Blocked separately on OpenAI
-   credit (session 14 re-confirmed `Quota exceeded` through a real codex call - ask, don't debug).
+0. **A red weekly CI went unnoticed for three weeks - close that hole.** Nothing in this project
+   surfaces a failed `schedule` run; it was found only because session 17's reality check runs
+   `gh run list`. The suite being red makes every claim in the README unprovable, so this is not a
+   cosmetic problem. Cheapest fix: keep `gh run list` in the session-start check (it works - it caught
+   this) and consider a notification on `schedule` failure. **Also expect more upstream CLI drift:**
+   the image is rebuilt from floating npm/Debian versions by design, so a weekly job WILL keep finding
+   vendor changes. That is the gate doing its job - but only if a human reads it.
+1. **The "how to use" video — rehearsed, scripted, NOT recorded** (user's priority #2 as of
+   2026-11-11). Everything needed is already on `main` (the eight untagged commits of 2026-10-10):
+   `docs/DEMO.md` §0 (6-shot list with measured timings), §0.4 (the GitHub shot - clone/fetch work in
+   the cage, push fails with no credential), `scripts/demo-usage.sh` (replaced `rehearse-usage.sh`;
+   12 PASS, exit 0, says "Do not ship this take." on failure), and the README quickstart on
+   `./scripts/warden-cli.sh`. **Nothing technical blocks this** - no date needed, no OpenAI credit
+   needed (it is the usage walkthrough, not the breach demo). Re-check `demo-usage.sh` exits 0 on the
+   current image first: session 17 moved codex-cli 0.161.0 → 0.167.1 under it.
+2. **Security demo recording — no date. Ask again each session** (AskUserQuestion). With a date: no
+   rebuild in the days before it; the interactive `./scripts/demo.sh --agent codex` rehearsal is the
+   user's step; `demo.sh --auto --agent codex` must end DEMO COMPLETE that day. Blocked separately on
+   OpenAI credit (re-confirmed empty 2026-11-11 by the user - ask, don't debug).
 2. **Local model - our own, trained in `notebook/`** (user call 2026-10-08: notebook in this repo, data
    never committed). Step 1 DONE: `notebook/collect_data.ipynb` + `notebook/collect/` gather chat-format
    JSONL from the user's git repos (commit -> diff), project files (docs/docstrings -> text/code), Claude /
@@ -65,10 +79,12 @@ reason; if the reason no longer holds, delete the item instead of doing it.
    scratch files/venv deleted after, nothing committed (train.ipynb itself was NOT edited - still
    correctly tuned for Colab/T4). Useful if the user wants to iterate locally without Colab someday,
    with a bf16 variant of the training cell - not needed if the Colab run goes fine.
-3. **(ideas, decide first)** a detect-only runc witness beside a runsc agent (hears canary reads,
-   cannot signal - restores the unforgeable record, not containment); udisks `/media/<user>/<label>`
-   in the mount guard (needs an is-it-a-mountpoint heuristic); SNI peek-and-splice (needs an
-   OpenSSL squid build).
+3. **(ideas, decide before building)** a detect-only runc witness beside a runsc agent (hears canary
+   reads, cannot signal - restores the unforgeable record, not containment; possible under Kata too,
+   where a runc inotify watcher heard the Kata agent's reads via virtiofsd - but NOT via
+   `--pid container:`, which handed a runc container the HOST PID namespace); SNI peek-and-splice
+   (needs an OpenSSL squid build). *(The udisks `/media/<user>/<label>` idea that used to sit here
+   SHIPPED in v1.2.11; `--memory` under Kata was answered in v1.2.9 by phase M. Both deleted.)*
 
 ### Decided this session (do not re-raise without new evidence)
 
@@ -262,6 +278,9 @@ would I know if this silently did nothing?" — then run that.
 | A probe that never ran looks exactly like a cap that held | The `exit=255` nproc run printed nothing at all and the first version of the assertion reported "did not bound the fork loop" - wrong diagnosis, right redness. Every measurement now checks for its own first line (the cgroup label) and says "nothing was measured" when it is absent |
 | `pull_request` already runs every CI job | Session 15: a PR needs no ci.yml scaffolding to measure on runtimes this box lacks - all five jobs ran on PR #9, and its first run caught the uid-1001 collision before `main` saw it. The temporary-branch-plus-push-trigger dance is only for a branch that should NOT be proposed for merge |
 | Docker's `.State.OOMKilled` is false under Kata when the cap kills | The guest kernel does the kill, so the host records `exit=137 OOMKilled=false` (measured, 256m and 1024m caps). Judge a memory kill by the exit code and the allocation high-water mark, never by that flag. Under gVisor the opposite trap: `/sys/fs/cgroup/memory.max` does not exist in the sandbox at all, so an in-container check `skip`s and proves nothing - only an allocation past the cap does (phase M) |
+| The version lives in THREE files, in two languages, and one of them is Python | `core/entrypoint.sh`, `scripts/warden-cli.sh` **and `monitors/canary_monitor.py:58`**. Session 17 bumped to 1.2.12, rebuilt, saw `AI Warden v1.2.12` from `status` - and the suite's own canary line still said `v1.2.11`, because the search for version strings had been `grep --include="*.sh" --include="*.md" --include="*.yml"` and the monitor is `.py`. That constant also goes into the incident-report JSON (`warden_version`, line ~783), so a breach record would have claimed the wrong version. Session 14 hit the same class of thing ("bumping the stale version strings"). Bump with a language-agnostic search: `grep -rnE '(WARDEN_VERSION\|__version__)\s*[:=]\s*"?1\.'` and re-read the canary banner from a real run, not just `status` |
+| An agent CLI's own output is prose, and prose gets reworded | Session 17: phase G grepped `codex login status` for `Logged in using an API key`. codex-cli 0.167.1 renamed it to `API key configured`, and the weekly CI went red for three weeks (2026-10-26, 11-02, 11-09) on a cage that was working perfectly - `rc=0` and `sandbox_off=1` said so in the failure line itself. Never assert on a vendor's sentence: assert on something that MOVES with the input (two different keys must give two different identities) or make the tool ACT. When an agent CLI surprises you, run its command by hand on the old and the new image before touching code - two `docker run`s answered this |
+| A Git for Windows auto-update kills a long background Bash run, and it looks like success | Session 17: `gfw-install-*` started at 16:06:51 while the suite was at phase J; the run died at 16:06:49, `usr\bin\bash.exe` vanished (so the Bash tool itself broke with "not found" while `bin\bash.exe` still existed), K/L/M never ran - and the background task reported **exit 0 with empty output**. 45 PASS / 0 FAIL looked like a pass. The recurring bug shape at the harness level. Write the suite's own `rc` into the log (`{ suite; printf '===SUITE_EXIT=%s===' $?; } > log`) and check the last phase and that marker before believing any background run; if Bash breaks mid-session, check `Get-Process gfw-install*` before blaming the change |
 ---
 
 ## 6. Conventions
@@ -275,6 +294,57 @@ would I know if this silently did nothing?" — then run that.
 ---
 
 ## 7. Session log (newest first)
+
+### 2026-11-11 — session 17 · Windows box · v1.2.12: phase G measures the login and the sandbox flag
+- **Did:** opened on a handoff **a month stale** and a CI that had been **red for three weeks** - and the
+  only thing that surfaced the red was `gh run list` in the reality check. Verified everything else before
+  trusting it: `main` = `7123102`, clean, in sync, 8 commits past `v1.2.11` (all docs/demo, no release owed);
+  Docker Desktop not running (started it); `warden-model-lab` holds only the untuned base GGUF and no
+  `manifest/`, so the Colab run still has not happened - checked before asking. One `AskUserQuestion`: the
+  user approved Docker + `build --pull`, still no demo date, still no OpenAI credit, still no Colab run.
+  **Diagnosed phase G by hand before touching code,** per the standing rule. Baseline on the image that was
+  green (codex-cli 0.161.0): `codex login status` printed `Logged in using an API key - sk-...`. After
+  `build --pull` (0.167.1) the identical wrapper line printed `API key configured - sk-warde***00000` plus
+  `Authentication is checked when you send a request.` **The cage had never broken** - CI's own failure line
+  said `rc=0, sandbox_off=1`, i.e. login succeeded and the flag was still passed; only `logged_in=0` was
+  wrong, and that was the one field grepping a vendor's sentence. Did NOT just add the new string: rewrote
+  phase G as two measurements, each written into a **phase-G-only scratch harness FIRST** and watched
+  failing against a **sabotaged COPY of `warden-cli.sh`** - login stripped → G1 `nothing was measured`;
+  `sandbox_mode` stripped → G2 `dfa_wrote=0, label=0`; real code → both PASS, and neither covered for the
+  other. G1 now sends **two different fake keys** and requires codex's identity line to differ and to carry
+  its own key (a reworded constant cannot satisfy that, nor a stale `auth.json`, nor a key arriving from
+  `.env`). G2 uses **`codex sandbox -- <cmd>`**, new in 0.167.1: under warden's flag the command writes
+  outside the workspace, and under a later `-c sandbox_mode="read-only"` (last `-c` wins) codex falls back
+  to bubblewrap, which cannot make a user namespace below `cap-drop=ALL`, so the same command is refused -
+  a both-ways proof on the real `warden-cli.sh run` path at zero API cost. Marker assembled at runtime so
+  the warden log's command echo cannot satisfy `grep -qx`. Pre-flighted the other two CI jobs locally
+  before pushing anything: `shellcheck -S warning` rc=0 on the exact CI file list, and trivy OS
+  HIGH/CRITICAL `--ignore-unfixed` = **0 on both images**. Also fixed the suite's `--help`, which prints a
+  fixed line range (`sed -n '2,57p'`) that my three new header lines would have truncated → `2,60p`.
+- **Did (the two things that nearly shipped a false green):** (1) suite run 1 was **killed at phase J by a
+  Git for Windows auto-update** (`gfw-install-*` at 16:06:51, run died 16:06:49, `usr\bin\bash.exe`
+  vanished so the Bash tool itself broke). K/L/M never ran, and the background task reported **exit 0 with
+  empty output** - 45 PASS / 0 FAIL looked exactly like a pass. Re-ran with the suite's own rc written into
+  the log (`===EXIT=`) and checked the last phase reached. Run 2: **A-M exit 0, 61 PASS, 0 FAIL, self-test
+  35/35, `enforced=4/7`**, one SKIP (phase J's no-GPU side, CI runs it). (2) Reading that run's output
+  rather than trusting `warden-cli.sh status`, the **canary banner still said `v1.2.11`**: the version
+  lives in **three files in two languages** and `monitors/canary_monitor.py:58` had been missed, because
+  the search had been `grep --include="*.sh" --include="*.md"`. That same constant feeds the incident-report
+  JSON (`warden_version`), so a breach record would have claimed the wrong version. Bumped it, rebuilt,
+  confirmed `v1.2.12` from a real run's canary line, and re-ran the whole suite under the corrected label.
+- **Learned:** the failing line had carried its own diagnosis for three weeks - `rc=0, sandbox_off=1` is
+  "login worked and the flag was passed", so only the prose match was broken. An agent CLI's output is a
+  UX surface and it gets reworded; a check that greps a vendor's sentence is the recurring bug shape wearing
+  a different hat, and the cure is to assert on something that MOVES with the input or to make the tool ACT.
+  Two `docker run`s on the old and the new image answered what no amount of code-reading would have. And
+  the recurring shape is not confined to the cage: this session it appeared in the **harness** (a run that
+  never happened reporting exit 0) and in a **label** (`status` green while the component's own banner was a
+  version behind).
+- **Prompt should have said:** `gh run list` is the first alarm and nothing else rings one - a red weekly
+  schedule sat unseen for three weeks beside a handoff nobody had corrected. Never assert on an agent CLI's
+  prose. Diff the bundled CLI versions after every `build --pull` and re-run the phase that touches each.
+  Write the suite's own rc into its log and check the last phase reached before believing a background run.
+  Bump versions with a language-agnostic grep, then re-read the banner from a real run, not from `status`.
 
 ### 2026-10-10 — session 16 · Windows box · v1.2.11: the mount guard stops a whole removable volume
 - **Did:** verified the handoff first (clean `main` = origin, `v1.2.10` one docs commit behind HEAD so the
@@ -807,6 +877,23 @@ it and say why.
   `docker build --pull` directly; and a security fix owes a tag + a superseded note
   on the release it replaces. Restored the "start Docker Desktop first" emphasis —
   it was down at session start and the prompt's warning saved time, so it stays.
+- **v23 · 2026-11-11** — session 17, whose whole subject was a CI that had been red for three
+  weeks without anyone noticing, on a cage that was never broken. (a) Promoted `gh run list` to
+  **the first alarm, because nothing else rings one**: the weekly `schedule` failed on 10-26, 11-02
+  and 11-09 and the only thing that surfaced it was the session-start check. (b) **Never assert on
+  an agent CLI's prose** — phase G grepped `codex login status` for "Logged in using an API key"
+  and codex-cli 0.167.1 renamed it to "API key configured"; assert on what MOVES with the input
+  (two keys → two identities) or make the tool ACT (`codex sandbox -- <cmd>`). The failure line had
+  said `rc=0, sandbox_off=1` all along, which is to say "login worked and the flag was passed". (c)
+  **DIFF the bundled CLI versions after every `build --pull`** and re-run the phase that touches
+  each one — 0.161.0 → 0.167.1 *was* the bug. (d) **Write the suite's own rc into its log and check
+  the last phase reached**: a Git for Windows auto-update killed the run at phase J, K/L/M never
+  ran, and the background task reported exit 0 with empty output, so 45 PASS / 0 FAIL looked like a
+  pass — the recurring bug shape, this time in the harness rather than the cage. Plus: if Bash
+  itself dies with "bash.exe not found", check `Get-Process gfw-install*` before blaming the diff.
+  (e) Recorded that a sabotaged COPY of `warden-cli.sh` is the cheapest both-ways proof, and that a
+  VERIFICATION-only release still earns a tag but no superseded note. Step 3 was folded into one
+  paragraph to pay for all of this and hold the fence at 70 lines.
 - **v22 · 2026-10-10** — session 16. (a) A CAPABILITY IS NOT PERMISSION: a fixture that needs
   `mount` needs CAP_SYS_ADMIN *and* `--security-opt apparmor=unconfined` - with the cap alone E3
   mounted on Docker Desktop (WSL2, no AppArmor) and failed on every GitHub runner; harness flags,
