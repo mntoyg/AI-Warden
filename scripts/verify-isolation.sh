@@ -33,6 +33,9 @@
 #                               gVisor happy-path is skipped where runsc is absent.
 #    G. Agent launch (codex)  - warden-cli must log codex in from OPENAI_API_KEY
 #                               and turn codex's own (unworkable) sandbox off.
+#                               Both measured: the identity codex reports must
+#                               track the key it was handed (G1), and the flag
+#                               must bite against a read-only control (G2).
 #    H. Egress audit trail    - a proxy whose `docker logs` went silently dead
 #                               (corrupt json log) must be detected by `up`,
 #                               recreated when idle, refused while in use.
@@ -77,7 +80,7 @@ for arg in "$@"; do
         --keep)       KEEP=1 ;;
         --no-breach)  RUN_BREACH=0 ;;
         --no-sentinel) RUN_SENTINEL=0 ;;
-        -h|--help)    sed -n '2,57p' "$0"; exit 0 ;;
+        -h|--help)    sed -n '2,60p' "$0"; exit 0 ;;
         *)            printf 'unknown option: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
@@ -1056,25 +1059,112 @@ printf '\n%s================= PHASE G: agent launch (codex) ==================%s
 #     failed "due to sandbox permissions" while `codex exec` still exited 0.
 # The launcher must log codex in from OPENAI_API_KEY (read from the environment,
 # never argv) and run it with sandbox_mode=danger-full-access, because AI Warden
-# is the sandbox. Checked with a FAKE key: `codex login --with-api-key` does not
-# call the API, so this phase spends nothing and needs no secret in CI.
+# is the sandbox.
+#
+# Both halves are now MEASURED, and each is proven by making codex ACT:
+#
+#   G1  the key codex holds must TRACK the key warden passed it. Two different
+#       fake keys must produce two different identity lines, each carrying its
+#       own key. Matching one fixed sentence is not a measurement: `codex login
+#       status` reworded itself from "Logged in using an API key - <key>"
+#       (0.161.0) to "API key configured - <key>" (0.167.1) and CI went red for
+#       three weeks on a cage that was working perfectly (2026-10-26, 11-02,
+#       11-09). A line that follows our key cannot be satisfied by a reworded
+#       constant - nor by a stale ~/.codex/auth.json, nor by a key that reached
+#       the container from .env instead of the environment.
+#   G2  sandbox_mode=danger-full-access must BITE. Our own "launching agent"
+#       log line only proves we PASSED the flag - that is a label. `codex
+#       sandbox -- <cmd>` makes codex act on it: under warden's flag the
+#       command runs, and with a later `-c sandbox_mode="read-only"` (the last
+#       -c wins) codex falls back to its own bubblewrap sandbox, which cannot
+#       create a user namespace under cap-drop=ALL, so the SAME command is
+#       refused. The label is printed beside the measurement, never instead.
+#
+# Asserted on output, never on rc (an agent CLI's exit code is not a state:
+# `codex exec` exited 0 while every command inside it failed). Checked with
+# FAKE keys: `codex login --with-api-key` only stores the key ("Authentication
+# is checked when you send a request"), so this phase calls no API, spends
+# nothing and needs no secret in CI.
 G_WS="${PROJECT_ROOT}/workspaces/.verify-codex-$$"
 mkdir -p "$G_WS"; chmod 0777 "$G_WS" 2>/dev/null || true
-g_out="$(OPENAI_API_KEY="sk-warden-drill-not-a-real-key-0000000000" NO_COLOR=1 \
-    "${SCRIPT_DIR}/warden-cli.sh" run "$G_WS" codex -- login status 2>&1)"
-g_rc=$?
-rmdir "${G_WS}/.secrets" 2>/dev/null || true
-rm -rf "$G_WS" 2>/dev/null || true
-g_logged_in=0; g_sandbox=0
-if printf '%s' "$g_out" | grep -q 'Logged in using an API key'; then g_logged_in=1; fi
-if printf '%s' "$g_out" | grep -q 'launching agent .*sandbox_mode="danger-full-access"'; then g_sandbox=1; fi
-if [ "$g_rc" -eq 0 ] && [ "$g_logged_in" = "1" ] && [ "$g_sandbox" = "1" ]; then
-    good "phase G: warden-cli logs codex in from OPENAI_API_KEY and launches it with sandbox_mode=danger-full-access"
+
+# Two fake keys differing in BOTH their first and last characters, so the
+# masked form codex echoes back (0.167.1: first 8 + '***' + last 5) differs too.
+G_KEY_A='sk-wardenA-drill-not-a-real-key-00000'
+G_KEY_B='sk-zzzzzzB-drill-not-a-real-key-22222'
+
+g_run() {
+    local key="$1"; shift
+    OPENAI_API_KEY="$key" NO_COLOR=1 "${SCRIPT_DIR}/warden-cli.sh" run "$G_WS" codex -- "$@" 2>&1
+}
+# codex's own output, with the CLI's chrome (warden lines, banner, ok/warn)
+# stripped - so a failure note shows what codex said, not the box drawing (v22).
+g_agent_out() { printf '%s' "$1" | grep -vE '^\[|^ *[|+]|^[[:space:]]*$'; }
+# The identity line: the one line carrying an `sk-` string. It can only come
+# from codex - the key never appears in the command, so the warden log (which
+# echoes the whole command back) cannot supply one.
+g_identity() { printf '%s' "$1" | grep 'sk-' | grep -v '^\[warden' | head -1; }
+g_redact() { printf '%s' "$1" | sed -E 's/sk-[A-Za-z0-9_*-]+/sk-REDACTED/g'; }
+
+g_out_a="$(g_run "$G_KEY_A" login status)"
+g_out_b="$(g_run "$G_KEY_B" login status)"
+g_id_a="$(g_identity "$g_out_a")"
+g_id_b="$(g_identity "$g_out_b")"
+
+if [ -z "$g_id_a" ] || [ -z "$g_id_b" ]; then
+    bad  "phase G1: codex never reported holding a key - nothing was measured"
+    note "         A: $(g_redact "$(g_agent_out "$g_out_a" | tr '\n' ' ')" | cut -c1-200)"
+    note "         B: $(g_redact "$(g_agent_out "$g_out_b" | tr '\n' ' ')" | cut -c1-200)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+elif [ "$g_id_a" = "$g_id_b" ]; then
+    bad  "phase G1: codex reported the SAME identity for two different keys - the key it holds is not the one warden passed"
+    note "         both runs: $(g_redact "$g_id_a" | cut -c1-200)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+elif ! printf '%s' "$g_id_a" | grep -qF "$(printf '%s' "$G_KEY_A" | cut -c1-6)" \
+   || ! printf '%s' "$g_id_b" | grep -qF "$(printf '%s' "$G_KEY_B" | cut -c1-6)"; then
+    bad  "phase G1: codex's identity line does not carry the key warden passed it"
+    note "         A: $(g_redact "$g_id_a" | cut -c1-200)"
+    note "         B: $(g_redact "$g_id_b" | cut -c1-200)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
 else
-    bad  "phase G: codex launch is not usable (rc=${g_rc}, logged_in=${g_logged_in}, sandbox_off=${g_sandbox})"
-    note "         $(printf '%s' "$g_out" | grep -E 'launching agent|Not logged in|Logged in' | sed -E 's/sk-[A-Za-z0-9_*-]+/sk-REDACTED/g' | tr '\n' ' ' | cut -c1-300)"
+    good "phase G1: warden-cli logs codex in from OPENAI_API_KEY - the identity codex reports tracks the key it was given"
+    # The identity lines are redacted before printing, which hides the very
+    # difference G1 asserted on - so name the two drill keys (fake, and literals
+    # of this script) that produced them.
+    note "         two different keys -> two different identities: A held $(printf '%s' "$G_KEY_A" | cut -c1-9)..., B held $(printf '%s' "$G_KEY_B" | cut -c1-9)..."
+    note "         A: $(g_redact "$g_id_a")"
+    note "         B: $(g_redact "$g_id_b")"
+fi
+
+# The marker is assembled at run time, so the literal string cannot appear in
+# the command the warden log echoes back: `grep -qx` on it can only be
+# satisfied by the sandboxed command's own output (v22).
+G_PROBE_DFA='f="/tmp/warden-g-dfa-$$"; echo probe > "$f" && [ -s "$f" ] && printf "%s-%s\n" WARDEN DFAWROTE'
+G_PROBE_RO='f="/tmp/warden-g-ro-$$"; echo probe > "$f" && [ -s "$f" ] && printf "%s-%s\n" WARDEN ROWROTE'
+
+g_dfa_out="$(g_run "$G_KEY_A" sandbox -- bash -c "$G_PROBE_DFA")"
+g_ro_out="$(g_run "$G_KEY_A" -c sandbox_mode="read-only" sandbox -- bash -c "$G_PROBE_RO")"
+
+g_dfa_wrote=0; g_ro_wrote=0; g_label=0
+printf '%s' "$g_dfa_out" | grep -qx 'WARDEN-DFAWROTE' && g_dfa_wrote=1
+printf '%s' "$g_ro_out"  | grep -qx 'WARDEN-ROWROTE'  && g_ro_wrote=1
+printf '%s' "$g_dfa_out" | grep -q 'launching agent .*sandbox_mode="danger-full-access"' && g_label=1
+
+if [ "$g_dfa_wrote" = "1" ] && [ "$g_ro_wrote" = "0" ]; then
+    good "phase G2: sandbox_mode=danger-full-access BITES - codex ran the command under warden's flag, and the same command was refused under a later -c sandbox_mode=read-only (label present: ${g_label})"
+    note "         control (read-only) said: $(g_agent_out "$g_ro_out" | grep -iE 'bwrap|namespace|denied|permission' | head -1 | cut -c1-160)"
+elif [ "$g_dfa_wrote" = "0" ]; then
+    bad  "phase G2: codex could NOT run a command under warden's sandbox_mode=danger-full-access (dfa_wrote=0, ro_wrote=${g_ro_wrote}, label=${g_label}) - nothing was measured"
+    note "         dfa: $(g_agent_out "$g_dfa_out" | tr '\n' ' ' | cut -c1-240)"
+    PHASE_FAILURES=$((PHASE_FAILURES + 1))
+else
+    bad  "phase G2: codex's own sandbox did NOT refuse under -c sandbox_mode=read-only either, so warden's flag proves nothing (dfa_wrote=1, ro_wrote=1, label=${g_label})"
+    note "         ro: $(g_agent_out "$g_ro_out" | tr '\n' ' ' | cut -c1-240)"
     PHASE_FAILURES=$((PHASE_FAILURES + 1))
 fi
+
+rmdir "${G_WS}/.secrets" 2>/dev/null || true
+rm -rf "$G_WS" 2>/dev/null || true
 
 # =============================================================================
 printf '\n%s================= PHASE H: egress audit trail ====================%s\n' "$C_BOLD" "$C_RESET"

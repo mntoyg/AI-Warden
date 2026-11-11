@@ -4,6 +4,92 @@
 
 ---
 
+## [1.2.12] — 2026-11-11
+
+**verification: phase G *วัด* การ login และอำนาจของ `sandbox_mode` แทนการ match ประโยคเดียวจาก codex**
+
+ไม่ใช่ security fix — **ไม่มีพฤติกรรมของกรงเปลี่ยนแม้แต่บรรทัดเดียว** v1.2.11 จึงไม่ถูก supersede
+สิ่งที่เปลี่ยนคือชุดทดสอบอ้างอะไรได้ และเลิกพังเพราะ upstream เปลี่ยนคำพูด
+(ต้อง rebuild agent image เพื่อให้ banner ตรงเวอร์ชัน: `./scripts/warden-cli.sh build`)
+
+### Fixed
+
+- **CI แดงติดกันสามสัปดาห์เพราะ phase G อ่าน *ถ้อยคำ* ไม่ใช่ *สถานะ*:** schedule ของ 2026-10-26
+  (run 40323195599), 11-02 (41468736318) และ 11-09 (42646837760) ล้มที่บรรทัดเดียวกันเป๊ะทั้งสาม runtime —
+  `FAIL phase G: codex launch is not usable (rc=0, logged_in=0, sandbox_off=1)` — โดย Static analysis
+  และ Image CVE scan ผ่านทุกครั้ง ไม่มี commit ไหนคั่นระหว่าง run เขียวครั้งสุดท้าย (10-19, 39253372657)
+  กับ run แดงครั้งแรก **กรงไม่เคยพัง** `rc=0` บอกว่า login สำเร็จ และ `sandbox_off=1` บอกว่า
+  `sandbox_mode="danger-full-access"` ยังถูกส่งอยู่ สิ่งที่หายไปมีอย่างเดียว: `codex login status`
+  เปลี่ยนคำพูดของตัวเอง
+
+  | codex-cli | `codex login status` พิมพ์ว่า |
+  |---|---|
+  | 0.161.0 (run เขียวครั้งสุดท้าย) | `Logged in using an API key - sk-...` |
+  | 0.167.1 (ปัจจุบัน) | `API key configured - sk-warde***00000` + `Authentication is checked when you send a request.` |
+
+  phase G grep หา `Logged in using an API key` ตรง ๆ จึงกลายเป็น false negative ทันทีที่ image
+  rebuild (CI rebuild ทุก run) — พิสูจน์ด้วยการรัน wrapper line เดิมด้วยมือบน image ทั้งสองเวอร์ชัน
+  ก่อนแก้โค้ดแม้บรรทัดเดียว
+
+- **`monitors/canary_monitor.py` ยังประกาศตัวเองเป็น `1.2.11`:** version string ของโปรเจกต์อยู่ใน
+  **สามไฟล์ สองภาษา** — `core/entrypoint.sh`, `scripts/warden-cli.sh` และ `monitors/canary_monitor.py:58`
+  การ bump รอบนี้พลาดตัวที่สามเพราะค้นด้วย `grep --include="*.sh"` ผล: `warden-cli.sh status` บอก
+  `v1.2.12` แต่ banner ของ canary ใน suite ยังบอก `v1.2.11` และ **incident report JSON** (`warden_version`)
+  ก็จะอ้างเวอร์ชันผิดไปด้วยถ้ามี breach เกิดขึ้น เจอเพราะอ่าน output ของ run จริง ไม่ใช่เชื่อ `status`
+
+### Changed
+
+- **phase G แยกเป็นสองการวัด และแต่ละอันถูกดูให้ FAIL บน wrapper ที่ถูกทำพิการก่อน:**
+
+  - **G1 — key ที่ codex ถืออยู่ต้อง *ตาม* key ที่ warden ส่งให้** ส่ง fake key สองใบที่ต่างกันทั้งหัว
+    และหาง แล้วบังคับว่า identity line ของ codex ต้องต่างกัน และแต่ละใบต้องมีหัว key ของตัวเอง
+    (`sk-wardenA***` vs `sk-zzzzzzB***`) ประโยคคงที่ที่ถูก reword ตอบข้อนี้ไม่ได้ และ
+    `~/.codex/auth.json` ค้าง หรือ key ที่มาจาก `.env` แทน environment ก็ตอบไม่ได้เหมือนกัน
+  - **G2 — `sandbox_mode=danger-full-access` ต้อง *กัด* ไม่ใช่แค่ถูกส่ง** บรรทัด log
+    `launching agent ... sandbox_mode="danger-full-access"` ของเราเองเป็น **label** มันพิสูจน์แค่ว่า
+    *เราส่ง* flag ไป `codex sandbox -- <cmd>` (subcommand ใหม่ใน 0.167.1) ทำให้ codex **ลงมือทำ**:
+    ใต้ flag ของ warden คำสั่งรันและเขียนไฟล์นอก workspace ได้ แต่ถ้าต่อท้ายด้วย
+    `-c sandbox_mode="read-only"` (`-c` ตัวหลังชนะ) codex จะถอยไปใช้ bubblewrap ของตัวเอง ซึ่ง
+    **สร้าง user namespace ใต้ `cap-drop=ALL` ไม่ได้** คำสั่งเดียวกันจึงถูกปฏิเสธ — label ถูกพิมพ์
+    *ข้าง* ผลวัด ไม่ใช่แทนผลวัด
+
+  ตารางที่ทำให้เชื่อได้ว่าทั้งสองข้อมีฟัน (scratch harness เฉพาะ phase G, warden-cli ที่ถูก sabotage):
+
+  | wrapper | G1 | G2 |
+  |---|---|---|
+  | ของจริง | PASS | PASS |
+  | ตัด login ออก | **FAIL** — `codex never reported holding a key - nothing was measured` | PASS |
+  | ตัด `sandbox_mode` ออก | PASS | **FAIL** — `dfa_wrote=0, label=0` |
+
+  แต่ละข้อ fail เฉพาะเมื่อ guard ของตัวเองพัง และไม่มีข้อไหนกลบให้อีกข้อ
+
+- **ยืนยันบนผลลัพธ์ ไม่เอา rc** (`codex exec` เคย exit 0 ทั้งที่ทุกคำสั่งข้างในล้ม) phase G เดิมดู
+  `g_rc` ด้วย ตอนนี้ไม่ดูแล้ว
+- marker ของ G2 ถูกประกอบตอน runtime (`printf "%s-%s" WARDEN DFAWROTE`) เพื่อให้ `grep -qx` ถูก
+  satisfy ได้จาก output ของคำสั่งในกรงเท่านั้น — warden log echo คำสั่งทั้งบรรทัดกลับมา (v22)
+- failure note ของ phase G ตัด chrome ของ CLI (banner, `[ ok ]`, `[warden]`) ออกก่อนพิมพ์ จึงเห็นว่า
+  **codex พูดอะไร** ไม่ใช่เส้นกรอบ — บทเรียนเดียวกับ E3 ใน v1.2.11
+- `--help` ของ suite พิมพ์ช่วงบรรทัดคงที่ (`sed -n '2,57p'`) ซึ่งจะกิน Usage line หายไปหลังเพิ่ม
+  คำอธิบาย phase G สามบรรทัด — ขยับเป็น `2,60p`
+
+### Measured
+
+image ถูก rebuild ด้วย `build --pull` ในเซสชันนี้ (ครั้งก่อน session 14):
+
+| CLI ใน image | ก่อน (v1.2.8–v1.2.11) | หลัง |
+|---|---|---|
+| codex-cli | 0.161.0 | **0.167.1** |
+| claude | 2.1.197 | 2.1.197 |
+| aider | 0.86.2 | 0.86.2 |
+
+- `codex login --with-api-key` **ยังไม่เรียก API** บน 0.167.1 (`API key saved. Authentication is
+  checked when you send a request.`) phase G จึงยังใช้ fake key ได้ ไม่เสียเงิน ไม่ต้องมี secret ใน CI
+- `~/.codex/auth.json` เขียน `{"auth_mode": "apikey", "OPENAI_API_KEY": "..."}` เหมือนเดิม
+- `codex login status` คืน rc 1 เมื่อยังไม่ login และ rc 0 เมื่อมี key — เป็นสัญญาณจริง แต่ไม่ถูกใช้
+  เป็นหลักฐานเดียวตามกฎ "assert on output, never rc"
+- เส้นทาง codex จริงด้วยคีย์ของ user **ยังทดสอบไม่ได้** — `Quota exceeded` (เครดิตหมด ไม่ใช่บั๊กของกรง)
+  v1.2.12 จึงยืนยัน login path ด้วย fake key เท่านั้น ตามที่ phase G ออกแบบไว้
+
 ## [1.2.11] — 2026-10-10
 
 **security: mount guard ปฏิเสธ volume ของสื่อถอดได้ทั้งลูก (รูปแบบของ udisks และ macOS)**

@@ -31,7 +31,7 @@ Windows + Docker Desktop (เครื่องเดียวกับที่
 |---|---|---|
 | 1 | เปิด Docker Desktop และรอจน `docker info` ผ่าน | `setup-host.sh` **fail-closed**: ถ้า daemon ไม่ขึ้นมันจะขึ้น `[fail] docker daemon is not reachable` และ exit 1 — เจอจริงตอนซ้อม เพราะ Docker Desktop ดับเองระหว่างวัน |
 | 2 | `./scripts/warden-cli.sh build` ให้เสร็จ **ก่อน** อัด (หรือยอมตัดต่อ) | เครื่องสะอาดครั้งแรกต้องดึง ~3–4 GB กินหลายนาที; ถ้า cache อยู่แล้ววัดได้ **8 วินาที** |
-| 3 | ตั้งเทอร์มินัลให้กว้างพอเห็นกรอบ banner ไม่แตก (~70 คอลัมน์ขึ้นไป) | banner `A I   W A R D E N   v1.2.11` คือช็อตเปิด |
+| 3 | ตั้งเทอร์มินัลให้กว้างพอเห็นกรอบ banner ไม่แตก (~70 คอลัมน์ขึ้นไป) | banner `A I   W A R D E N   v1.2.12` คือช็อตเปิด |
 | 4 | **อย่าให้ `.env` ขึ้นกล้อง** และอย่ารัน `codex login status` | มันพิมพ์คีย์บางส่วนออกมา (`sk-proj-***…`) |
 | 5 | เตรียมโฟลเดอร์เปล่าชื่อ `my-project` ไว้ 1 ไฟล์ (เช่น `app.py`) | ให้เห็นว่า agent เห็นแค่โฟลเดอร์นี้ ไม่ใช่เครื่องทั้งเครื่อง |
 
@@ -61,7 +61,7 @@ measured` ไม่ปล่อยให้ความเงียบดูเ�
 | 2 | `./scripts/setup-host.sh` | `[ ok ] docker daemon reachable` · `[ ok ] all 10 required files present` · `[ ok ] egress allowlist has 22 rule(s)` · `[ ok ] .env created from .env.example (mode 600)` · ปิดท้าย `12 passed, 1 warning(s), 0 failure(s)` + บล็อก **Next steps** | ~5 วินาที |
 | 3 | `./scripts/warden-cli.sh build` | `[ ok ] agent sandbox built` · `[ ok ] images ready` | 8 วินาที (cache) / หลายนาที (เครื่องสะอาด) |
 | 4 | `./scripts/warden-cli.sh up` | `[ ok ] egress proxy up (health=healthy)` · `[ ok ] egress audit trail live` | 5 วินาที |
-| 5 | `./scripts/warden-cli.sh status` | v1.2.11 · allowlist 22 rule(s) · **audit trail live** · networks `internal=true` | ทันที |
+| 5 | `./scripts/warden-cli.sh status` | v1.2.12 · allowlist 22 rule(s) · **audit trail live** · networks `internal=true` | ทันที |
 | 6 | `./scripts/warden-cli.sh run ./my-project bash` | banner + `isolation : cap-drop=ALL, no-new-privileges, uid 1001, network=warden_internal (internal)` แล้วได้ shell ในกรง | ~17 วินาทีต่อ session |
 
 ในช็อต 6 สี่คำสั่งนี้คือแกนของวิดีโอ — รันแล้วได้ผลนี้จริงจาก clone สด:
@@ -282,8 +282,8 @@ panel ของแอป) — **ห้ามพิมพ์ `bash` เปล่�
 | # | Step | Command | Pass condition |
 |---|---|---|---|
 | 1 | Docker Desktop ทำงานอยู่ | `docker info` | มี server version ออกมา |
-| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.161.0` (เวอร์ชันที่ทดสอบ login + sandbox แล้วใน v1.2.8, session 14 - ต้อง workspace เป็น git repo ไม่งั้นโดนปฏิเสธด้วย "Not inside a trusted directory") v1.2.9–v1.2.11 rebuild จาก cache ล้วน ไม่ได้ขยับ CLI ตัวไหน |
-| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–M ผ่าน (v1.2.11), **exit 0**, `enforced=4/7` บน Docker Desktop |
+| 2 | ใช้ image ที่ซ้อมไว้ **ห้าม build ใหม่วันถ่าย** | `docker run --rm --entrypoint codex ai-warden/agent:latest --version` | `codex-cli 0.167.1` (v1.2.12, session 17 — ต้อง workspace เป็น git repo ไม่งั้นโดนปฏิเสธด้วย "Not inside a trusted directory") v1.2.9–v1.2.11 rebuild จาก cache ล้วนบน 0.161.0; **0.167.1 เปลี่ยนถ้อยคำของ `codex login status`** จาก `Logged in using an API key` เป็น `API key configured` ซึ่งเป็นเหตุให้ CI แดงสามสัปดาห์ — ถ้าวันถ่าย `--version` ไม่ใช่ 0.167.1 ให้รัน suite ใหม่ก่อน |
+| 3 | suite เขียว | `./scripts/verify-isolation.sh` | phase A–M ผ่าน (v1.2.12), **exit 0**, `enforced=4/7` บน Docker Desktop |
 | 3b | audit trail ของ proxy ยังมีชีวิต | `./scripts/warden-cli.sh status` | บรรทัด audit trail บอก `live` — ถ้า `DEAD` (เกิดแล้ว 2 ครั้งหลังปิด Docker Desktop ไม่สะอาด) รัน `./scripts/warden-cli.sh up` แล้วเช็คใหม่ |
 | 4 | API key สำหรับองก์ 4 | ไฟล์ `.env` มีบรรทัด `OPENAI_API_KEY=...` (ห้ามวางในแชทหรือบน command line) | องก์ 0 ของ `demo.sh` บอก `OPENAI_API_KEY is available` — บอกแค่ว่ามี key **ไม่ได้บอกว่ามีเครดิต** ข้อ 5 เป็นตัวพิสูจน์ |
 | 5 | ซ้อมเต็มรูปแบบ | `./scripts/demo.sh --auto --agent codex` | `PASS codex authenticated through the sandbox and answered (READY)` และ `DEMO COMPLETE - every act verified its own claim` — ถ้าเห็น `Quota exceeded` คือเครดิต OpenAI หมด ไม่ใช่ sandbox เสีย |

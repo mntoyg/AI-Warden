@@ -88,7 +88,12 @@
   PASS phase F: warden-cli applies WARDEN_RUNTIME end-to-end (agent HostConfig.Runtime=nvidia)
 
 ================= PHASE G: agent launch (codex) ==================
-  PASS phase G: warden-cli logs codex in from OPENAI_API_KEY and launches it with sandbox_mode=danger-full-access
+  PASS phase G1: warden-cli logs codex in from OPENAI_API_KEY - the identity codex reports tracks the key it was given
+           two different keys -> two different identities: A held sk-wardenA..., B held sk-zzzzzzB...
+           A: API key configured - sk-REDACTED
+           B: API key configured - sk-REDACTED
+  PASS phase G2: sandbox_mode=danger-full-access BITES - codex ran the command under warden's flag, and the same command was refused under a later -c sandbox_mode=read-only (label present: 1)
+           control (read-only) said: bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces.
 
 ================= PHASE H: egress audit trail ====================
   PASS phase H: with a sandbox running, 'up' refused a dead audit trail (rc=1) and left the proxy alone
