@@ -86,6 +86,10 @@ jobs:
             docker run --rm -i hadolint/hadolint hadolint --failure-threshold warning - < "$f"
           done
 
+      - name: CI watchdog self-test (every assertion must bite)
+        # scripts/ci-status.sh judges CI from fixtures here: no network, no gh.
+        run: ./scripts/ci-status.sh --self-test
+
       - name: Byte-compile the canary monitor
         run: python3 -m py_compile monitors/canary_monitor.py
 
@@ -525,3 +529,97 @@ jobs:
           left="$(docker volume ls -q --filter 'label=ai.warden.role=canary-vault' | wc -l)"
           echo "leftover canary vaults: ${left}"
           test "$left" -eq 0
+
+  # ===========================================================================
+  # The alarm. The weekly schedule run went red for three weeks (2026-10-26,
+  # 11-02, 11-09) and nothing rang: GitHub emails only whoever last touched
+  # the workflow, and a cron has no author. A red run opens (or updates) ONE
+  # issue labelled ci-red; the next fully green run closes it, so the issue's
+  # state is the suite's state and shows on the repo page.
+  #
+  # Deliberately NOT run on pull_request: fork PRs get a read-only token, and
+  # an issue per red PR would teach the reader to ignore the label.
+  #
+  # Green means EVERY needed job concluded success. `skipped` and `cancelled`
+  # are neither red nor green - the alarm does nothing, because a job that
+  # silently did not run must never close an issue.
+  #
+  # An alarm that fails (403 from a missing `issues: write`, a label that will
+  # not create) does so inside a run that is already red, where nobody looks.
+  # Two defences: every write is re-read and the job fails loudly if the issue
+  # is not there afterwards, and scripts/ci-status.sh (C4) refuses to call a
+  # red CI "witnessed" unless an open ci-red issue actually exists.
+  alarm:
+    name: CI alarm (red opens a ci-red issue, green closes it)
+    needs: [static, vulnerabilities, integration, gvisor, kata]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVENT: ${{ github.event_name }}
+      REF: ${{ github.ref_name }}
+      SHA: ${{ github.sha }}
+      RESULTS: ${{ join(needs.*.result, ' ') }}
+    steps:
+      - name: Open, update or close the ci-red issue
+        run: |
+          echo "needed-job results: ${RESULTS}"
+          state=green
+          for r in ${RESULTS}; do
+            [ "$r" = success ] && continue
+            if [ "$r" = failure ]; then state=red; break; fi
+            state=unknown
+          done
+          echo "state: ${state}"
+
+          if [ "$state" = unknown ]; then
+            echo "A needed job was skipped or cancelled: neither opening nor closing anything."
+            exit 0
+          fi
+
+          if [ "$state" = red ]; then
+            gh label create ci-red --force --color d73a4a \
+              --description "CI is red; closed automatically by the next green run"
+            failed="$(gh run view "$RUN_ID" --json jobs \
+              -q '.jobs[] | select(.conclusion == "failure") | "- " + .name')" \
+              || failed="- (could not list the failed jobs; open the run)"
+            body="$(printf '%s\n' \
+              "CI went red." "" \
+              "- run: ${RUN_URL}" \
+              "- event: ${EVENT} on ${REF} @ ${SHA}" "" \
+              "Failed jobs:" "${failed}" "" \
+              "Read the failing LINE first. Upstream drift (a CLI rewording its output," \
+              "a new CVE in the Debian base) is the usual cause of a red schedule run" \
+              "with no commit in between." "" \
+              "This issue closes itself when a full run is green again.")"
+            existing="$(gh issue list --label ci-red --state open --json number -q '.[0].number')"
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body "$body"
+            else
+              gh issue create --label ci-red --title "CI is red on ${REF} (${EVENT})" --body "$body"
+            fi
+            # GitHub accepts some writes and changes nothing: read it back.
+            n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+            if [ "$n" -lt 1 ]; then
+              echo "::error::the run is red but no open ci-red issue exists after the write - the alarm did not ring"
+              exit 1
+            fi
+            echo "open ci-red issues: ${n}"
+          else
+            for num in $(gh issue list --label ci-red --state open --json number -q '.[].number'); do
+              gh issue close "$num" --comment "A full run is green again: ${RUN_URL}"
+            done
+            n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+            if [ "$n" -ne 0 ]; then
+              echo "::error::the run is green but ${n} ci-red issue(s) are still open after closing"
+              exit 1
+            fi
+            echo "no open ci-red issues"
+          fi
