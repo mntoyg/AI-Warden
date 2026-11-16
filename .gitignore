@@ -13,6 +13,13 @@ workspaces/*
 workspaces/default/*
 !workspaces/default/.gitkeep
 
+# ---- warden-model-lab: a SEPARATE repo, kept in this folder on purpose ------
+# Our own model's data, checkpoints and GGUF weights (~2.7 GB). It has its own
+# .git and its own remote (github.com/mntoyg/warden-model-lab); the training
+# CODE lives in notebook/. Anchored so it matches only this exact folder, and
+# never to be force-added: an outer commit would record a nested repo, not files.
+/warden-model-lab/
+
 # ---- Runtime artefacts ----------------------------------------------------
 logs/
 *.log
