@@ -8,3 +8,5 @@ docs
 .env
 .env.local
 .ai
+# warden-model-lab is a separate repo of weights/data (~2.7 GB); never build context
+warden-model-lab

@@ -581,6 +581,7 @@ ai-warden/
 │   ├── THREAT_MODEL.md
 │   ├── VERIFICATION.md
 │   └── DEMO.md                  # runbook ของการสาธิต
+├── warden-model-lab/            # repo แยก (gitignored) เก็บ data/weights ของโมเดลของเราเอง ~2.7 GB — โค้ดเทรนอยู่ใน notebook/
 └── workspaces/
     └── default/                 # โปรเจกต์ที่จะ mount เข้า sandbox
 ```
