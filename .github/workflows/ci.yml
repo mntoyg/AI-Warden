@@ -625,7 +625,14 @@ jobs:
               gh issue create --label ci-red --title "CI is red on ${REF} (${EVENT})" --body "$body"
             fi
             # GitHub accepts some writes and changes nothing: read it back.
-            n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+            # (measured by the drill: the list lagged the create by a few seconds
+            # and the first read-back said 0 for an issue that existed)
+            n=0
+            for attempt in 1 2 3 4 5 6; do
+              n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+              if [ "$n" -ge 1 ]; then break; fi
+              sleep 5
+            done
             if [ "$n" -lt 1 ]; then
               echo "::error::the run is red but no open ci-red issue exists after the write - the alarm did not ring"
               exit 1
@@ -635,7 +642,12 @@ jobs:
             for num in $(gh issue list --label ci-red --state open --json number -q '.[].number'); do
               gh issue close "$num" --comment "A full run is green again: ${RUN_URL}"
             done
-            n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+            n=1
+            for attempt in 1 2 3 4 5 6; do
+              n="$(gh issue list --label ci-red --state open --json number -q 'length')"
+              if [ "$n" -eq 0 ]; then break; fi
+              sleep 5
+            done
             if [ "$n" -ne 0 ]; then
               echo "::error::the run is green but ${n} ci-red issue(s) are still open after closing"
               exit 1
