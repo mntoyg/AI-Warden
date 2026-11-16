@@ -6,6 +6,52 @@
 
 ---
 
+## 2026-11-16 · session 18 (Windows box) — CI แดงแล้วต้อง "ดัง": alarm + watchdog สำหรับ cron ที่ไม่มีใครอ่าน
+
+### สิ่งที่เจอตอนเปิดเซสชัน
+
+`main` = `969f551` ตรงกับ origin, tag `v1.2.12` ใหม่สุด, CI เขียวทั้งสี่ push — แต่ `gh release list`
+ยังโชว์ **v1.2.11 เป็น Latest**: release page ของ v1.2.12 ที่ค้างจาก session 17 ไม่เคยถูกสร้าง
+Docker Desktop ปิดอยู่ (เปิดแล้วพร้อมใน 10 วินาที), audit trail ของ proxy `DEAD` ตามปกติหลังรีสตาร์ต (`up` ซ่อมให้)
+
+### สิ่งที่ทำ
+
+- **สร้าง release v1.2.12** ตามที่ผู้ใช้อนุมัติ (`gh release create v1.2.12 --notes-file ...` ไม่ใส่ `--target`)
+  แล้วอ่านกลับยืนยัน: ขึ้นเป็น Latest, v1.2.11 **ไม่ต้องติด superseded note** เพราะ v1.2.12 เป็น verification-only
+- **`alarm` job ใน `ci.yml`**: needs ทั้งห้า job, ไม่รันบน `pull_request` — `failure` เปิด (หรือ comment ใน) issue
+  `ci-red` ใบเดียว, run ถัดไปที่เขียวครบปิดให้เอง; skipped/cancelled ไม่ทำอะไร (job ที่เงียบหายไม่มีสิทธิ์ปิด issue);
+  ทุกการเขียวถูกอ่านกลับ ถ้า issue ไม่อยู่ job ล้มเสียงดัง
+- **`scripts/ci-status.sh`** — ครึ่งที่ alarm ทำเองไม่ได้ (C1–C5):
+  C1 run ล่าสุดเขียว · C2 มี `schedule` run ในรอบ 8 วัน (`if: failure()` ปลุกไม่ได้ถ้า run ไม่เคยเกิด) ·
+  C3 weekly gate เขียว **หรือมี run ใหม่กว่าที่เขียว** · C4 CI แดงต้องมี issue `ci-red` เปิดอยู่ (พยานของ alarm เอง) ·
+  C5 CI เขียวต้องไม่เหลือ issue ค้าง · exit 2 = "ไม่ได้วัดอะไร" ไม่ใช่เขียว
+
+### หลักฐาน (done means run)
+
+- `ci-status.sh --self-test` 10/10 (fixture ออฟไลน์ ฝั่ง CI รันใน static job) และ **ถอด assertion ทีละตัวใน
+  สำเนา**: C1–C5 แต่ละตัวทำให้ fixture ของมันเองล้ม (rc=1) — ทุกตัวมีฟันจริง
+- shellcheck `-S warning` rc=0 · `ci.yml` parse ได้ 6 job
+- **ซ้อมบน runner จริง** ด้วย `workflow_dispatch --ref ci-alarm` (alarm ข้าม `pull_request` จึงซ้อมด้วย PR ไม่ได้):
+
+| run | ผล | สิ่งที่เห็น |
+|---|---|---|
+| 43892229689 | แดง | เปิด issue 11 — **แต่ read-back ของเราร้อง "ไม่มี issue"** (list ตามหลัง create หลายวินาที) แก้เป็น retry ≤30 วิ |
+| 43892427106 | แดงซ้ำ | comment ลง issue 11 เดิม, เปิดค้าง **ใบเดียว** (ไม่ซ้ำ) |
+| 43892590440 | เขียว | ปิด issue 11 เอง, เหลือ 0 |
+
+- **รันกับ repo จริงแล้ว C3 แดงผิด**: schedule run 11-09 แดงมา 7 วัน ทั้งที่ push หลังจากนั้นเขียวสามครั้ง
+  (ทุก push รัน `--pull` ชุดเดียวกัน) → แก้ให้ C3 ยอมรับ run ที่ใหม่กว่าและเขียว พร้อม fixture `c3recovered`
+
+### ค้างอยู่ / ติดฝั่งผู้ใช้
+
+- **ยังไม่ได้ซ้อม:** path skipped/cancelled ของ alarm บน runner, และ `schedule` event จริง (ทั้งสองต้องรอ cron วันจันทร์ 2026-11-23)
+- **cron ของวันนี้ (06:00 UTC) ยังไม่ยิง** ตอน 15:06 UTC (GitHub เคยเลื่อน 6–9 ชม.) — ถ้าไม่มา C2 จะแดงเองหลัง 8 วัน
+- **วันถ่าย demo:** ยังไม่มีวัน · **เครดิต OpenAI:** ยังไม่เติม · **Colab run:** ยังไม่ได้รัน
+- Next steps #1: วิดีโอ "how to use" ซ้อมแล้ว ยังไม่ได้อัด (ไม่มีอะไรบล็อกทางเทคนิค)
+- prompt สำหรับแชทใหม่: [`.ai/NEXT_PROMPT.md`](.ai/NEXT_PROMPT.md) **v24**
+
+---
+
 ## 2026-11-11 · session 17 (Windows box) — CI แดงสามสัปดาห์เพราะ codex เปลี่ยนคำพูด ไม่ใช่เพราะกรงพัง
 
 ### 🔴 สิ่งที่เจอตอนเปิดเซสชัน
