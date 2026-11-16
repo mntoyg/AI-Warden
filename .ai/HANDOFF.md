@@ -296,6 +296,7 @@ would I know if this silently did nothing?" — then run that.
 | `gh issue list` lags a create by seconds | Session 18's red drill opened issue 11 and the immediate read-back saw 0. Retry up to 30 s before concluding a write was lost - and before concluding it was not |
 | A workflow that skips `pull_request` cannot be drilled by a PR | `gh workflow run ci.yml --ref <branch> -f ...` works because `workflow_dispatch` is already on the default branch's `ci.yml`; use a TEMPORARY commit that skips the heavy jobs and adds a job that passes or fails on an input, then revert it. A branch push does not run CI (push triggers main and tags only) |
 | `docker run -w /mnt` is rewritten to `C:/Program Files/Git/mnt` | Git Bash converts the path even for a bind-mount working dir. `export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'` first, and the shell does NOT keep it between Bash calls |
+| `chmod +x` on this box is not committed | Session 18: `core.fileMode=false`, so `chmod +x scripts/new.sh` changed the disk and not the index; PR 12's static job died with `Permission denied` (exit 126) on a script that ran fine locally. After creating a script run `git update-index --chmod=+x <file>` and check `git ls-files -s <file>` says `100755` BEFORE pushing. `scripts/demo-usage.sh` is still `100644` (CI does not run it; fix it if anyone runs it on Linux) |
 
 ---
 
