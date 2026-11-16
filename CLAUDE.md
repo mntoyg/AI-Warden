@@ -5,8 +5,9 @@ Zero-Trust Docker sandbox for AI coding agents. Public repo.
 ## Session loop (do this every time)
 
 1. **Start:** read [`.ai/HANDOFF.md`](.ai/HANDOFF.md). Then verify it against reality
-   (git status/fetch, latest tag, `gh run list`, `docker info`). Reality wins — fix the
-   handoff if it is wrong.
+   (git status/fetch, latest tag, `./scripts/ci-status.sh`, `docker info`). Reality wins —
+   fix the handoff if it is wrong. `ci-status.sh` exit 2 means nothing was measured: that
+   is not green.
 2. **Work:** top item in HANDOFF "Next steps" unless told otherwise.
 3. **End:** update `.ai/HANDOFF.md`, rewrite [`.ai/NEXT_PROMPT.md`](.ai/NEXT_PROMPT.md)
    (bump version, cite the event behind every change, stay under 70 lines), add a line

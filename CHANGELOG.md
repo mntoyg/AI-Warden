@@ -4,6 +4,24 @@
 
 ---
 
+## [Unreleased]
+
+**CI: red ต้อง "ดัง" — ไม่ใช่ security fix, ไม่มีพฤติกรรมของกรงเปลี่ยน** (ไม่ต้อง tag)
+
+### Added
+
+- **`alarm` job ใน `.github/workflows/ci.yml`:** CI แดงเปิด/comment issue `ci-red` ใบเดียว, run ที่เขียวครบปิดให้เอง
+  (ไม่รันบน `pull_request`; skipped/cancelled ไม่ทำอะไร; ทุกการเขียนถูกอ่านกลับด้วย retry) — weekly schedule เคยแดง
+  สามสัปดาห์ (2026-10-26, 11-02, 11-09) โดยไม่มีใครรู้ เพราะ cron ไม่มีเจ้าของให้ GitHub ส่งเมลหา
+- **`scripts/ci-status.sh`:** ครึ่งที่ alarm ทำเองไม่ได้ — C1 run ล่าสุดเขียว, C2 มี schedule run ใน 8 วัน
+  (จับ cron ที่ไม่เคยยิง), C3 weekly gate เขียวหรือมี run ใหม่กว่าที่เขียว, C4 CI แดงต้องมี issue `ci-red` เปิดอยู่
+  (พยานของ alarm), C5 ไม่มี issue ค้างหลัง CI เขียว; exit 2 = ไม่ได้วัดอะไร (ไม่ใช่เขียว) `--self-test` 10 fixture
+  รันใน static job ของ CI และทุก assertion ถูกถอดทดสอบแล้วว่ามีฟัน
+- ซ้อมบน runner จริงด้วย `workflow_dispatch` (แดง → เปิด issue, แดงซ้ำ → comment, เขียว → ปิด)
+  **ยังไม่ได้ซ้อม:** path skipped/cancelled และ `schedule` event จริง
+
+---
+
 ## [1.2.12] — 2026-11-11
 
 **verification: phase G *วัด* การ login และอำนาจของ `sandbox_mode` แทนการ match ประโยคเดียวจาก codex**

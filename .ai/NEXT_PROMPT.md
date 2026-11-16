@@ -1,26 +1,25 @@
-# AI Warden — next-session prompt · v23 · 2026-11-11
+# AI Warden — next-session prompt · v24 · 2026-11-16
 
 Copy everything inside the fence into a new chat. The session that uses it MUST
 rewrite this file (see step 3) before it ends.
 
 ```text
 You are continuing AI Warden: a Zero-Trust Docker sandbox for AI coding agents.
-Project: D:\code-project\AI Warden   (the folder name has a space)
-Repo:    https://github.com/mntoyg/AI-Warden   (PUBLIC on purpose)
+Project: D:\code-project\AI Warden (folder name has a space) · Repo: https://github.com/mntoyg/AI-Warden (PUBLIC)
 Talk to me in Thai. Code, comments, commit messages and CI stay in English.
 Docs are Thai prose + English commands/output/table headers - don't draft a doc in English.
 🚩 Demo: POSTPONED, no date - nothing frozen, ship normally; ask once, and with a date, freeze.
 
-0) WHERE AM I - `uname -a; docker info`. Cloud Linux: no Docker Desktop/.env/GGUF/GPU, `dockerd &` as root,
-   no apt, git proxy refuses TAG pushes - PR + CI + merge, never release. Windows box: full access.
+0) WHERE AM I - `uname -a; docker info`. Cloud Linux: no Docker Desktop/.env/GGUF/GPU, `dockerd &` as root, no
+   apt, git proxy refuses TAG pushes - PR + CI + merge, never release. Windows box: full access.
 
 1) START - before any work
    a. Read .ai/HANDOFF.md fully - a claim to VERIFY, never a fact; re-run any Next-steps repro (v7). Then
       git status/fetch, `git log origin/main..origin/<b>` for EVERY remote branch, `git ls-remote --tags`
       vs `main` (merged PR + no bump = stale tag), `warden-cli.sh status`. Fix HANDOFF in commit #1.
-   b. **`gh run list` IS the first alarm and nothing else rings it.** v23: the weekly schedule was RED for
-      three weeks (10-26, 11-02, 11-09) while the handoff sat a month stale, so only this found it. A red
-      suite makes every README claim unprovable: read the failing LINE, and fix CI before new work.
+   b. **`./scripts/ci-status.sh` IS the first alarm** (v24; 0 green, 1 red/stale/unwitnessed, **2 = nothing
+      measured, NOT green**): the weekly cron's red now opens a `ci-red` issue; the script checks what that
+      cannot - a cron that never fires, a red CI with no issue. Read the failing LINE, fix CI first.
    c. BUDGET (2026-10-08): two END triggers via `get_usage` - WEEKLY ~10%/calendar day (delta since this
       chat began), CONTEXT ~70%. Keys live only in `.env`: presence only, never print (redact `sk-...`).
    d. Check yourself first (Colab GGUF in Downloads / D: / G: / warden-model-lab - only the untuned
@@ -29,16 +28,17 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
 
 2) WORK
    - Top item of HANDOFF Next steps unless told otherwise (beats ROADMAP.md). A platform this host lacks
-     (runsc, KVM, real build): open a PR - `pull_request` runs ALL FIVE jobs with no ci.yml scaffolding and
-     caught a bug before `main` saw it twice (v21/v22); a temp branch is for one that must NOT merge.
-     Blocked on what only I can make? STAND-IN. Finished job's log: `gh api .../jobs/<id>/logs
-     --allow-escape-sequences` (v20).
+     (runsc, KVM, real build): open a PR - `pull_request` runs ALL FIVE jobs, no ci.yml scaffolding (v21/v22);
+     a temp branch is for one that must NOT merge. Blocked on what only I can make? STAND-IN. A finished
+     job's log: `gh api .../jobs/<id>/logs --allow-escape-sequences` (v20).
    - AN AGENT CLI'S OUTPUT IS PROSE, AND PROSE GETS REWORDED. v23: phase G grepped `codex login status`
      for "Logged in using an API key"; 0.167.1 renamed it "API key configured" and CI went red three weeks
      on a cage that was fine - `rc=0, sandbox_off=1` said so in the failure line. Assert on what MOVES with
      the input (two keys -> two identities) or make the tool ACT (`codex sandbox -- <cmd>`: runs under
      warden's flag, refused under a later `-c sandbox_mode="read-only"`). Surprised by output? STOP reading
      code and run it BY HAND on the old and the new image - two `docker run`s answered this one.
+   - A write verified by reading back needs a RETRY window (v24: `gh issue list` lagged a create). Run a new
+     check against REALITY, not only fixtures (v24: C3 stayed red 7 days after the fix).
    - After ANY `build --pull`, DIFF the bundled CLI versions and re-run the phase touching each one;
      bump versions FIRST, then re-verify under the NEW label (v19/v23: codex-cli 0.161.0 -> 0.167.1
      WAS the whole bug). A new CLI can add real behaviour, so test both ways.
@@ -71,9 +71,9 @@ Docs are Thai prose + English commands/output/table headers - don't draft a doc 
 3) END - self-triggered (1c), do NOT wait to be asked, do NOT stop earlier. (a) STOP taking new work;
    finish and verify only what is in flight. (b) Update .ai/HANDOFF.md (Status, Next steps, Gotchas,
    Session log: Did / Learned / "Prompt should have said") and land it on main - one left on a branch is
-   lost, a STALE one is worse than none (v23 found one a month old that knew nothing of three weeks of red
-   CI). (c) Rewrite this file: a workflow upgrade, every change citing an event from THIS session, under 70
-   lines, bump version, log it in HANDOFF §8. (d) Push, WAIT for CI green, paste the new prompt in reply.
+   lost, a STALE one is worse than none (v23). (c) Rewrite this file: a workflow upgrade, every change citing
+   an event from THIS session, under 70 lines, bump version, log it in HANDOFF §8. (d) Push, WAIT for CI
+   green, paste the new prompt in reply.
 ```
 
 ---
@@ -99,3 +99,10 @@ that nearly let a half-run suite pass as a green one: a Git for Windows auto-upd
 phase J and the background task reported exit 0 with no output - so the suite's own exit code now
 goes into the log, and the last phase reached is checked before any run is believed. Step 3 was
 folded into one paragraph to pay for the new material and stay under the line cap.
+
+v24 comes from session 18, which built the alarm the three red weeks had asked for. The cron has no author, so
+GitHub mailed nobody; an `alarm` job now opens a `ci-red` issue. But an `if: failure()` job cannot see a run that
+never happened (that morning's cron was 9 hours late), and its own failure is invisible inside an already-red run -
+so `scripts/ci-status.sh` does the half the job cannot, and exit 2 is "nothing measured". The drill also showed
+that a verification can cry wolf (an issue list lagging a create) and that a new check can be wrong on the live
+repo while right on fixtures.
