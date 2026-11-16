@@ -22,10 +22,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      drill:
-        description: 'DRILL ONLY (temporary commit)'
-        default: 'red'
   schedule:
     # Weekly, Monday 06:00 UTC. The image builds below run with --pull, so this
     # catches a HIGH/CRITICAL that lands in the Debian base AFTER our last push -
@@ -40,7 +36,6 @@ jobs:
   # ===========================================================================
   static:
     name: Static analysis
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -145,7 +140,6 @@ jobs:
   # ===========================================================================
   vulnerabilities:
     name: Image CVE scan
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -207,7 +201,6 @@ jobs:
   # ===========================================================================
   integration:
     name: Isolation drills (real ext4)
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -292,7 +285,6 @@ jobs:
   # the sandbox said "armed out-of-band" (it now says NOT armed - phase K).
   gvisor:
     name: gVisor (runsc) drills
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -411,7 +403,6 @@ jobs:
   # under Kata because its stdin was a pipe that never closes.
   kata:
     name: Kata Containers drills
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -558,19 +549,9 @@ jobs:
   # Two defences: every write is re-read and the job fails loudly if the issue
   # is not there afterwards, and scripts/ci-status.sh (C4) refuses to call a
   # red CI "witnessed" unless an open ci-red issue actually exists.
-  drill:
-    name: DRILL (temporary)
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "drill=${DRILL}"
-          [ "${DRILL}" = green ]
-        env:
-          DRILL: ${{ inputs.drill }}
-
   alarm:
     name: CI alarm (red opens a ci-red issue, green closes it)
-    needs: [drill]
+    needs: [static, vulnerabilities, integration, gvisor, kata]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
